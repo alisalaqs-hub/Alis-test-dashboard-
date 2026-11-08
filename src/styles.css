@@ -519,3 +519,42 @@ main.home-main { padding-top: 0; }
 .card.ink .btn:not(.ghost):not(.accent) { background: #F6F7F9; color: #0B0F1C; border-color: #F6F7F9; }
 .card.ink .pos { color: #4FD6B8; } .card.ink .neg { color: #FF8A73; }
 .table-wrap:focus-visible, pre.code:focus-visible { outline-offset: -3px; }
+
+/* ===== Brixo interactive X-ray logo (brand master, scaled 1200×800 stage) ===== */
+.bxl { container-type: inline-size; width: 100%; }
+.bxl-frame { position: relative; width: 100%; margin: 0 auto; aspect-ratio: 3 / 2; overflow: hidden; border-radius: 18px; border: 1px solid #DDE1E8; box-shadow: var(--shadow); }
+.bxl-stage { position: absolute; left: 0; top: 0; width: 1200px; height: 800px; transform-origin: 0 0; overflow: hidden; touch-action: pan-y; cursor: crosshair;
+  background-color: #F6F7F9; background-image: linear-gradient(#E6E9EF 1px, transparent 1px), linear-gradient(90deg, #E6E9EF 1px, transparent 1px); background-size: 40px 40px;
+  font-family: 'Montserrat', system-ui, sans-serif; color: #0B0F1C; }
+.bxl-layer { position: absolute; inset: 0; }
+.bxl-lockup { position: absolute; left: 177px; top: 270px; display: flex; align-items: flex-end; gap: 27px; }
+.bxl-lockup svg { display: block; flex: none; }
+.bxl-words { display: flex; flex-direction: column; padding-bottom: 3px; white-space: nowrap; }
+.bxl-wordmark { display: block; margin: 0; font-size: 182px; line-height: 0.8; font-weight: 800; letter-spacing: 0; }
+.bxl-tagline { display: block; margin: 2px 0 0; font-size: 39px; line-height: 1.2; font-weight: 500; }
+.bxl-xray { pointer-events: none; color: #7FD4FF; background-color: #0A1633; background-image: linear-gradient(#15295A 1px, transparent 1px), linear-gradient(90deg, #15295A 1px, transparent 1px); background-size: 40px 40px; clip-path: circle(150px at 600px 434px); }
+.bxl-xray .bxl-wordmark { color: transparent; -webkit-text-stroke: 1.5px #7FD4FF; }
+.bxl-xray .bxl-tagline { color: #7FD4FF; }
+.bxl-label { position: absolute; font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; }
+.bxl-titleblock { position: absolute; right: 56px; bottom: 36px; width: 280px; border: 1.5px solid #3F6FBF; font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; }
+.bxl-titleblock div { display: flex; justify-content: space-between; padding: 8px 12px; }
+.bxl-titleblock div + div { border-top: 1px solid #3F6FBF; }
+.bxl-titleblock .k { color: #6E9BE0; }
+.bxl-ring { position: absolute; left: 450px; top: 284px; width: 300px; height: 300px; box-sizing: border-box; border: 2px solid #F07415; border-radius: 50%; pointer-events: none; transition: opacity 250ms ease; }
+.bxl-ring .h { position: absolute; left: 50%; top: 50%; width: 22px; height: 2px; margin: -1px 0 0 -11px; background: #F07415; }
+.bxl-ring .v { position: absolute; left: 50%; top: 50%; width: 2px; height: 22px; margin: -11px 0 0 -1px; background: #F07415; }
+.bxl-ring .tag { position: absolute; left: 50%; top: -13px; transform: translateX(-50%); padding: 4px 8px; border-radius: 4px; background: #F07415; color: #0B0F1C; font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.12em; white-space: nowrap; }
+.bxl-chrome { position: absolute; left: 56px; right: 56px; top: 32px; display: flex; justify-content: space-between; gap: 24px; pointer-events: none; font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.14em; transition: color 300ms ease; }
+.bxl-btn { position: absolute; left: 56px; bottom: 36px; display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 22px; border: 0; border-radius: 10px; font: 700 16px 'Montserrat', system-ui, sans-serif; cursor: pointer; transition: background-color 300ms ease, color 300ms ease; }
+.bxl-btn:focus-visible { outline: 3px solid #5E3BF6; outline-offset: 4px; }
+.bxl-under { display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; }
+@container (max-width: 600px) {
+  .bxl-btn, .bxl-chrome { display: none; }
+  .bxl-under { display: flex; }
+}
+@media (prefers-reduced-motion: reduce) { .bxl-xray, .bxl-ring, .bxl-btn { transition: none !important; } }
+
+.xr-section { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 32px; align-items: center; }
+@media (max-width: 900px) { .xr-section { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
+.hero-xray { min-width: 0; }
+@media (min-width: 961px) { .home-hero-inner { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 32px; max-width: 1320px; } }

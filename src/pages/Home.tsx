@@ -8,6 +8,7 @@ import { Icon } from '../components/Icons';
 import { gbp, gbpK, HouseArt, Tag } from '../components/ui';
 import { useStore } from '../store';
 import { XRayHero } from '../components/XRay';
+import { BrixoLogoXRay } from '../components/BrixoLogoXRay';
 
 const TASKS: { to: string; icon: string; label: string; sub: string; tone: string }[] = [
   { to: destination('buy', 'homes for sale in London'), icon: 'search', label: 'Buy a home', sub: 'Search & AI matches', tone: 'ink' },
@@ -37,7 +38,7 @@ export default function Home() {
             <p className="hero-sub">Every listing comes with its true cost of works, a price check and what it could become.</p>
             <SmartSearch />
           </div>
-          <div className="hero-xray"><XRayHero /></div>
+          <div className="hero-xray"><BrixoLogoXRay /></div>
         </div>
       </section>
 
@@ -90,6 +91,16 @@ export default function Home() {
           </div>
         </section>
 
+        <section className="xr-section" aria-labelledby="xr-h">
+          <div>
+            <span className="label-mono">04 / See beyond</span>
+            <h2 id="xr-h" className="home-h">X-ray any listing</h2>
+            <p className="muted" style={{ maxWidth: 460 }}>Every Brixo listing has a blueprint underneath: what the works really cost, where the space is, how efficient it could be and what it could be worth. Drag the lens to look inside.</p>
+            <Link to="/import" className="btn" style={{ marginTop: 14 }}>X-ray a listing from any website →</Link>
+          </div>
+          <XRayHero />
+        </section>
+
         <section className="myhome-cta card ink">
           <div>
             <span className="eyebrow" style={{ color: 'inherit', opacity: 0.6 }}>Own a home?</span>
@@ -109,7 +120,7 @@ export default function Home() {
         </section>
 
         <section>
-          <span className="label-mono">04 / Professionals</span>
+          <span className="label-mono">05 / Professionals</span>
           <h2 className="home-h">For professionals</h2>
           <div className="chips">
             {[['/agents', 'Estate agents'], ['/landlord', 'Landlords'], ['/developer', 'Developers'], ['/marketplace', 'Contractors'], ['/automation', 'AI agents'], ['/enterprise', 'API & white-label']].map(([to, l]) => <Link key={to} to={to} className="chip">{l} →</Link>)}

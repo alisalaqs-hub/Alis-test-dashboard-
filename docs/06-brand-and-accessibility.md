@@ -10,7 +10,8 @@
 | Blueprint palette (dark theme & X-ray) | Ground `#0A1633` · Grid `#15295A` · Line `#7FD4FF` · Guide `#3F6FBF` · Orange `#FF9A4D` · Purple `#A996FF` |
 | Type | Montserrat (display 800, UI 500–700) · JetBrains Mono (figures, labels: 11px, uppercase, 0.14em tracking) |
 | Surface | Paper with a 40px drafting grid; white cards with 1px grid-line borders; 10px button radius |
-| Signature interaction | **X-ray lens** (`src/components/XRay.tsx`): drag over a home to reveal its blueprint annotated with live engine figures (loft, kitchen, EPC, value, ground risk); "See through" toggle reveals all |
+| Interactive logo | **Brixo X-ray logo** — faithful port of the brand master (`src/components/BrixoLogoXRay.tsx`): 1200×800 stage scaled to its frame; lens auto-sweeps, follows pointer/finger, "See through" reveals the full blueprint (Section A–A, 01 Foundations / 02 The Property / 03 Beyond, title block). Homepage hero. Accessibility: text alternative, `aria-pressed`, purple focus ring, reduced-motion = static, pauses off-screen; below 600px wide the control is shown full-size under the artwork (44px target) |
+| Product X-ray | **Listing X-ray** (`src/components/XRay.tsx`): drag over a home to reveal its blueprint annotated with live engine figures (loft, kitchen, EPC, value, ground risk); "See through" toggle reveals all |
 | Section labels | Drawing-sheet numbering: `01 / FIND`, `02 / DO`, `03 / FOR YOU`… |
 
 ### Colour roles (enforced by tokens in `src/styles.css`)
