@@ -4,9 +4,10 @@ import { DUMMY_HASH, hashPassword, newToken, passwordProblem, sha256, verifyPass
 import { createSession, destroySession, getUser, publicUser } from '../auth/session';
 import { one, q, tx } from '../db';
 import { mails } from '../services/email';
+import { limit } from '../services/ratelimit';
 import { audit, HttpError, parse, requireUser } from '../services/http';
 
-const limited = (max: number) => ({ config: { rateLimit: { max, timeWindow: '1 minute' } } });
+const limited = (name: string, max: number, windowSec = 60) => ({ preHandler: limit(`auth.${name}`, max, windowSec) });
 const ACCOUNT_TYPES = ['buyer', 'owner', 'landlord', 'agent', 'developer', 'investor'] as const;
 
 const Register = z.object({
@@ -34,7 +35,7 @@ async function useEmailToken(token: string, purpose: 'verify' | 'reset') {
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  app.post('/api/auth/register', limited(8), async (req, reply) => {
+  app.post('/api/auth/register', limited('register', 8), async (req, reply) => {
     const b = parse(Register, req.body);
     const problem = passwordProblem(b.password);
     if (problem) throw new HttpError(400, problem, 'weak_password', { password: problem });
@@ -57,7 +58,7 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.code(201).send({ user: publicUser(req.user!) });
   });
 
-  app.post('/api/auth/login', limited(10), async (req, reply) => {
+  app.post('/api/auth/login', limited('login', 10), async (req, reply) => {
     const b = parse(z.object({ email: z.string().trim().max(254), password: z.string().max(200) }), req.body);
     const row = await one<{ id: string; password_hash: string }>('SELECT id, password_hash FROM users WHERE email = $1 AND deleted_at IS NULL', [b.email]);
     const good = await verifyPassword(b.password, row?.password_hash ?? DUMMY_HASH);
@@ -78,14 +79,14 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.get('/api/auth/me', async (req) => ({ user: req.user ? publicUser(req.user) : null }));
 
-  app.post('/api/auth/verify', limited(20), async (req) => {
+  app.post('/api/auth/verify', limited('verify', 20), async (req) => {
     const b = parse(z.object({ token: z.string().min(10).max(100) }), req.body);
     const userId = await useEmailToken(b.token, 'verify');
     await q('UPDATE users SET email_verified_at = coalesce(email_verified_at, now()), updated_at = now() WHERE id = $1', [userId]);
     return { ok: true, user: req.user?.id === userId ? publicUser((await getUser(userId))!) : undefined };
   });
 
-  app.post('/api/auth/resend-verification', limited(3), async (req) => {
+  app.post('/api/auth/resend-verification', limited('resend', 3, 600), async (req) => {
     const u = requireUser(req);
     if (u.email_verified_at) return { ok: true, alreadyVerified: true };
     await mails.verify(u.email, u.display_name, await issueEmailToken(u.id, 'verify'));
@@ -93,7 +94,7 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   // Always answers the same way, so it can't be used to find out who has an account.
-  app.post('/api/auth/forgot', limited(5), async (req) => {
+  app.post('/api/auth/forgot', limited('forgot', 5, 600), async (req) => {
     const b = parse(z.object({ email: z.string().trim().max(254) }), req.body);
     const u = await one<{ id: string; display_name: string; email: string }>('SELECT id, display_name, email FROM users WHERE email = $1 AND deleted_at IS NULL', [b.email]);
     if (u) {
@@ -103,7 +104,7 @@ export async function authRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.post('/api/auth/reset', limited(10), async (req, reply) => {
+  app.post('/api/auth/reset', limited('reset', 10), async (req, reply) => {
     const b = parse(z.object({ token: z.string().min(10).max(100), password: z.string().max(200) }), req.body);
     const problem = passwordProblem(b.password);
     if (problem) throw new HttpError(400, problem, 'weak_password', { password: problem });
@@ -115,7 +116,7 @@ export async function authRoutes(app: FastifyInstance) {
     return { ok: true, user: publicUser((await getUser(userId))!) };
   });
 
-  app.post('/api/auth/change-password', limited(5), async (req) => {
+  app.post('/api/auth/change-password', limited('change-password', 5), async (req) => {
     const u = requireUser(req);
     const b = parse(z.object({ current: z.string().max(200), password: z.string().max(200) }), req.body);
     const row = await one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [u.id]);

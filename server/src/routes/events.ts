@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { one, q } from '../db';
+import { limit } from '../services/ratelimit';
 
 const Event = z.object({
   listing: z.string().regex(/^sk-[a-z0-9]{7}$/),
@@ -14,7 +15,7 @@ const Event = z.object({
 });
 
 export async function eventRoutes(app: FastifyInstance) {
-  app.post('/api/events', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/events', { preHandler: limit('events', 120, 60) }, async (req, reply) => {
     const r = Event.safeParse(req.body);
     if (!r.success) return reply.code(202).send({ ok: false }); // never break the page over analytics
     const l = await one<{ id: string }>(`SELECT id FROM listings WHERE ref = $1 AND status IN ('live', 'under_offer')`, [r.data.listing]);

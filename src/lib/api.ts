@@ -12,6 +12,9 @@ export class ApiError extends Error {
   constructor(public status: number, message: string, public code = 'error', public fields: Record<string, string> = {}) { super(message); }
 }
 
+/** Low-level call used by feature clients (src/lib/ai/*). Throws ApiError with a message written for people. */
+export async function apiCall<T>(method: string, path: string, body?: unknown, opts: { timeout?: number } = {}): Promise<T> { return request<T>(method, path, body, opts); }
+
 async function request<T>(method: string, path: string, body?: unknown, opts: { timeout?: number } = {}): Promise<T> {
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
   let r: Response;

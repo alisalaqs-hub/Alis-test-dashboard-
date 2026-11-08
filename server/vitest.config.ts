@@ -17,6 +17,8 @@ export default defineConfig({
       MODERATE_OWNER_LISTINGS: 'true',
       OPENAI_API_KEY: '',
       RESEND_API_KEY: '',
+      AI_JOBS_MODE: 'sync',
+      STORAGE_DRIVER: 'local',
     },
     setupFiles: ['server/test/setup.ts'],
   },

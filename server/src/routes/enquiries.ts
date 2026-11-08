@@ -6,6 +6,8 @@ import { mails } from '../services/email';
 import { audit, forbidden, HttpError, notFound, parse, requireUser } from '../services/http';
 import { PUBLIC_STATUSES, streetOnly } from '../services/listings';
 import { orgIdsFor } from './listings';
+import { limit } from '../services/ratelimit';
+import { emit, screenEnquiry } from '../ai/hooks';
 
 const Enquiry = z.object({
   name: z.string().trim().min(1, 'Enter your name.').max(80),
@@ -24,7 +26,7 @@ async function listerEmails(listing: { owner_user_id: string | null; organisatio
     [listing.owner_user_id, listing.organisation_id])).map((r) => r.email);
 }
 
-type Row = { id: string; listing_id: string; from_user_id: string | null; email: string; name: string; phone: string | null; kind: EnquirySummaryDTO['kind']; status: EnquirySummaryDTO['status']; preferred_slot: string | null; created_at: Date;
+type Row = { filtered: boolean; filter_reason: string | null; id: string; listing_id: string; from_user_id: string | null; email: string; name: string; phone: string | null; kind: EnquirySummaryDTO['kind']; status: EnquirySummaryDTO['status']; preferred_slot: string | null; created_at: Date;
   ref: string; title: string | null; address_line: string; town: string; price: number; channel: 'sale' | 'rent'; owner_user_id: string | null; organisation_id: string | null };
 
 async function access(req: FastifyRequest, id: string) {
@@ -42,7 +44,7 @@ async function access(req: FastifyRequest, id: string) {
 const titleOf = (e: Pick<Row, 'title' | 'address_line' | 'town'>) => e.title || `${streetOnly(e.address_line)}, ${e.town}`;
 
 export async function enquiryRoutes(app: FastifyInstance) {
-  app.post('/api/listings/:ref/enquiries', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/listings/:ref/enquiries', { preHandler: limit('enquiry.create', 5, 60) }, async (req, reply) => {
     const { ref } = req.params as { ref: string };
     const b = parse(Enquiry, req.body);
     if (b.website) return reply.code(201).send({ ok: true }); // quietly drop bots
@@ -58,8 +60,12 @@ export async function enquiryRoutes(app: FastifyInstance) {
       await q(`INSERT INTO enquiry_messages (enquiry_id, author, author_user_id, body) VALUES ($1, 'enquirer', $2, $3)`, [e!.id, req.user?.id ?? null, b.message], c);
       return e!.id;
     });
-    for (const to of await listerEmails(l)) await mails.enquiryToLister(to, titleOf(l), l.ref, b.name, b.kind, b.message, b.preferredSlot);
+    // Automated screen (spam / scams). Filtered enquiries are kept but not emailed to the lister.
+    const verdict = await screenEnquiry({ enquiryId: id, listingId: l.id, name: b.name, email: b.email, message: b.message, kind: b.kind });
+    if (verdict.filter) await q('UPDATE enquiries SET filtered = true, filter_reason = $2 WHERE id = $1', [id, (verdict.reason ?? 'Looks like spam').slice(0, 300)]);
+    else for (const to of await listerEmails(l)) await mails.enquiryToLister(to, titleOf(l), l.ref, b.name, b.kind, b.message, b.preferredSlot);
     await audit(req, 'enquiry.created', `listing:${ref}`, { kind: b.kind, enquiry: id });
+    await emit('enquiryCreated', { enquiryId: id, listingId: l.id });
     return reply.code(201).send({ ok: true, id });
   });
 
@@ -78,12 +84,13 @@ export async function enquiryRoutes(app: FastifyInstance) {
         ORDER BY coalesce(lm.created_at, e.created_at) DESC LIMIT 200`, [u.id, orgs, !!u.email_verified_at, u.email]);
     const items: EnquirySummaryDTO[] = rows.map((r) => ({
       id: r.id, kind: r.kind, status: r.status, role: r.is_lister ? 'lister' : 'enquirer',
+      filtered: r.is_lister ? r.filtered : false, filterReason: r.is_lister ? r.filter_reason : null,
       listing: { ref: r.ref, title: titleOf(r), price: r.price, channel: r.channel },
       name: r.name, email: r.is_lister ? r.email : null, phone: r.is_lister ? r.phone : null, preferredSlot: r.preferred_slot,
       lastMessage: r.last_body ? { body: r.last_body, author: r.last_author!, at: r.last_at!.toISOString() } : null,
       messages: r.messages, createdAt: r.created_at.toISOString(),
     }));
-    return { items, unread: items.filter((i) => i.role === 'lister' && i.status === 'new').length };
+    return { items, unread: items.filter((i) => i.role === 'lister' && i.status === 'new' && !i.filtered).length };
   });
 
   app.get('/api/enquiries/:id', async (req) => {
@@ -97,10 +104,11 @@ export async function enquiryRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post('/api/enquiries/:id/messages', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/enquiries/:id/messages', { preHandler: limit('enquiry.reply', 20, 60, 'user-or-ip') }, async (req, reply) => {
     const { e, role } = await access(req, (req.params as { id: string }).id);
     const { body } = parse(z.object({ body: z.string().trim().min(1, 'Write a message.').max(3000) }), req.body);
     await q(`INSERT INTO enquiry_messages (enquiry_id, author, author_user_id, body) VALUES ($1, $2, $3, $4)`, [e.id, role, req.user!.id, body]);
+    await emit('enquiryMessage', { enquiryId: e.id, author: role });
     if (role === 'lister') {
       await q(`UPDATE enquiries SET status = 'replied' WHERE id = $1 AND status = 'new'`, [e.id]);
       await mails.replyToEnquirer(e.email, titleOf(e), body);

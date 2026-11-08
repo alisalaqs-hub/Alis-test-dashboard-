@@ -1,37 +1,61 @@
 /**
- * Applies server/migrations/*.sql in order, once each, inside a transaction.
- * Run: npm run db:migrate   (also runs automatically when the server starts; CLI in bin/migrate.ts)
+ * Applies server/migrations/*.sql in order, once each, each inside its own transaction.
+ * Safe with connection poolers (PgBouncer / Neon pooled URLs): uses transaction-scoped
+ * advisory locks and re-checks inside the transaction, so concurrent cold starts can't
+ * apply a migration twice.
+ *
+ * Source of migrations: the .sql files when the folder exists (development, Node server),
+ * otherwise the copy embedded at build time (serverless bundles have no repo folder).
+ * Run by hand: npm run db:migrate. Also runs on server start / first serverless request.
  */
 import fs from 'node:fs/promises';
+import fss from 'node:fs';
 import path from 'node:path';
-import { ROOT } from './config';
-import { pool } from './db';
+import pg from 'pg';
+import { config, ROOT } from './config';
+import { EMBEDDED_MIGRATIONS } from './migrations.generated';
+
+export async function loadMigrations(): Promise<{ name: string; sql: string }[]> {
+  const dir = path.join(ROOT, 'server/migrations');
+  if (fss.existsSync(dir)) {
+    const files = (await fs.readdir(dir)).filter((f) => /^\d+_.+\.sql$/.test(f)).sort();
+    return Promise.all(files.map(async (name) => ({ name, sql: await fs.readFile(path.join(dir, name), 'utf8') })));
+  }
+  return [...EMBEDDED_MIGRATIONS].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+let done: Promise<void> | null = null;
+/** Run once per process (cheap when up to date: one query). */
+export function ensureMigrated(log?: (m: string) => void) {
+  if (!done) done = migrate(log).catch((e) => { done = null; throw e; });
+  return done;
+}
 
 export async function migrate(log: (m: string) => void = () => {}) {
-  const dir = path.join(ROOT, 'server/migrations');
-  const files = (await fs.readdir(dir)).filter((f) => /^\d+_.+\.sql$/.test(f)).sort();
-  const c = await pool.connect();
+  const migrations = await loadMigrations();
+  const client = new pg.Client({ connectionString: config.migrationsUrl, ssl: config.databaseSsl ? { rejectUnauthorized: config.databaseSslVerify } : undefined });
+  await client.connect();
   try {
-    // One server at a time applies migrations.
-    await c.query('SELECT pg_advisory_lock(727274)');
-    await c.query('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-    const done = new Set((await c.query<{ name: string }>('SELECT name FROM schema_migrations')).rows.map((r) => r.name));
-    for (const f of files) {
-      if (done.has(f)) continue;
-      const sql = await fs.readFile(path.join(dir, f), 'utf8');
-      await c.query('BEGIN');
+    await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+    const applied = new Set((await client.query<{ name: string }>('SELECT name FROM schema_migrations')).rows.map((r) => r.name));
+    for (const m of migrations) {
+      if (applied.has(m.name)) continue;
+      await client.query('BEGIN');
       try {
-        await c.query(sql);
-        await c.query('INSERT INTO schema_migrations (name) VALUES ($1)', [f]);
-        await c.query('COMMIT');
-        log(`applied ${f}`);
+        await client.query('SELECT pg_advisory_xact_lock(727274)');
+        const again = await client.query('SELECT 1 FROM schema_migrations WHERE name = $1', [m.name]);
+        if (!again.rowCount) {
+          await client.query(m.sql);
+          await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [m.name]);
+          log(`applied ${m.name}`);
+        }
+        await client.query('COMMIT');
       } catch (e) {
-        await c.query('ROLLBACK');
-        throw new Error(`Migration ${f} failed: ${(e as Error).message}`);
+        await client.query('ROLLBACK').catch(() => {});
+        throw new Error(`Migration ${m.name} failed: ${(e as Error).message}`);
       }
     }
   } finally {
-    await c.query('SELECT pg_advisory_unlock(727274)').catch(() => {});
-    c.release();
+    await client.end().catch(() => {});
   }
 }

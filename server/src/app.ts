@@ -13,6 +13,16 @@ import { loadSession } from './auth/session';
 import { config } from './config';
 import { HttpError } from './services/http';
 import { aiRoutes } from './routes/ai';
+import { aiCoreRoutes } from './routes/ai-core';
+import { aiAssistantRoutes } from './routes/ai-assistant';
+import { aiSearchRoutes } from './routes/ai-search';
+import { aiListingRoutes } from './routes/ai-listing';
+import { aiTrustRoutes } from './routes/ai-trust';
+import { aiInboxRoutes } from './routes/ai-inbox';
+import { aiImportRoutes } from './routes/ai-import';
+import { aiPropertyRoutes } from './routes/ai-property';
+import { aiBriefingRoutes } from './routes/ai-briefing';
+import { AiError } from './ai/core';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { enquiryRoutes } from './routes/enquiries';
@@ -37,7 +47,8 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(cookie);
   await app.register(multipart, { limits: { fileSize: config.storage.maxPhotoBytes, files: 12, fields: 20, fieldSize: 20_000 } });
-  if (!config.isTest) await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
+  // A coarse in-memory limit helps a single long-lived server; per-action limits live in the database (services/ratelimit).
+  if (config.memoryRateLimit) await app.register(rateLimit, { global: true, max: 600, timeWindow: '1 minute' });
 
   // Agent feeds may arrive as raw bytes; BLM files are commonly Windows-1252 text.
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: 25 * 1024 * 1024 }, (_req, body, done) => done(null, body));
@@ -81,7 +92,12 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.setErrorHandler((err: FastifyError | HttpError, req, reply) => {
     if (err instanceof HttpError) {
+      if (err.status === 429 && err.fields?.retryAfter) reply.header('Retry-After', err.fields.retryAfter);
       return reply.code(err.status).send({ error: { code: err.code, message: err.message, fields: err.fields } });
+    }
+    if (err instanceof AiError) {
+      if (!config.isTest) req.log.warn({ code: err.code, err: err.message.slice(0, 300) }, 'ai error');
+      return reply.code(err.status).send({ error: { code: err.code, message: err.userMessage } });
     }
     const status = (err as FastifyError).statusCode ?? 500;
     if (status === 413 || (err as FastifyError).code === 'FST_REQ_FILE_TOO_LARGE') {
@@ -102,6 +118,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(feedRoutes);
   await app.register(adminRoutes);
   await app.register(aiRoutes);
+  await app.register(aiCoreRoutes);
+  await app.register(aiAssistantRoutes);
+  await app.register(aiSearchRoutes);
+  await app.register(aiListingRoutes);
+  await app.register(aiTrustRoutes);
+  await app.register(aiInboxRoutes);
+  await app.register(aiImportRoutes);
+  await app.register(aiPropertyRoutes);
+  await app.register(aiBriefingRoutes);
   await app.register(eventRoutes);
 
   // Uploaded media (local storage driver).

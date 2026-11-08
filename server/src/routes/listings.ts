@@ -9,6 +9,8 @@ import { audit, forbidden, HttpError, notFound, parse, requireUser } from '../se
 import { cleanImage, sniffImage } from '../services/images';
 import { checksFor, columnsFrom, geocode, LISTING_SELECT, ListingBody, photosFor, PUBLIC_STATUSES, toDTO, type ListingRow } from '../services/listings';
 import { deleteFile, newKey, putFile } from '../services/storage';
+import { limit } from '../services/ratelimit';
+import { emit } from '../ai/hooks';
 
 export async function orgIdsFor(userId?: string | null) {
   if (!userId) return [];
@@ -147,6 +149,7 @@ export async function listingRoutes(app: FastifyInstance) {
     if (keys.length) {
       await q(`UPDATE listings SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() WHERE id = $1`, [row.id, ...Object.values(cols)]);
       await audit(req, 'listing.updated', `listing:${ref}`, { fields: keys, ...(b.price != null && b.price !== row.price ? { priceFrom: row.price, priceTo: b.price } : {}) });
+      await emit('listingUpdated', { listingId: row.id, ref, fields: keys });
     }
     const fresh = (await loadByRef(ref))!;
     const photos = (await photosFor([fresh.id])).get(fresh.id) ?? [];
@@ -165,6 +168,8 @@ export async function listingRoutes(app: FastifyInstance) {
     const goLive = !config.moderateOwnerListings || trustedAgency;
     await q(`UPDATE listings SET status = $2, rejection_reason = NULL, published_at = CASE WHEN $2 = 'live' THEN now() ELSE published_at END, updated_at = now() WHERE id = $1`, [row.id, goLive ? 'live' : 'pending']);
     await audit(req, goLive ? 'listing.published' : 'listing.submitted', `listing:${ref}`);
+    await emit('listingSubmitted', { listingId: row.id, ref, userId: req.user!.id });
+    if (goLive) await emit('listingsPublished', { listingIds: [row.id] });
     if (!goLive && config.adminEmail) {
       await mails.enquiryToLister(config.adminEmail, row.title ?? row.address_line, ref, 'Streetkey', 'question', 'A new listing is waiting for review in the admin area.').catch(() => {});
     }
@@ -199,7 +204,7 @@ export async function listingRoutes(app: FastifyInstance) {
   });
 
   /* ---------- photos ---------- */
-  app.post('/api/listings/:ref/photos', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/listings/:ref/photos', { preHandler: limit('listing.photos', 60, 60, 'user-or-ip') }, async (req, reply) => {
     const { ref } = req.params as { ref: string };
     const row = await editable(req, ref);
     if (!req.isMultipart()) throw new HttpError(400, 'Upload photos as a form (multipart).', 'not_multipart');
@@ -222,6 +227,7 @@ export async function listingRoutes(app: FastifyInstance) {
     }
     await q('UPDATE listings SET updated_at = now() WHERE id = $1', [row.id]);
     await audit(req, 'listing.photos_added', `listing:${ref}`, { added: added.length, rejected: rejected.length });
+    if (added.length) await emit('photosUploaded', { listingId: row.id, ref: row.ref, photoIds: added.map((a) => a.id), userId: req.user!.id });
     return reply.code(added.length ? 201 : 400).send({ added, rejected, ...(added.length ? {} : { error: { code: 'no_photos', message: rejected[0] ?? 'No photos were uploaded.' } }) });
   });
 

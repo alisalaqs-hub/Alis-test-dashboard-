@@ -7,9 +7,13 @@ pg.types.setTypeParser(1700, (v) => Number.parseFloat(v));
 
 export const pool = new pg.Pool({
   connectionString: config.databaseUrl,
-  ssl: config.databaseSsl ? { rejectUnauthorized: false } : undefined,
-  max: 10,
+  ssl: config.databaseSsl ? { rejectUnauthorized: config.databaseSslVerify } : undefined,
+  max: config.databasePoolMax,
+  // Serverless instances freeze between requests: drop idle connections quickly and fail fast.
+  idleTimeoutMillis: config.runtime === 'netlify' ? 10_000 : 30_000,
+  connectionTimeoutMillis: 10_000,
 });
+pool.on('error', () => { /* an idle client died (e.g. instance thawed); the pool replaces it */ });
 
 export type Q = Pick<pg.PoolClient, 'query'>;
 

@@ -9,6 +9,8 @@ import { parseBLM } from '../../../src/engine/listings';
 import { listingRef, newToken, sha256 } from '../auth/crypto';
 import { one, q, tx } from '../db';
 import { audit, forbidden, HttpError, notFound, parse, requireUser } from '../services/http';
+import { limit } from '../services/ratelimit';
+import { emit } from '../ai/hooks';
 
 async function orgRole(req: FastifyRequest, orgId: string) {
   const u = requireUser(req);
@@ -65,7 +67,7 @@ export async function feedRoutes(app: FastifyInstance) {
     return { items: await q(`SELECT id, format, accepted, withdrawn, rejected, created_at AS "createdAt" FROM feed_runs WHERE organisation_id = $1 ORDER BY created_at DESC LIMIT 50`, [id]) };
   });
 
-  app.post('/api/feeds/blm', { bodyLimit: 25 * 1024 * 1024, config: { rateLimit: { max: 12, timeWindow: '1 minute' } } }, async (req) => {
+  app.post('/api/feeds/blm', { bodyLimit: 25 * 1024 * 1024, preHandler: limit('feeds.blm', 12, 60) }, async (req) => {
     const auth = req.headers.authorization ?? '';
     const key = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
     if (!key.startsWith('skf_')) throw new HttpError(401, 'Send your feed key as “Authorization: Bearer skf_…”.', 'feed_auth');
@@ -79,6 +81,7 @@ export async function feedRoutes(app: FastifyInstance) {
     const report = parseBLM(raw, fk.name);
     const geo = await bulkGeocode(report.inputs.map((i) => i.postcode));
 
+    const touched: string[] = [];
     const result = await tx(async (c) => {
       let accepted = 0;
       for (const i of report.inputs) {
@@ -104,7 +107,7 @@ export async function feedRoutes(app: FastifyInstance) {
         for (const [n, url] of (i.photos ?? []).slice(0, 40).entries()) {
           await q(`INSERT INTO listing_photos (listing_id, storage_key, url, content_type, bytes, position) VALUES ($1, $2, $3, 'image/*', 0, $4)`, [row!.id, `ext:${url}`, url, n], c);
         }
-        accepted++;
+        accepted++; touched.push(row!.id);
       }
       const withdrawn = await q(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE organisation_id = $1 AND source_kind = 'agent-feed'
         AND status IN ('live', 'under_offer', 'pending') AND NOT (source_ref = ANY($2)) RETURNING id`, [fk.organisation_id, report.inputs.map((i) => i.ref)], c);
@@ -114,6 +117,7 @@ export async function feedRoutes(app: FastifyInstance) {
       return { accepted, withdrawn: withdrawn.length };
     });
     await audit(req, 'feed.ingested', `org:${fk.organisation_id}`, { ...result, rejected: report.rejected.length });
+    if (fk.verified && touched.length) await emit('listingsPublished', { listingIds: touched });
     return {
       ...result, rejected: report.rejected, format: `BLM ${report.version}`,
       note: fk.verified ? 'Listings are live.' : 'Your agency is awaiting verification, so these listings are pending until an admin approves the agency.',

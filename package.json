@@ -14,8 +14,8 @@
     "a11y": "node scripts/a11y-audit.cjs",
     "server:dev": "tsx watch server/src/index.ts",
     "server:start": "node server/dist/index.js",
-    "server:build": "esbuild server/src/index.ts server/src/bin/migrate.ts server/src/bin/seed.ts server/src/bin/job.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outdir=server/dist --out-extension:.js=.js --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
-    "server:test": "vitest run --config server/vitest.config.ts",
+    "server:build": "node scripts/gen-migrations.mjs && esbuild server/src/index.ts server/src/bin/migrate.ts server/src/bin/seed.ts server/src/bin/job.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outdir=server/dist --out-extension:.js=.js --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
+    "server:test": "node scripts/gen-migrations.mjs && vitest run --config server/vitest.config.ts",
     "server:typecheck": "tsc -p server/tsconfig.json",
     "build:all": "npm run build && npm run server:build",
     "db:migrate": "tsx server/src/bin/migrate.ts",
@@ -23,7 +23,10 @@
     "job": "tsx server/src/bin/job.ts",
     "db:migrate:prod": "node server/dist/bin/migrate.js",
     "job:prod": "node server/dist/bin/job.js",
-    "db:seed:prod": "node server/dist/bin/seed.js"
+    "db:seed:prod": "node server/dist/bin/seed.js",
+    "gen:migrations": "node scripts/gen-migrations.mjs",
+    "build:netlify": "node scripts/netlify-build.mjs",
+    "netlify:bundle-check": "node scripts/netlify-bundle-check.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
@@ -31,6 +34,7 @@
     "@fastify/rate-limit": "^11.2.2",
     "@fastify/static": "^10.1.10",
     "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "@netlify/blobs": "^11.1.8",
     "fastify": "^5.12.8",
     "pg": "^8.23.1",
     "react": "^19.3.1",
@@ -39,6 +43,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@netlify/functions": "^6.1.1",
     "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",

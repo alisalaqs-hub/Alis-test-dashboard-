@@ -8,7 +8,9 @@ import { one, q } from '../db';
 import { audit, HttpError, parse, requireUser } from '../services/http';
 import { cleanImage, sniffImage } from '../services/images';
 import { AiError, aiImagesEnabled, editRoomImage, roomPrompt } from '../services/openai';
+import { modelFor } from '../ai/core';
 import { newKey, putFile } from '../services/storage';
+import { limit } from '../services/ratelimit';
 
 const Fields = z.object({
   room: z.enum(['kitchen', 'bathroom', 'living', 'bedroom', 'dining', 'office', 'hallway']),
@@ -30,12 +32,7 @@ async function usedToday(userId: string) {
 }
 
 export async function aiRoutes(app: FastifyInstance) {
-  app.get('/api/ai/status', async (req) => ({
-    imagesEnabled: aiImagesEnabled(), dailyLimit: config.ai.dailyImagesPerUser,
-    usedToday: req.user ? await usedToday(req.user.id) : 0, signedIn: !!req.user, model: config.ai.imageModel,
-  }));
-
-  app.post('/api/ai/room-image', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/ai/room-image', { preHandler: limit('ai.room_image', 6, 60, 'user-or-ip') }, async (req, reply) => {
     const u = requireUser(req);
     if (!aiImagesEnabled()) throw new HttpError(503, 'AI room redesign isn’t switched on yet on this server.', 'ai_disabled');
     if ((await usedToday(u.id)) >= config.ai.dailyImagesPerUser) throw new HttpError(429, `You’ve used today’s ${config.ai.dailyImagesPerUser} AI designs. Try again tomorrow.`, 'quota');
@@ -63,10 +60,10 @@ export async function aiRoutes(app: FastifyInstance) {
     const source = await putFile(newKey('ai/source', file.type), clean, file.type);
     await q(`INSERT INTO consents (user_id, purpose) SELECT $1, 'ai_image_processing' WHERE NOT EXISTS (SELECT 1 FROM consents WHERE user_id = $1 AND purpose = 'ai_image_processing' AND withdrawn_at IS NULL)`, [u.id]);
     const row = await one<{ id: string }>(`INSERT INTO ai_images (user_id, room, style, brief, prompt, source_key, model) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [u.id, f.room, style?.name ?? f.style, f.brief ?? null, prompt, source.key, config.ai.imageModel]);
+      [u.id, f.room, style?.name ?? f.style, f.brief ?? null, prompt, source.key, await modelFor('image')]);
 
     try {
-      const out = await editRoomImage(clean, file.type, prompt);
+      const out = await editRoomImage(clean, file.type, prompt, { userId: u.id });
       const outType = sniffImage(out) ?? 'image/png';
       const stored = await putFile(newKey('ai/result', outType), out, outType);
       const done = await one<Row>(`UPDATE ai_images SET status = 'done', result_key = $2, result_url = $3, finished_at = now() WHERE id = $1 RETURNING *`, [row!.id, stored.key, stored.url]);

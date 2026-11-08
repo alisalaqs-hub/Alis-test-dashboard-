@@ -5,6 +5,7 @@ import { one, q } from '../db';
 import { mails } from '../services/email';
 import { audit, HttpError, notFound, parse, requireAdmin } from '../services/http';
 import { checksFor, LISTING_SELECT, photosFor, toDTO, type ListingRow } from '../services/listings';
+import { emit } from '../ai/hooks';
 
 export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/summary', async (req) => {
@@ -44,6 +45,8 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!r) throw new HttpError(409, 'Only pending listings can be approved.', 'bad_status');
     if (r.email) await mails.listingLive(r.email, r.title ?? r.address_line, ref);
     await audit(req, 'admin.listing_approved', `listing:${ref}`);
+    const live = await one<{ id: string }>('SELECT id FROM listings WHERE ref = $1', [ref]);
+    if (live) await emit('listingsPublished', { listingIds: [live.id] });
     return { status: 'live' };
   });
 
@@ -88,6 +91,7 @@ export async function adminRoutes(app: FastifyInstance) {
     // Verifying an agency releases its pending feed listings.
     const released = verified ? await q(`UPDATE listings SET status = 'live', published_at = coalesce(published_at, now()), updated_at = now() WHERE organisation_id = $1 AND status = 'pending' AND source_kind IN ('agent-feed', 'agent') RETURNING id`, [id]) : [];
     await audit(req, 'admin.org_verified', `org:${id}`, { verified, released: released.length });
+    if (released.length) await emit('listingsPublished', { listingIds: (released as { id: string }[]).map((r) => r.id) });
     return { ok: true, released: released.length };
   });
 

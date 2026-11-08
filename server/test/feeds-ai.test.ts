@@ -55,7 +55,8 @@ describe('AI room redesign', () => {
     config.ai.dailyImagesPerUser = 2;
     const calls: { prompt: string; fidelity: string | null; model: string | null; hasImage: boolean; auth: string | null }[] = [];
     const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4be0000000049454e44ae426082', 'hex');
-    fakeHosts.set('api.openai.com', async (_url, init) => {
+    fakeHosts.set('api.openai.com', async (url, init) => {
+      if (!url.endsWith('/images/edits')) return Response.json({ data: [] });
       const form = init!.body as FormData;
       calls.push({ prompt: String(form.get('prompt')), fidelity: form.get('input_fidelity') as string | null, model: form.get('model') as string | null, hasImage: form.get('image') instanceof Blob, auth: new Headers(init!.headers).get('authorization') });
       return Response.json({ data: [{ b64_json: png.toString('base64') }] });
@@ -89,7 +90,8 @@ describe('AI room redesign', () => {
     config.ai.openaiKey = 'sk-test';
     config.ai.dailyImagesPerUser = 10;
     let n = 0;
-    fakeHosts.set('api.openai.com', async (_url, init) => {
+    fakeHosts.set('api.openai.com', async (url, init) => {
+      if (!url.endsWith('/images/edits')) return Response.json({ data: [] });
       n++;
       const form = init!.body as FormData;
       if (form.get('input_fidelity')) return Response.json({ error: { message: 'Unknown parameter: input_fidelity' } }, { status: 400 });
@@ -99,8 +101,9 @@ describe('AI room redesign', () => {
       const { c } = await signUp();
       const r = await send(c.cookie);
       expect(n).toBe(2);
-      expect(r.statusCode).toBe(502);
+      expect(r.statusCode).toBe(503);
       expect(r.json().error.message).toMatch(/OPENAI_API_KEY/);
+      expect(r.json().error.message).not.toMatch(/abc123/);
       const hist = (await c.get('/api/ai/room-images')).json.items;
       expect(hist[0].status).toBe('failed');
       expect(JSON.stringify(hist)).not.toMatch(/abc123/); // rejected keys are never stored

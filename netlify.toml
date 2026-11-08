@@ -1,13 +1,32 @@
-# Alternative host: Netlify (connect the GitHub repo; these settings are picked up automatically).
+# Streetkey on Netlify: the website (static, from dist/) plus the back end as Netlify Functions.
+#   /api/*    → netlify/functions/api.mts       (the full API: accounts, listings, AI…)
+#   /media/*  → netlify/functions/media.mts     (photos and AI images from Netlify Blobs)
+#   AI jobs   → netlify/functions/ai-worker-background.mts (long AI work, up to 15 minutes)
+#   hourly    → netlify/functions/scheduled.mts (search alerts, job recovery, clean-up)
+# Set environment variables in Netlify: Site configuration → Environment variables (see .env.example).
 [build]
-  command = "npm run build"
+  command = "npm run build:netlify"
   publish = "dist"
+
 [build.environment]
   NODE_VERSION = "22"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  external_node_modules = ["pg-native"]
+
 [[headers]]
   for = "/*"
   [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://api.postcodes.io; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
     X-Frame-Options = "SAMEORIGIN"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(self)"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

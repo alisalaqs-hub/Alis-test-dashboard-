@@ -1,5 +1,6 @@
 /**
  * File storage for listing photos and AI images.
+ *  - netlify-blobs: Netlify Blobs (default on Netlify), served by the media function at /media/...
  *  - local: files on disk (development, or a persistent disk on the host), served at /media/...
  *  - s3:    any S3-compatible bucket (Cloudflare R2, AWS S3, Backblaze B2) with a public base URL.
  */
@@ -17,7 +18,17 @@ export function newKey(folder: string, contentType: string) {
   return `${folder}/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}.${EXT[contentType] ?? 'bin'}`;
 }
 
+/** Netlify Blobs store (strong consistency so a photo can be shown straight after upload). */
+async function blobs() {
+  const { getStore } = await import('@netlify/blobs');
+  return getStore({ name: config.storage.blobStore, consistency: 'strong' });
+}
+
 export async function putFile(key: string, body: Buffer, contentType: string): Promise<Stored> {
+  if (config.storage.driver === 'netlify-blobs') {
+    await (await blobs()).set(key, new Uint8Array(body).buffer as ArrayBuffer, { metadata: { contentType } });
+    return { key, url: `/media/${key}` };
+  }
   if (config.storage.driver === 's3') {
     await s3Put(key, body, contentType);
     return { key, url: `${config.storage.s3.publicBaseUrl}/${key}` };
@@ -29,6 +40,11 @@ export async function putFile(key: string, body: Buffer, contentType: string): P
 }
 
 export async function getFile(key: string): Promise<Buffer | null> {
+  if (key.startsWith('ext:')) { const r = await fetch(key.slice(4), { signal: AbortSignal.timeout(15_000) }).catch(() => null); return r?.ok ? Buffer.from(await r.arrayBuffer()) : null; }
+  if (config.storage.driver === 'netlify-blobs') {
+    const b = await (await blobs()).get(key, { type: 'arrayBuffer' });
+    return b ? Buffer.from(b) : null;
+  }
   if (config.storage.driver === 's3') {
     const r = await fetch(`${config.storage.s3.publicBaseUrl}/${key}`);
     return r.ok ? Buffer.from(await r.arrayBuffer()) : null;
@@ -36,7 +52,22 @@ export async function getFile(key: string): Promise<Buffer | null> {
   return fs.readFile(safeLocal(key)).catch(() => null);
 }
 
+/** Bytes and content type (used by the Netlify media function). */
+export async function getFileWithType(key: string): Promise<{ body: Buffer; contentType: string } | null> {
+  if (config.storage.driver === 'netlify-blobs') {
+    const r = await (await blobs()).getWithMetadata(key, { type: 'arrayBuffer' });
+    if (!r) return null;
+    return { body: Buffer.from(r.data), contentType: String((r.metadata as { contentType?: string })?.contentType ?? 'application/octet-stream') };
+  }
+  const body = await getFile(key);
+  if (!body) return null;
+  const ext = key.split('.').pop();
+  return { body, contentType: ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'jpg' ? 'image/jpeg' : 'application/octet-stream' };
+}
+
 export async function deleteFile(key: string) {
+  if (key.startsWith('ext:')) return;
+  if (config.storage.driver === 'netlify-blobs') { await (await blobs()).delete(key).catch(() => {}); return; }
   if (config.storage.driver === 's3') { await s3Request('DELETE', key).catch(() => {}); return; }
   await fs.unlink(safeLocal(key)).catch(() => {});
 }
@@ -78,4 +109,4 @@ async function s3Request(method: 'PUT' | 'DELETE', key: string, body: Buffer = B
   return fetch(`${endpoint.origin}${pathName}`, { method, headers, body: method === 'PUT' ? new Uint8Array(body) : undefined, signal: AbortSignal.timeout(30_000) });
 }
 
-export const storageReady = () => config.storage.driver === 'local' || !!(config.storage.s3.endpoint && config.storage.s3.bucket && config.storage.s3.accessKeyId && config.storage.s3.publicBaseUrl);
+export const storageReady = () => config.storage.driver === 'local' || config.storage.driver === 'netlify-blobs' || !!(config.storage.s3.endpoint && config.storage.s3.bucket && config.storage.s3.accessKeyId && config.storage.s3.publicBaseUrl);

@@ -3,27 +3,16 @@
  *   alerts   email saved-search matches (instant/daily/weekly), run hourly
  *   cleanup  remove expired sessions and links, and raw analytics older than 13 months, run daily
  */
-import { setDynamicListings, type Property } from '../../../src/data/properties';
-import { buildListing } from '../../../src/engine/listings';
+import { setDynamicListings } from '../../../src/data/properties';
+import { invalidateLiveRegistry, rowToProperty } from '../ai/registry';
 import { parseQuery, runSearch } from '../../../src/engine/search';
-import type { PropertyType } from '../../../src/engine/refurb';
 import { q } from '../db';
 import { mails } from '../services/email';
-import { LISTING_SELECT, toDTO, type ListingRow } from '../services/listings';
+import { LISTING_SELECT, type ListingRow } from '../services/listings';
 
 const DUE: Record<string, string> = { instant: '50 minutes', daily: '23 hours', weekly: '6 days 23 hours' };
 
-/** A live listing as the website's search engine sees it, so alerts match exactly what search shows. */
-function asProperty(r: ListingRow): Property {
-  const d = toDTO(r, [], {});
-  return buildListing({
-    id: d.ref, listing: d.channel, title: d.title ?? undefined, addressLine: d.addressLine, town: d.town, postcode: r.postcode,
-    type: d.type as PropertyType, tenure: d.tenure, leaseYears: d.leaseYears ?? undefined, beds: d.beds, baths: d.baths, floorArea: d.floorArea,
-    price: d.price, epc: d.epc ?? undefined, councilTax: d.councilTax ?? undefined, features: d.features, description: d.description ?? undefined,
-    source: { kind: d.source.kind === 'landlord' ? 'landlord' : d.source.kind === 'owner' ? 'owner' : 'agent-feed', name: d.source.name, licence: '', verified: d.source.verified },
-    geo: d.lat != null && d.lng != null ? { lat: d.lat, lng: d.lng } : undefined, status: 'live',
-  });
-}
+const asProperty = (r: ListingRow) => rowToProperty(r);
 
 export async function runAlerts(now = new Date()) {
   const searches = await q<{ id: string; query: string; mode: string; alert_frequency: string; last_alerted_at: Date | null; created_at: Date; email: string }>(
@@ -47,10 +36,14 @@ export async function runAlerts(now = new Date()) {
     await q('UPDATE saved_searches SET last_alerted_at = $2 WHERE id = $1', [s.id, now]);
   }
   setDynamicListings([]);
+  invalidateLiveRegistry();
   return { searches: searches.length, emails };
 }
 
 export async function runCleanup() {
+  await q(`DELETE FROM rate_limits WHERE window_start < now() - interval '2 days'`);
+  await q(`DELETE FROM ai_cache WHERE expires_at < now()`);
+  await q(`DELETE FROM ai_usage WHERE at < now() - interval '13 months'`);
   const sessions = await q('DELETE FROM sessions WHERE expires_at < now() RETURNING 1');
   const tokens = await q(`DELETE FROM email_tokens WHERE expires_at < now() - interval '7 days' RETURNING 1`);
   const events = await q(`DELETE FROM engagement_events WHERE occurred_at < now() - interval '13 months' RETURNING 1`);

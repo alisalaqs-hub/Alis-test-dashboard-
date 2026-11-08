@@ -56,12 +56,14 @@ export interface UserDTO {
 
 export interface HealthDTO {
   ok: boolean; version: string;
-  features: { email: 'resend' | 'log'; storage: 'local' | 's3'; aiImages: boolean; moderation: boolean };
+  features: { email: 'resend' | 'log'; storage: 'local' | 's3' | 'netlify-blobs'; aiImages: boolean; ai: boolean; moderation: boolean; runtime: 'node' | 'netlify' };
 }
 
 export interface EnquirySummaryDTO {
   id: string; kind: 'viewing' | 'question' | 'offer'; status: 'new' | 'replied' | 'closed';
   role: 'lister' | 'enquirer';
+  /** Held back by the automated spam/scam screen (lister only). */
+  filtered: boolean; filterReason: string | null;
   listing: { ref: string; title: string; price: number; channel: 'sale' | 'rent' };
   name: string; email: string | null; phone: string | null; preferredSlot: string | null;
   lastMessage: { body: string; author: 'enquirer' | 'lister'; at: string } | null;
