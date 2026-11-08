@@ -11,6 +11,11 @@ Preview address: `https://alisalaqs-hub.github.io/Alis-test-dashboard-/`
 
 What the preview includes: “Public preview” banner, `noindex` (search engines won't list the demo data), self-hosted fonts (no third-party requests), draft Privacy / Terms / Accessibility pages.
 
+## Stage 1b · The live site with accounts (server)
+Accounts, real listings with photos, enquiries, alerts, agent feeds and the AI room designer need the Streetkey server.
+It hosts the website and the API at one address. Follow **[08 · The back end](08-backend.md) → Put it live on Render**
+(`render.yaml` sets up the web service, database and hourly job). GitHub Pages can stay as a free static demo.
+
 ## Stage 2 · Your own domain (e.g. streetkey.co.uk)
 1. Check the name: UKIPO trade mark search (classes 9, 35, 36, 37, 42) and Companies House.
 2. Buy the domain from any registrar (≈ £10–15/yr for .co.uk).
@@ -29,7 +34,7 @@ What the preview includes: “Public preview” banner, `noindex` (search engine
 | Replace fictional listings with real ones (agent feeds / verified owner listings) | Dev |
 | Connect official data: HM Land Registry Price Paid, EPC register, EA flood, postcodes | Dev |
 | QS review of refurbishment rate library | QS consultant |
-| Backend: accounts, database, image storage, moderation (see 04-roadmap) | Dev |
+| Backend: accounts, database, image storage, moderation | Done: see 08-backend; deploy it and set the keys |
 | If introducing buyers/tenants for owners: redress scheme + HMRC AML supervision | You + solicitor |
 | Professional indemnity & cyber insurance; security test before taking personal data or payments | You |
 | Remove `<meta name="robots" content="noindex">` from `index.html`; remove preview banner | Dev |

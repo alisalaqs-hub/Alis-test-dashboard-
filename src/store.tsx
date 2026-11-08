@@ -10,11 +10,11 @@ export interface AuditEntry { at: string; actor: string; action: string; detail:
 export interface Viewing { id: string; propertyId: string; slot: string; status: 'requested' }
 export interface RecentSearch { q: string; mode: string; at: string }
 
-interface State { saved: string[]; compare: string[]; designs: SavedDesign[]; queue: ProposedAction[]; audit: AuditEntry[]; viewings: Viewing[]; recent: RecentSearch[]; savedSearches: RecentSearch[]; myListings: Property[]; feedListings: Property[]; tracked: Property[] }
-const EMPTY: State = { saved: [], compare: [], designs: [], queue: [], audit: [], viewings: [], recent: [], savedSearches: [], myListings: [], feedListings: [], tracked: [] };
+interface State { saved: string[]; compare: string[]; designs: SavedDesign[]; queue: ProposedAction[]; audit: AuditEntry[]; viewings: Viewing[]; recent: RecentSearch[]; savedSearches: RecentSearch[]; myListings: Property[]; feedListings: Property[]; tracked: Property[]; serverListings: Property[] }
+const EMPTY: State = { saved: [], compare: [], designs: [], queue: [], audit: [], viewings: [], recent: [], savedSearches: [], myListings: [], feedListings: [], tracked: [], serverListings: [] };
 const KEY = 'streetkey-state-v1';
 
-function load(): State { try { const raw = localStorage.getItem(KEY); return raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY; } catch { return EMPTY; } }
+function load(): State { try { const raw = localStorage.getItem(KEY); return raw ? { ...EMPTY, ...JSON.parse(raw), serverListings: [] } : EMPTY; } catch { return EMPTY; } }
 
 interface Ctx extends State {
   toggleSaved: (id: string) => void;
@@ -32,6 +32,11 @@ interface Ctx extends State {
   removeFeed: (agent: string) => void;
   trackListing: (p: Property) => void;
   untrack: (id: string) => void;
+  /** Listings from the Streetkey server (live site only; never stored on the device). */
+  setServerListings: (list: Property[]) => void;
+  addServerListing: (p: Property) => void;
+  replaceSaved: (keys: string[]) => void;
+  replaceSavedSearches: (list: RecentSearch[]) => void;
 }
 const StoreCtx = createContext<Ctx | null>(null);
 
@@ -41,12 +46,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useMemo(() => {
     const base = baseListings();
     base.forEach((b) => { b.alsoListedBy = undefined; });
-    const dynamic = [...s.myListings, ...s.feedListings, ...s.tracked].map((p) => ({ ...p, alsoListedBy: undefined }));
+    const dynamic = [...s.serverListings, ...s.myListings, ...s.feedListings, ...s.tracked].map((p) => ({ ...p, alsoListedBy: undefined }));
     const { merged } = dedupe([...base, ...dynamic.filter((p) => p.visibility !== 'private')]);
     const ids = new Set(base.map((b) => b.id));
     setDynamicListings([...merged.filter((p) => !ids.has(p.id)), ...dynamic.filter((p) => p.visibility === 'private')]);
-  }, [s.myListings, s.feedListings, s.tracked]);
-  useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* storage unavailable */ } }, [s]);
+  }, [s.serverListings, s.myListings, s.feedListings, s.tracked]);
+  useEffect(() => { try { const { serverListings: _skip, ...keep } = s; void _skip; localStorage.setItem(KEY, JSON.stringify(keep)); } catch { /* storage unavailable */ } }, [s]);
   const log = useCallback((actor: string, action: string, detail: string) => set((x) => ({ ...x, audit: [{ at: new Date().toISOString(), actor, action, detail }, ...x.audit].slice(0, 200) })), []);
   const api = useMemo<Ctx>(() => ({
     ...s,
@@ -64,6 +69,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     removeFeed: (agent) => set((x) => ({ ...x, feedListings: x.feedListings.filter((f) => f.source?.name !== `${agent} (agent feed)`) })),
     trackListing: (p) => set((x) => ({ ...x, tracked: [p, ...x.tracked.filter((t) => t.id !== p.id)].slice(0, 30) })),
     untrack: (id) => set((x) => ({ ...x, tracked: x.tracked.filter((t) => t.id !== id) })),
+    setServerListings: (list) => set((x) => ({ ...x, serverListings: list })),
+    addServerListing: (p) => set((x) => ({ ...x, serverListings: [p, ...x.serverListings.filter((y) => y.id !== p.id)] })),
+    replaceSaved: (keys) => set((x) => ({ ...x, saved: keys })),
+    replaceSavedSearches: (list) => set((x) => ({ ...x, savedSearches: list })),
     requestViewing: (propertyId, slot) => set((x) => ({ ...x, viewings: [...x.viewings, { id: `v${Date.now()}`, propertyId, slot, status: 'requested' }], audit: [{ at: new Date().toISOString(), actor: 'you', action: 'viewing requested', detail: `${propertyId} · ${slot}` }, ...x.audit] })),
   }), [s, log]);
   return <StoreCtx.Provider value={api}>{children}</StoreCtx.Provider>;

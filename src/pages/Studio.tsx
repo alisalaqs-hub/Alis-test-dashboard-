@@ -6,6 +6,8 @@ import { engagementFor } from '../engine/engagement';
 import { track } from '../engine/tracking';
 import { gbp, gbpK, Meter, Section, Seg, Tag } from '../components/ui';
 import { useStore } from '../store';
+import { api, ApiError, mediaUrl } from '../lib/api';
+import { useServer } from '../lib/server';
 
 const PAINTS = [['Original', ''], ['Chalk white', '#f3f1ea'], ['Warm stone', '#e3d8c6'], ['Sage', '#c9d3c0'], ['Dusky blue', '#c3cdd6'], ['Clay', '#d9b8a3'], ['Deep green', '#4b5d52']] as const;
 
@@ -77,6 +79,22 @@ export default function Studio() {
   const [briefMsg, setBriefMsg] = useState('');
   const [pos, setPos] = useState(50);
   const [photo, setPhoto] = useState<string | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [ai, setAi] = useState<{ url: string; style: string; label: string } | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState('');
+  const [aiLeft, setAiLeft] = useState<number | null>(null);
+  const [aiConsent, setAiConsent] = useState(false);
+  const { online, user, health } = useServer();
+  const aiOn = online && !!health?.features.aiImages;
+  const generate = async () => {
+    if (!photoFile) return;
+    setAiBusy(true); setAiErr('');
+    try {
+      const r = await api.ai.roomImage(photoFile, { room, style: styleId, brief: brief.trim() || undefined, palette: [paint, style.palette.wall, style.palette.accent].filter(Boolean).join(',') });
+      setAi({ url: mediaUrl(r.image.url!), style: style.name, label: r.label }); setAiLeft(r.remainingToday); setPos(50);
+    } catch (e) { setAiErr((e as ApiError).message); } finally { setAiBusy(false); }
+  };
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { designs, saveDesign, enqueue } = useStore();
@@ -108,7 +126,7 @@ export default function Studio() {
       <div className="page-head">
         <div><div className="eyebrow">AI interior design studio</div><h2 style={{ marginTop: 6 }}>Redesign any room — and know what it costs</h2>
           <p className="muted" style={{ marginTop: 6 }}>For {prop.street.replace(' (fictional)', '')}, {prop.town} · labour priced for {cost.regionLabel} (×{cost.regionFactor}).</p></div>
-        <div className="row"><Tag kind="warn">Concept visualisation — not a construction design</Tag><Tag kind="live">Photo-real generation: image model API</Tag></div>
+        <div className="row"><Tag kind="warn">Concept visualisation — not a construction design</Tag>{aiOn ? <Tag kind="ai">AI photo redesign: on</Tag> : <Tag kind="neutral">{online ? 'AI photo redesign: not switched on yet' : 'AI photo redesign: on the live site'}</Tag>}</div>
       </div>
 
       <div className="card ai-card">
@@ -126,16 +144,27 @@ export default function Studio() {
             <Seg value={room} onChange={(r) => { setRoom(r); setOverrides({}); }} options={[{ value: 'kitchen', label: 'Kitchen' }, { value: 'bathroom', label: 'Bathroom' }, { value: 'living', label: 'Living room' }, { value: 'bedroom', label: 'Bedroom' }]} />
             <div className="row">
               {(room === 'living' || room === 'bedroom' || room === 'kitchen') && <label className="check"><input type="checkbox" checked={staged} onChange={(e) => setStaged(e.target.checked)} />Virtual staging</label>}
-              <label className="btn ghost sm" style={{ cursor: 'pointer' }}><input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setPhoto(URL.createObjectURL(f)); }} />Upload room photo</label>
+              <label className="btn ghost sm" style={{ cursor: 'pointer' }}><input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) { setPhoto(URL.createObjectURL(f)); setPhotoFile(f); setAi(null); setAiErr(''); } }} />Upload room photo</label>
             </div>
           </div>
           <div ref={ref} className="ba card" style={{ padding: 0 }} onPointerDown={(e) => { (e.target as HTMLElement).setPointerCapture?.(e.pointerId); drag(e.clientX); }} onPointerMove={(e) => e.buttons && drag(e.clientX)}>
-            {staged && (room === 'living' || room === 'bedroom' || room === 'kitchen') && <span className="watermark">VIRTUALLY STAGED</span>}
-            <div>{photo ? <><img src={photo} alt="Your room" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><div style={{ position: 'absolute', inset: 0, background: paint || style.palette.cab, mixBlendMode: 'color', opacity: 0.45 }} /></> : <RoomArt room={room} s={style} before={false} wall={paint} staged={staged} />}</div>
+            {ai ? <span className="watermark">AI-GENERATED CONCEPT</span> : photo ? <span className="watermark">COLOUR PREVIEW · NOT AI</span> : staged && (room === 'living' || room === 'bedroom' || room === 'kitchen') && <span className="watermark">VIRTUALLY STAGED</span>}
+            <div>{ai ? <img src={ai.url} alt={`AI concept: ${ai.style} ${room}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : photo ? <><img src={photo} alt="Your room" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><div style={{ position: 'absolute', inset: 0, background: paint || style.palette.cab, mixBlendMode: 'color', opacity: 0.45 }} /></> : <RoomArt room={room} s={style} before={false} wall={paint} staged={staged} />}</div>
             <div style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}>{photo ? <img src={photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <RoomArt room={room} s={style} before wall="" staged={false} />}</div>
             <div className="handle" style={{ left: `${pos}%` }} />
           </div>
-          {photo && <p className="xs muted">Your photo stays in your browser. The “after” is a colour-grade preview; production sends the photo (with consent) to an image model with structure guidance so walls, windows and proportions are preserved, and labels every output as AI-generated.</p>}
+          {photo && <div className="card ai-gen stack" aria-live="polite">
+            <div className="row between"><b>Redesign this photo with AI</b>{aiLeft != null && <span className="xs muted">{aiLeft} left today</span>}</div>
+            {aiOn && user ? <>
+              <p className="small muted">Streetkey AI keeps your room’s walls, windows and layout and restyles it as <b>{style.name}</b>{brief.trim() ? <> following your brief</> : ''}. It takes about a minute.</p>
+              <label className="check"><input type="checkbox" checked={aiConsent} onChange={(e) => setAiConsent(e.target.checked)} />I’m happy for this photo to be sent to our AI provider (OpenAI) to create the design. It isn’t used to train their models.</label>
+              <button className="btn accent" disabled={aiBusy || !aiConsent} onClick={() => void generate()}>{aiBusy ? 'Designing your room…' : ai ? `Try again as ${style.name}` : `Generate ${style.name} design`}</button>
+              {aiErr && <div className="callout small" role="alert">{aiErr}</div>}
+              {ai && <p className="xs muted">{ai.label} Drag the slider to compare. Saved in <Link to="/account/designs">your AI designs</Link>.</p>}
+            </> : aiOn ? <p className="small"><Link to="/account">Sign in or create a free account</Link> to generate a photo-real redesign of this room.</p>
+              : online ? <p className="small muted">AI photo redesign isn’t switched on on this server yet. The preview above is a simple colour wash, not AI.</p>
+              : <p className="small muted">This preview has no server, so the “after” is a simple colour wash, not AI. On the live Streetkey site, the AI redesigns your actual photo in the style you choose. Your photo stays in your browser here.</p>}
+          </div>}
 
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
             {STYLES.map((s) => (

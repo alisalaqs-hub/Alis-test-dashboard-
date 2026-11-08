@@ -9,6 +9,18 @@
 export type EventName = 'listing_view' | 'photo_enlarge' | 'floorplan_open' | 'save' | 'compare_add' | 'viewing_request' | 'enquiry' | 'ai_question' | 'refurb_sim' | 'design_style' | 'document_open';
 export interface TrackedEvent { name: EventName; listingId: string; at: string; session: string; props?: Record<string, string | number> }
 
+import { api } from '../lib/api';
+
+/** Event names the Streetkey server accepts for live listings (others stay on the device). */
+const SERVER_NAMES: Partial<Record<EventName, string>> = { listing_view: 'listing_view', photo_enlarge: 'photo_open', floorplan_open: 'floorplan_open', save: 'save', viewing_request: 'viewing_request', enquiry: 'enquiry', ai_question: 'ai_question', refurb_sim: 'refurb_sim', design_style: 'design_style' };
+function serverSession() {
+  try {
+    let s = sessionStorage.getItem('streetkey-ssid');
+    if (!s) { const a = new Uint8Array(18); crypto.getRandomValues(a); s = btoa(String.fromCharCode(...a)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); sessionStorage.setItem('streetkey-ssid', s); }
+    return s;
+  } catch { return null; }
+}
+
 const CONSENT_KEY = 'streetkey-analytics-consent';
 const EVENTS_KEY = 'streetkey-events';
 
@@ -27,6 +39,8 @@ export function track(name: EventName, listingId: string, props?: TrackedEvent['
     const list: TrackedEvent[] = JSON.parse(sessionStorage.getItem(EVENTS_KEY) ?? '[]');
     list.unshift({ name, listingId, at: new Date().toISOString(), session: session(), props });
     sessionStorage.setItem(EVENTS_KEY, JSON.stringify(list.slice(0, 100)));
+    const serverName = SERVER_NAMES[name]; const ssid = serverSession();
+    if (serverName && ssid && /^sk-[a-z0-9]{7}$/.test(listingId)) api.event(listingId, serverName, ssid);
     window.dispatchEvent(new Event('streetkey-track'));
     return true;
   } catch { return false; }

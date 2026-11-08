@@ -171,7 +171,12 @@ export function extractListing(text: string, url = ''): Extracted {
 const BLM_TYPE: Record<string, PropertyType> = { '1': 'terraced', '2': 'terraced', '3': 'semi-detached', '4': 'detached', '5': 'terraced', '7': 'flat', '8': 'flat', '9': 'flat', '10': 'flat', '11': 'flat', '12': 'bungalow', '13': 'bungalow', '14': 'bungalow', '15': 'bungalow', '28': 'flat' };
 const BLM_TENURE: Record<string, Property['tenure']> = { '1': 'freehold', '2': 'leasehold', '4': 'leasehold', '5': 'share-of-freehold' };
 
-export interface FeedReport { accepted: Property[]; rejected: { ref: string; reason: string }[]; fields: number; version: string }
+export interface FeedReport {
+  accepted: Property[];
+  /** The facts exactly as supplied (no defaults filled in), keyed by the agent's own reference — what a server stores. */
+  inputs: (ListingInput & { ref: string })[];
+  rejected: { ref: string; reason: string }[]; fields: number; version: string;
+}
 
 export function parseBLM(raw: string, agentName: string): FeedReport {
   const header = raw.match(/#HEADER#([\s\S]*?)#DEFINITION#/i)?.[1] ?? '';
@@ -182,7 +187,7 @@ export function parseBLM(raw: string, agentName: string): FeedReport {
   const fields = defBlock.split(eor)[0].trim().split(eof).map((x) => x.trim()).filter(Boolean);
   const dataBlock = raw.match(/#DATA#([\s\S]*?)#END#/i)?.[1] ?? '';
   const rows = dataBlock.split(eor).map((r) => r.trim()).filter(Boolean);
-  const accepted: Property[] = []; const rejected: FeedReport['rejected'] = [];
+  const accepted: Property[] = []; const inputs: FeedReport['inputs'] = []; const rejected: FeedReport['rejected'] = [];
   for (const r of rows) {
     const row = r.endsWith(eof) ? r.slice(0, -1) : r;
     const vals = row.split(eof);
@@ -198,19 +203,22 @@ export function parseBLM(raw: string, agentName: string): FeedReport {
     const features = Object.keys(rec).filter((k) => /^FEATURE\d+$/.test(k)).map((k) => rec[k]).filter(Boolean);
     const all = `${rec.SUMMARY ?? ''} ${rec.DESCRIPTION ?? ''} ${features.join(' ')}`;
     const ex = extractListing(all);
-    accepted.push(buildListing({
+    const media = Object.keys(rec).filter((k) => /^MEDIA_IMAGE_\d+$/.test(k)).sort().map((k) => rec[k]).filter((v) => /^https:\/\//i.test(v));
+    const input: ListingInput = {
       id: `feed-${agentName.toLowerCase().replace(/[^a-z]+/g, '-')}-${ref.toLowerCase()}`,
       listing: lettings ? 'rent' : 'sale', title: rec.SUMMARY?.slice(0, 90),
       addressLine: [rec.ADDRESS_1, rec.ADDRESS_2].filter(Boolean).join(' '), town: rec.TOWN || rec.ADDRESS_3 || 'Unknown', postcode,
       type: BLM_TYPE[rec.PROP_SUB_ID] ?? ex.fields.type ?? 'terraced', tenure: BLM_TENURE[rec.TENURE_TYPE_ID] ?? ex.fields.tenure ?? 'freehold',
       leaseYears: ex.fields.leaseYears, beds: Number(rec.BEDROOMS) || 0, baths: Number(rec.BATHROOMS) || 1, floorArea: ex.fields.floorArea ?? 0,
       condition: ex.fields.condition, price, epc: ex.fields.epc, councilTax: ex.fields.councilTax, serviceChargeAnnual: ex.fields.serviceChargeAnnual,
-      features, description: rec.DESCRIPTION,
+      features, description: rec.DESCRIPTION, photos: media.length ? media : undefined,
       source: { kind: 'agent-feed', name: `${agentName} (agent feed)`, licence: 'Displayed under agent feed agreement; agent retains ownership', verified: true },
       status: rec.STATUS_ID === '1' ? 'under offer' : 'live',
-    }));
+    };
+    inputs.push({ ...input, ref });
+    accepted.push(buildListing(input));
   }
-  return { accepted, rejected, fields: fields.length, version };
+  return { accepted, inputs, rejected, fields: fields.length, version };
 }
 
 /* ---------- 5. merge the same home from several sources ---------- */

@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-single
+server/dist
+server/uploads
+server/.test-uploads
+.env
+.git

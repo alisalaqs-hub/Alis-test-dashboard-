@@ -4,13 +4,14 @@ import { StreetkeyBow, StreetkeyWordmark } from './Brand';
 import { Icon } from './Icons';
 import { SmartSearch } from './SmartSearch';
 import { useStore } from '../store';
+import { useServer } from '../lib/server';
 
 const PRIMARY = [
   ['/search', 'Search'], ['/list', 'List a property'], ['/prices', 'Sold prices'], ['/studio', 'Design'], ['/estimate', 'Costs'], ['/invest', 'Invest'], ['/my-home', 'My Home'],
 ] as const;
 const MORE = [
   { title: 'Explore', items: [['/search', 'search', 'Search homes', 'Buy, rent, commercial'], ['/prices', 'pound', 'Sold prices', 'What things really sold for'], ['/import', 'spark', 'Check any listing', 'From any website, privately'], ['/compare', 'chart', 'Compare', 'Side-by-side intelligence'], ['/saved', 'heart', 'Saved', 'Homes, searches & designs']] },
-  { title: 'Sell & let', items: [['/list', 'tag', 'List your property', 'Sell or let it yourself'], ['/owner', 'chart', 'Owner dashboard', 'How your listing performs']] },
+  { title: 'Sell & let', items: [['/list', 'tag', 'List your property', 'Sell or let it yourself'], ['/account/listings', 'key', 'My listings & inbox', 'Manage listings, reply to buyers'], ['/owner', 'chart', 'Owner dashboard', 'How your listing performs']] },
   { title: 'Plan & improve', items: [['/my-home', 'home', 'My Home', 'Value, ideas & costs for your home'], ['/studio', 'palette', 'Design studio', 'Redesign a room, see the cost'], ['/estimate', 'tools', 'Refurb costs', 'Regional estimate & BoQ'], ['/invest', 'chart', 'Investment', 'Yields, BRRR, flips, HMOs']] },
   { title: 'For professionals', items: [['/sources', 'building', 'Listing feeds', 'Connect your CRM to Streetkey'], ['/agents', 'briefcase', 'Agent command centre', 'Portfolio analytics & AI'], ['/landlord', 'key', 'Landlords', 'Lettings & compliance'], ['/developer', 'crane', 'Developers', 'Demand & appraisals'], ['/marketplace', 'tools', 'Contractors', 'Scoped, benchmarked quotes'], ['/automation', 'spark', 'AI agents', 'Automations & approvals'], ['/enterprise', 'building', 'API & Enterprise', 'White-label & widgets']] },
 ] as const;
@@ -18,6 +19,7 @@ const MORE = [
 export default function Layout() {
   const { pathname } = useLocation();
   const { saved } = useStore();
+  const { online, user } = useServer();
   const [sheet, setSheet] = useState<null | 'ask' | 'more'>(null);
   const [theme, setTheme] = useState<string | null>(() => { try { return localStorage.getItem('streetkey-theme'); } catch { return null; } });
   useEffect(() => { window.scrollTo(0, 0); setSheet(null); }, [pathname]);
@@ -49,7 +51,7 @@ export default function Layout() {
   return (
     <>
       <a href="#main" className="skip-link" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to main content</a>
-      <div className="preview-bar" role="note"><div><b>PUBLIC PREVIEW</b><span className="pv-long">Listings and figures are demonstration data. Estimates are not advice.</span><span className="pv-short">Demo data · not advice</span><Link to="/terms">Terms</Link></div></div>
+      <div className="preview-bar" role="note"><div>{online ? <><b>EARLY ACCESS</b><span className="pv-long">Listings marked “Demo data” are illustrations. Estimates are not advice.</span><span className="pv-short">Demo listings marked · not advice</span></> : <><b>PUBLIC PREVIEW</b><span className="pv-long">Listings and figures are demonstration data. Estimates are not advice.</span><span className="pv-short">Demo data · not advice</span></>}<Link to="/terms">Terms</Link></div></div>
       <header className="topbar">
         <div className="topbar-inner">
           <Link to="/" className="logo" aria-label="Streetkey home" onClick={() => { if (pathname === '/') window.dispatchEvent(new Event('streetkey:turn')); }}><StreetkeyWordmark /></Link>
@@ -59,6 +61,9 @@ export default function Layout() {
           <div className="row" style={{ gap: 8, marginLeft: 'auto', flexWrap: 'nowrap' }}>
             <Link to="/saved" className="icon-btn desktop-only" aria-label={`Saved (${saved.length})`}><Icon name="heart" />{saved.length > 0 && <span className="dot-badge">{saved.length}</span>}</Link>
             <button className="icon-btn desktop-only" aria-label="Toggle colour theme" onClick={() => setTheme(dark ? 'light' : 'dark')}>{dark ? '☀' : '☾'}</button>
+            {online && (user
+              ? (() => { const ini = user.name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase(); return <Link to="/account" className="icon-btn acct-btn" aria-label={`${ini}: your account`} title={`${user.name}: your account`}>{ini}</Link>; })()
+              : <Link to="/account" className="btn sm ghost signin-btn">Sign in</Link>)}
             <button className="icon-btn" aria-label="Menu" aria-haspopup="dialog" onClick={() => setSheet('more')}><Icon name="menu" /></button>
           </div>
         </div>
@@ -67,7 +72,7 @@ export default function Layout() {
       <main id="main" tabIndex={-1} className={isHome ? 'home-main' : undefined}><Outlet /></main>
 
       <footer className="site"><div>
-        <span className="row" style={{ gap: 10 }}><StreetkeyBow size={22} /> <span><b>Streetkey</b> — See Beyond the Property. Public preview · listings and figures are demonstration data.</span></span>
+        <span className="row" style={{ gap: 10 }}><StreetkeyBow size={22} /> <span><b>Streetkey</b> — See Beyond the Property. {online ? 'Early access · demo listings are labelled “Demo data”. Estimates are not advice.' : 'Public preview · listings and figures are demonstration data.'}</span></span>
         <nav aria-label="Legal"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/accessibility">Accessibility</Link><Link to="/sources">Listing feeds</Link></nav>
       </div></footer>
 

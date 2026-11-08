@@ -1,0 +1,68 @@
+# Render Blueprint: one web service (website + API), a PostgreSQL database and an hourly job.
+# Dashboard → New → Blueprint → pick this repository. Then fill in the values marked "sync: false".
+# Region: Frankfurt is Render's closest region to the UK.
+services:
+  - type: web
+    name: streetkey
+    runtime: node
+    region: frankfurt
+    plan: starter
+    branch: claude/ai-property-platform-uk-kwzcrf
+    buildCommand: npm ci --include=dev && npm run build:all
+    startCommand: npm run server:start
+    healthCheckPath: /api/health
+    disk:
+      name: uploads
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: streetkey-db
+          property: connectionString
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: PUBLIC_URL
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+  - type: cron
+    name: streetkey-hourly
+    runtime: node
+    region: frankfurt
+    plan: starter
+    branch: claude/ai-property-platform-uk-kwzcrf
+    schedule: "7 * * * *"
+    buildCommand: npm ci --include=dev && npm run server:build
+    startCommand: npm run job:prod -- hourly
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: streetkey-db
+          property: connectionString
+      - key: PUBLIC_URL
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+
+databases:
+  - name: streetkey-db
+    region: frankfurt
+    plan: basic-256mb
+    postgresMajorVersion: "16"

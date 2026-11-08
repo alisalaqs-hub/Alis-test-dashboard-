@@ -9,6 +9,57 @@ import { propertySkills } from '../ai/skills';
 import { AssistantPanel } from '../components/Assistant';
 import { gbp, gbpK, HouseArt, Section, Stat, Tag } from '../components/ui';
 import { useStore } from '../store';
+import { api, ApiError } from '../lib/api';
+import { isServerRef } from '../lib/listingAdapter';
+import { useServer } from '../lib/server';
+
+/** The next few viewing slots: Saturday mornings and weekday evenings. */
+function nextSlots(n = 4) {
+  const out: string[] = []; const d = new Date(); d.setHours(0, 0, 0, 0);
+  for (let i = 1; out.length < n && i < 21; i++) {
+    const day = new Date(d.getTime() + i * 86_400_000); const dow = day.getDay();
+    const label = day.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    if (dow === 6) out.push(`${label} 10:00`, `${label} 11:30`);
+    else if (dow >= 1 && dow <= 4 && out.length < n - 1) out.push(`${label} 17:30`);
+  }
+  return out.slice(0, n);
+}
+
+/** Viewing request / question for a live Streetkey listing: goes to the lister by email and into both inboxes. */
+function EnquiryBox({ listingRef, rental, slots, lister }: { listingRef: string; rental: boolean; slots: string[]; lister: string }) {
+  const { user } = useServer();
+  const [kind, setKind] = useState<'viewing' | 'question'>('viewing');
+  const [f, setF] = useState({ name: user?.name ?? '', email: user?.email ?? '', phone: user?.phone ?? '', message: '', slot: '', website: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<ApiError | null>(null);
+  const [sent, setSent] = useState(false);
+  useEffect(() => { if (user) setF((x) => ({ ...x, name: x.name || user.name, email: x.email || user.email, phone: x.phone || user.phone || '' })); }, [user]);
+  const submit = async () => {
+    setBusy(true); setErr(null);
+    try {
+      await api.listings.enquire(listingRef, { name: f.name, email: f.email, phone: f.phone || undefined, kind, message: f.message || (kind === 'viewing' ? `I’d like to view this ${rental ? 'rental' : 'home'}.` : ''), preferredSlot: kind === 'viewing' ? f.slot || undefined : undefined, website: f.website });
+      setSent(true); track(kind === 'viewing' ? 'viewing_request' : 'enquiry', listingRef);
+    } catch (e) { setErr(e as ApiError); } finally { setBusy(false); }
+  };
+  if (sent) return <div className="callout ok small" role="status"><b>Sent to {lister}.</b> They’ll reply by email{user ? <> and in your <Link to="/account/inbox">inbox</Link></> : ''}. Never pay a deposit or holding fee before you’ve viewed the property.</div>;
+  return (
+    <form className="stack" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+      <div className="seg" role="group" aria-label="What would you like to do?">
+        <button type="button" className={kind === 'viewing' ? 'on' : ''} aria-pressed={kind === 'viewing'} onClick={() => setKind('viewing')}>Request a viewing</button>
+        <button type="button" className={kind === 'question' ? 'on' : ''} aria-pressed={kind === 'question'} onClick={() => setKind('question')}>Ask a question</button>
+      </div>
+      {err && <div className="callout small" role="alert">{err.message}{Object.values(err.fields).map((m) => <div key={m}>• {m}</div>)}</div>}
+      {kind === 'viewing' && <fieldset className="stack" style={{ gap: 4, border: 0, padding: 0, margin: 0 }}><legend className="xs muted">Preferred time (the lister confirms)</legend>{slots.map((s) => <label key={s} className="check"><input type="radio" name="slot" checked={f.slot === s} onChange={() => setF({ ...f, slot: s })} />{s}</label>)}</fieldset>}
+      <label className="field">Your name<input className="input" autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></label>
+      <label className="field">Email<input className="input" type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></label>
+      <label className="field">Phone (optional)<input className="input" type="tel" autoComplete="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
+      <label className="field">Message<textarea className="input" rows={3} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} placeholder={kind === 'viewing' ? 'Anything the seller should know?' : 'What would you like to know?'} required={kind === 'question'} /></label>
+      <input className="hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} name="website" />
+      <button className="btn accent" disabled={busy || !f.name || !f.email || (kind === 'question' && !f.message.trim())}>{busy ? 'Sending…' : kind === 'viewing' ? 'Request viewing' : 'Send question'}</button>
+      <p className="xs muted">Your details go only to {lister}. See our <Link to="/privacy">privacy notice</Link>.</p>
+    </form>
+  );
+}
 
 function FloorPlan({ beds, type, area }: { beds: number; type: string; area: number }) {
   const rooms = type === 'commercial'
@@ -24,7 +75,21 @@ function FloorPlan({ beds, type, area }: { beds: number; type: string; area: num
 
 export default function PropertyDetails() {
   const { id = 'wal-001' } = useParams();
+  const { online, status, loadListing } = useServer();
+  const [missing, setMissing] = useState(false);
+  const known = getProperty(id);
+  useEffect(() => { setMissing(false); if (!known && isServerRef(id) && online) void loadListing(id).then((r) => { if (!r) setMissing(true); }); }, [id, online, known, loadListing]);
+  if (!known && isServerRef(id)) {
+    if (status === 'checking' || (online && !missing)) return <p className="muted small" style={{ padding: 20 }}>Loading listing…</p>;
+    return <div className="card stack" style={{ maxWidth: 560 }}><h2>Listing not found</h2><p className="muted">It may have been sold, let or withdrawn.</p><Link className="btn" to="/search">Search homes</Link></div>;
+  }
+  return <PropertyDetailsInner id={id} />;
+}
+
+function PropertyDetailsInner({ id }: { id: string }) {
+  const { online } = useServer();
   const p = getProperty(id) ?? PROPERTIES[0];
+  const live = online && isServerRef(p.id);
   const { saved, compare, toggleSaved, toggleCompare, requestViewing, viewings } = useStore();
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [consent, setC] = useState(getConsent());
@@ -39,7 +104,7 @@ export default function PropertyDetails() {
   const rent = useMemo(() => rentalScenario(p), [p]);
   const rental = p.listing === 'rent';
   useEffect(() => { track('listing_view', p.id); const h = () => setEvents(recentEvents()); window.addEventListener('streetkey-track', h); h(); return () => window.removeEventListener('streetkey-track', h); }, [p.id, consent]);
-  const slots = ['Sat 14 Nov 10:00', 'Sat 14 Nov 11:30', 'Mon 16 Nov 17:30', 'Wed 18 Nov 18:00'];
+  const slots = useMemo(() => nextSlots(), []);
   const myViewing = viewings.find((v) => v.propertyId === p.id);
 
   return (
@@ -129,6 +194,7 @@ export default function PropertyDetails() {
         </div>
 
         <div className="stack sticky" style={{ gap: 16 }}>
+          {live ? <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}><EnquiryBox listingRef={p.id} rental={rental} slots={slots} lister={p.agent} /></Section> : <>
           <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}>
             {myViewing ? <div className="callout ok small">Viewing requested for <b>{myViewing.slot}</b>. The agent confirms in the app. (Demo: nothing is sent.)</div> : <>
               <div className="stack" style={{ gap: 6 }}>{slots.map((s) => <label key={s} className="check"><input type="radio" name="slot" checked={slot === s} onChange={() => setSlot(s)} />{s}</label>)}</div>
@@ -141,6 +207,7 @@ export default function PropertyDetails() {
               <button className="btn ghost" style={{ marginTop: 8 }} disabled={!msg.trim()} onClick={() => { setSent(true); track('enquiry', p.id); }}>Send enquiry</button>
             </>}
           </Section>
+          </>}
           <Section title="Your privacy" kicker="What Streetkey records">
             <p className="small">With your consent, Streetkey records anonymous interactions (e.g. photo enlarged, floor plan opened) to give owners <b>aggregated</b> insights. Groups under 10 people are never shown.</p>
             <div className="row" style={{ marginTop: 8 }}>

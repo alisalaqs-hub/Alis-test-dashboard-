@@ -1,5 +1,9 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { api, ApiError, mediaUrl } from '../lib/api';
+import type { PhotoDTO } from '../lib/apiTypes';
+import { useServer } from '../lib/server';
+import { SignIn } from './Account';
 import { areaEvidence, buildListing, complianceChecks, normalisePostcode, POSTCODE_RE, type ListingInput } from '../engine/listings';
 import type { Condition, Era, PropertyType } from '../engine/refurb';
 import type { Property } from '../data/properties';
@@ -10,19 +14,21 @@ import { useStore } from '../store';
 const STEPS = ['Basics', 'Address', 'Details', 'Photos', 'Price', 'Description', 'Review'];
 const FEATURES = ['Garden', 'Parking', 'Garage', 'Balcony', 'Chain free', 'Period features', 'New kitchen', 'En-suite', 'Pets considered', 'Furnished', 'Close to station', 'Loft potential'];
 
-/** Resize an uploaded image in the browser (keeps the prototype's local storage small). */
-function compress(file: File, max = 900): Promise<string> {
+/** Resize an uploaded image in the browser (small for the on-device preview; full size for the live site). */
+function compress(file: File, max = 900, quality = 0.72): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       const s = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
       c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
-      resolve(c.toDataURL('image/jpeg', 0.72)); URL.revokeObjectURL(img.src);
+      resolve(c.toDataURL('image/jpeg', quality)); URL.revokeObjectURL(img.src);
     };
     img.onerror = reject; img.src = URL.createObjectURL(file);
   });
 }
+
+const dataUrlToBlob = (u: string) => { const [head, b64] = u.split(','); const bin = atob(b64); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new Blob([a], { type: head.match(/data:([^;]+)/)?.[1] ?? 'image/jpeg' }); };
 
 function draftDescription(i: ListingInput): string {
   const kind = i.listing === 'rent' ? 'available to rent' : 'for sale';
@@ -38,6 +44,12 @@ function draftDescription(i: ListingInput): string {
 
 export default function ListProperty() {
   const { publishListing, myListings } = useStore();
+  const { online, user, refreshListings } = useServer();
+  const [params] = useSearchParams();
+  const editRef = online ? params.get('edit') : null;
+  const [existing, setExisting] = useState<PhotoDTO[]>([]);
+  const [serverDone, setServerDone] = useState<{ ref: string; status: string } | null>(null);
+  const [serverError, setServerError] = useState<ApiError | null>(null);
   const [step, setStep] = useState(0);
   const [who, setWho] = useState<'owner' | 'landlord' | 'agent'>('owner');
   const [staged, setStaged] = useState(false);
@@ -51,12 +63,25 @@ export default function ListProperty() {
     source: { kind: 'owner', name: 'Private seller', licence: 'Posted by the owner on Streetkey', verified: false },
   });
   const set = <K extends keyof ListingInput>(k: K, v: ListingInput[K]) => setF((x) => ({ ...x, [k]: v }));
+  // Editing a listing on the live site: load it into the form.
+  useEffect(() => {
+    if (!editRef) return;
+    api.listings.get(editRef).then(({ listing: d }) => {
+      setF((x) => ({ ...x, listing: d.channel, title: d.title ?? '', addressLine: d.addressLine, town: d.town, postcode: d.postcode, type: d.type as PropertyType, tenure: d.tenure,
+        leaseYears: d.leaseYears ?? undefined, beds: d.beds, baths: d.baths, floorArea: d.floorArea, era: (d.era ?? x.era) as Era, condition: (d.condition ?? x.condition) as Condition,
+        price: d.price, epc: d.epc ?? '', councilTax: d.councilTax ?? '', serviceChargeAnnual: d.serviceChargeAnnual ?? undefined, groundRentAnnual: d.groundRentAnnual ?? undefined,
+        features: d.features.filter((t) => t !== 'Contains virtually staged images'), description: d.description ?? '', photos: [] }));
+      setStaged(d.features.includes('Contains virtually staged images'));
+      setExisting(d.photos); setDeclared({ owner: true, accurate: true });
+      if (d.source.kind === 'landlord') setWho('landlord');
+    }).catch((e: ApiError) => setServerError(e));
+  }, [editRef]);
   const ev = useMemo(() => (POSTCODE_RE.test(f.postcode) ? areaEvidence(f.postcode) : null), [f.postcode]);
   const condAdj = { good: 0.97, fair: 0.9, poor: 0.8, derelict: 0.68 }[f.condition ?? 'fair'];
   const range = ev ? (f.listing === 'rent'
     ? { low: Math.round((ev.rentPerM2 * f.floorArea * 0.92) / 25) * 25, high: Math.round((ev.rentPerM2 * f.floorArea * 1.08) / 25) * 25 }
     : { low: Math.round((ev.refurbishedPerM2 * f.floorArea * condAdj * 0.92) / 1000) * 1000, high: Math.round((ev.refurbishedPerM2 * f.floorArea * condAdj * 1.08) / 1000) * 1000 }) : null;
-  const checks = complianceChecks({ ...f, description: f.description });
+  const checks = complianceChecks({ ...f, description: f.description, photos: [...existing.map((p) => p.url), ...(f.photos ?? [])] });
   const blocking = checks.filter((c) => !c.ok && c.severity === 'block');
   const canPublish = blocking.length === 0 && declared.owner && declared.accurate;
   const preview = useMemo(() => buildListing({ ...f, id: 'preview' }), [f]);
@@ -76,7 +101,27 @@ export default function ListProperty() {
     } catch { setLookup('Couldn’t reach the postcode service — enter the town manually; we’ll verify the postcode later.'); }
   };
 
+  const publishToServer = async () => {
+    setBusy(true); setServerError(null);
+    try {
+      const features = staged ? [...f.features, 'Contains virtually staged images'] : f.features;
+      const body = {
+        channel: f.listing, title: f.title || null, addressLine: f.addressLine, town: f.town, postcode: f.postcode, type: f.type, tenure: f.tenure,
+        leaseYears: f.tenure === 'leasehold' ? f.leaseYears ?? null : null, beds: f.beds, baths: f.baths, floorArea: f.floorArea, era: f.era ?? null, condition: f.condition ?? null,
+        price: f.price, epc: f.epc || null, councilTax: f.councilTax || null, serviceChargeAnnual: f.serviceChargeAnnual ?? null, groundRentAnnual: f.groundRentAnnual ?? null,
+        features, description: f.description || draftDescription(f), ownershipDeclared: declared.owner,
+      };
+      const r = editRef ? await api.listings.update(editRef, body) : await api.listings.create(body);
+      const ref = r.listing.ref;
+      if (f.photos?.length) await api.listings.uploadPhotos(ref, f.photos.map(dataUrlToBlob));
+      const status = ['draft', 'rejected', 'withdrawn'].includes(r.listing.status) ? (await api.listings.submit(ref)).status : r.listing.status;
+      await refreshListings();
+      setServerDone({ ref, status });
+    } catch (e) { setServerError(e instanceof ApiError ? e : new ApiError(0, 'Something went wrong.')); } finally { setBusy(false); }
+  };
+
   const publish = () => {
+    if (online) { void publishToServer(); return; }
     const p = buildListing({ ...f, description: f.description || draftDescription(f), features: staged ? [...f.features, 'Contains virtually staged images'] : f.features,
       source: { kind: who === 'landlord' ? 'landlord' : 'owner', name: who === 'landlord' ? 'Private landlord' : 'Private seller', licence: 'Posted by the owner on Streetkey', verified: false } });
     publishListing(p); setDone(p);
@@ -86,7 +131,20 @@ export default function ListProperty() {
     <div className="stack" style={{ gap: 16, maxWidth: 720 }}>
       <h2>Agents: connect your CRM instead</h2>
       <p className="muted">You don’t need to retype listings. Add Streetkey as a portal destination in your CRM (BLM or API feed) and every listing, price change and status update flows in automatically.</p>
-      <div className="row"><Link to="/sources" className="btn">Connect a listing feed</Link><button className="btn ghost" onClick={() => setWho('owner')}>I’m a private seller or landlord</button></div>
+      <div className="row"><Link to={online ? '/account/agency' : '/sources'} className="btn">Connect a listing feed</Link><button className="btn ghost" onClick={() => setWho('owner')}>I’m a private seller or landlord</button></div>
+    </div>
+  );
+
+  if (serverDone) return (
+    <div className="stack" style={{ gap: 16, maxWidth: 720 }}>
+      {serverDone.status === 'live'
+        ? <div className="callout ok" role="status"><b>Your listing is live on Streetkey.</b> It now appears in search with a full intelligence profile.</div>
+        : <div className="callout ok" role="status"><b>Thanks, your listing has been sent for review.</b> We check every private listing before it goes live, usually within a working day, and we’ll email you as soon as it’s published.</div>}
+      <div className="row">
+        {serverDone.status === 'live' && <Link to={`/property/${serverDone.ref}`} className="btn">View my listing</Link>}
+        <Link to="/account/listings" className="btn ghost">Manage my listings</Link>
+        <Link to="/account/inbox" className="btn ghost">Inbox</Link>
+      </div>
     </div>
   );
 
@@ -156,9 +214,13 @@ export default function ListProperty() {
           </>}
           {step === 3 && <>
             <h3>Photos</h3>
+            {existing.length > 0 && <div className="photo-grid">{existing.map((p, i) => (
+              <div key={p.id} className="photo-item"><img src={mediaUrl(p.url)} alt={p.alt ?? `Photo ${i + 1}`} />{i === 0 && <span className="cap-lead">Lead</span>}
+                <div className="row photo-actions"><button className="btn ghost sm" onClick={() => { if (editRef) void api.listings.deletePhoto(editRef, p.id).then(() => setExisting((x) => x.filter((y) => y.id !== p.id))); }}>Remove</button></div>
+              </div>))}</div>}
             <label className="dropzone" style={{ display: 'block' }}>
-              <input type="file" accept="image/*" multiple hidden onChange={async (e) => { const files = [...(e.target.files ?? [])].slice(0, 10 - (f.photos?.length ?? 0)); setBusy(true); try { const imgs = await Promise.all(files.map((x) => compress(x))); set('photos', [...(f.photos ?? []), ...imgs]); } finally { setBusy(false); } }} />
-              <Icon name="home" /> {busy ? 'Processing…' : 'Tap to add photos (up to 10). The first photo is your lead image.'}
+              <input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={async (e) => { const files = [...(e.target.files ?? [])].slice(0, (online ? 30 : 10) - (f.photos?.length ?? 0) - existing.length); setBusy(true); try { const imgs = await Promise.all(files.map((x) => (online ? compress(x, 2000, 0.85) : compress(x)))); set('photos', [...(f.photos ?? []), ...imgs]); } finally { setBusy(false); } }} />
+              <Icon name="home" /> {busy ? 'Processing…' : `Tap to add photos (up to ${online ? 30 : 10}). The first photo is your lead image.`}
             </label>
             {(f.photos?.length ?? 0) > 0 && <div className="photo-grid">{f.photos!.map((src, i) => (
               <div key={i} className="photo-item"><img src={src} alt={`Photo ${i + 1}`} />{i === 0 && <span className="cap-lead">Lead</span>}
@@ -188,8 +250,12 @@ export default function ListProperty() {
             <ul className="clean small">{checks.map((c) => <li key={c.id} className="row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}><span>{c.ok ? '✅' : c.severity === 'block' ? '⛔' : '⚠️'}</span><span style={{ color: c.ok ? 'var(--muted)' : undefined }}>{c.message}</span></li>)}</ul>
             <label className="check"><input type="checkbox" checked={declared.owner} onChange={(e) => setDeclared({ ...declared, owner: e.target.checked })} />I own this property or am authorised to {f.listing === 'rent' ? 'let' : 'sell'} it</label>
             <label className="check"><input type="checkbox" checked={declared.accurate} onChange={(e) => setDeclared({ ...declared, accurate: e.target.checked })} />The information is accurate and I’ll keep it up to date</label>
-            <button className="btn accent" disabled={!canPublish} onClick={publish} style={{ opacity: canPublish ? 1 : 0.5 }}>Publish listing</button>
-            {!canPublish && <div className="xs muted">{blocking.length ? `${blocking.length} item${blocking.length > 1 ? 's' : ''} to fix before publishing.` : 'Confirm both declarations to publish.'}</div>}
+            {serverError && <div className="callout" role="alert"><b>{serverError.message}</b>{Object.values(serverError.fields).length > 0 && <ul className="clean small" style={{ marginTop: 6 }}>{Object.values(serverError.fields).map((m) => <li key={m}>• {m}</li>)}</ul>}</div>}
+            {online && !user ? <SignIn heading="Sign in to publish your listing" /> : <>
+              <button className="btn accent" disabled={!canPublish || busy} onClick={publish} style={{ opacity: canPublish ? 1 : 0.5 }}>{busy ? 'Publishing…' : editRef ? 'Save changes' : online ? 'Submit listing' : 'Publish listing'}</button>
+              {!canPublish && <div className="xs muted">{blocking.length ? `${blocking.length} item${blocking.length > 1 ? 's' : ''} to fix before publishing.` : 'Confirm both declarations to publish.'}</div>}
+              {online && canPublish && <div className="xs muted">Private listings are checked by our team before they go live. You’ll get an email when it’s published.</div>}
+            </>}
           </>}
           <div className="row between" style={{ marginTop: 6 }}>
             <button className="btn ghost" disabled={step === 0} onClick={() => setStep(step - 1)} style={{ visibility: step === 0 ? 'hidden' : 'visible' }}>← Back</button>
@@ -200,7 +266,7 @@ export default function ListProperty() {
         <aside className="stack sticky" style={{ gap: 12 }}>
           <div className="eyebrow">Live preview</div>
           <article className="pcard">
-            <div className="pcard-img">{f.photos?.[0] ? <img src={f.photos[0]} alt="Lead" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <HouseArt hue={preview.photoHue} type={f.type} />}</div>
+            <div className="pcard-img">{existing[0] || f.photos?.[0] ? <img src={existing[0] ? mediaUrl(existing[0].url) : f.photos![0]} alt="Lead" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <HouseArt hue={preview.photoHue} type={f.type} />}</div>
             <div className="pcard-body">
               <span className="num" style={{ fontSize: 19 }}>{f.price ? (f.listing === 'rent' ? `${gbp(f.price)} pcm` : gbp(f.price)) : '£ —'}</span>
               <span className="small" style={{ fontWeight: 600 }}>{preview.title}</span>
