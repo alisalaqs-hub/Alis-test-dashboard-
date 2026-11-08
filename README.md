@@ -78,6 +78,7 @@ docs/         strategy & brand · architecture · commercial model · roadmap & 
 4. [Roadmap, go-to-market & next implementation steps](docs/04-roadmap-and-next-steps.md)
 5. [Listing supply: other websites, agent feeds & owner listings (incl. legal position)](docs/05-listing-sources.md)
 6. [Brand system & accessibility (WCAG 2.2 AA, axe-audited)](docs/06-brand-and-accessibility.md)
+7. [Going live: hosting, domain & launch checklist](docs/07-going-live.md)
 
 ## Caveats
 

@@ -12,6 +12,9 @@ const Prices = lazy(() => import('./pages/Prices'));
 const ListProperty = lazy(() => import('./pages/ListProperty'));
 const ImportListing = lazy(() => import('./pages/ImportListing'));
 const Sources = lazy(() => import('./pages/Sources'));
+const Privacy = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Privacy })));
+const Terms = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Terms })));
+const AccessibilityPage = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Accessibility })));
 const Estimator = lazy(() => import('./pages/Estimator'));
 const Investment = lazy(() => import('./pages/Investment'));
 const Studio = lazy(() => import('./pages/Studio'));
@@ -39,6 +42,9 @@ export default function App() {
         <Route path="list" element={<ListProperty />} />
         <Route path="import" element={<ImportListing />} />
         <Route path="sources" element={<Sources />} />
+        <Route path="privacy" element={<Privacy />} />
+        <Route path="terms" element={<Terms />} />
+        <Route path="accessibility" element={<AccessibilityPage />} />
         <Route path="estimate" element={<Estimator />} />
         <Route path="invest" element={<Investment />} />
         <Route path="studio" element={<Studio />} />

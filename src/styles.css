@@ -27,9 +27,9 @@
   --focus: #5E3BF6;
   --shadow: 0 1px 0 rgba(11, 15, 28, 0.04), 0 12px 32px -16px rgba(11, 15, 28, 0.25);
   --radius: 14px;
-  --display: 'Montserrat', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --display: 'Montserrat Variable', 'Montserrat', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --serif: var(--display);
-  --sans: 'Montserrat', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sans: 'Montserrat Variable', 'Montserrat', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   color-scheme: light;
 }
@@ -525,7 +525,7 @@ main.home-main { padding-top: 0; }
 .bxl-frame { position: relative; width: 100%; margin: 0 auto; aspect-ratio: 3 / 2; overflow: hidden; border-radius: 18px; border: 1px solid #DDE1E8; box-shadow: var(--shadow); }
 .bxl-stage { position: absolute; left: 0; top: 0; width: 1200px; height: 800px; transform-origin: 0 0; overflow: hidden; touch-action: pan-y; cursor: crosshair;
   background-color: #F6F7F9; background-image: linear-gradient(#E6E9EF 1px, transparent 1px), linear-gradient(90deg, #E6E9EF 1px, transparent 1px); background-size: 40px 40px;
-  font-family: 'Montserrat', system-ui, sans-serif; color: #0B0F1C; }
+  font-family: 'Montserrat Variable', 'Montserrat', system-ui, sans-serif; color: #0B0F1C; }
 .bxl-layer { position: absolute; inset: 0; }
 .bxl-lockup { position: absolute; left: 177px; top: 270px; display: flex; align-items: flex-end; gap: 27px; }
 .bxl-lockup svg { display: block; flex: none; }
@@ -545,7 +545,7 @@ main.home-main { padding-top: 0; }
 .bxl-ring .v { position: absolute; left: 50%; top: 50%; width: 2px; height: 22px; margin: -11px 0 0 -1px; background: #F07415; }
 .bxl-ring .tag { position: absolute; left: 50%; top: -13px; transform: translateX(-50%); padding: 4px 8px; border-radius: 4px; background: #F07415; color: #0B0F1C; font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.12em; white-space: nowrap; }
 .bxl-chrome { position: absolute; left: 56px; right: 56px; top: 32px; display: flex; justify-content: space-between; gap: 24px; pointer-events: none; font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.14em; transition: color 300ms ease; }
-.bxl-btn { position: absolute; left: 56px; bottom: 36px; display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 22px; border: 0; border-radius: 10px; font: 700 16px 'Montserrat', system-ui, sans-serif; cursor: pointer; transition: background-color 300ms ease, color 300ms ease; }
+.bxl-btn { position: absolute; left: 56px; bottom: 36px; display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 22px; border: 0; border-radius: 10px; font: 700 16px 'Montserrat Variable', 'Montserrat', system-ui, sans-serif; cursor: pointer; transition: background-color 300ms ease, color 300ms ease; }
 .bxl-btn:focus-visible { outline: 3px solid #5E3BF6; outline-offset: 4px; }
 .bxl-under { display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; }
 @container (max-width: 600px) {
@@ -558,3 +558,16 @@ main.home-main { padding-top: 0; }
 @media (max-width: 900px) { .xr-section { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
 .hero-xray { min-width: 0; }
 @media (min-width: 961px) { .home-hero-inner { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 32px; max-width: 1320px; } }
+
+/* Public preview notice */
+.preview-bar { background: var(--ink); color: var(--paper); font-size: 12.5px; }
+.preview-bar > div { max-width: 1320px; margin: 0 auto; padding: 7px 16px; display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; text-align: center; }
+.preview-bar b { font-family: var(--mono); letter-spacing: .12em; font-size: 11px; color: var(--accent); }
+.preview-bar a { color: inherit; }
+.legal { max-width: 760px; }
+.legal h2 { margin: 28px 0 8px; font-size: 1.25rem; }
+.legal p, .legal li { line-height: 1.65; }
+footer.site nav { display: flex; gap: 14px; flex-wrap: wrap; }
+footer.site nav a { color: var(--ink-2); }
+.preview-bar { background: #0B0F1C; color: #F6F7F9; }
+.preview-bar b { color: #FF9A4D; }

@@ -3,7 +3,7 @@
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const path = require('path');
 const AXE = path.resolve('node_modules/axe-core/axe.min.js');
-const routes = ['', 'search?q=Croydon', 'property/wal-001', 'property/wal-001/intelligence', 'my-home', 'prices?q=Croydon', 'list', 'import', 'sources', 'studio', 'estimate', 'invest', 'owner', 'agents', 'landlord', 'developer', 'marketplace', 'automation', 'enterprise', 'compare', 'saved'];
+const routes = ['', 'search?q=Croydon', 'property/wal-001', 'property/wal-001/intelligence', 'my-home', 'prices?q=Croydon', 'list', 'import', 'sources', 'studio', 'estimate', 'invest', 'owner', 'agents', 'landlord', 'developer', 'marketplace', 'automation', 'enterprise', 'compare', 'saved', 'privacy', 'terms', 'accessibility', 'list', 'import', 'sources'];
 (async () => {
   const b = await chromium.launch();
   const summary = {};

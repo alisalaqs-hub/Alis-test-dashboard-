@@ -49,6 +49,7 @@ export default function Layout() {
   return (
     <>
       <a href="#main" className="skip-link" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to main content</a>
+      <div className="preview-bar" role="note"><div><b>PUBLIC PREVIEW</b><span>Listings and figures are demonstration data. Estimates are not advice.</span><Link to="/terms">Terms</Link></div></div>
       <header className="topbar">
         <div className="topbar-inner">
           <Link to="/" className="logo" aria-label="Brixo home"><BrixoWordmark /></Link>
@@ -66,8 +67,8 @@ export default function Layout() {
       <main id="main" tabIndex={-1} className={isHome ? 'home-main' : undefined}><Outlet /></main>
 
       <footer className="site"><div>
-        <span className="row" style={{ gap: 10 }}><BrixoMark size={22} /> <span><b>Brixo</b> — See Beyond the Property. Prototype v0.4 · listings and figures are demonstration data.</span></span>
-        <span>Not regulated financial, tax, legal, planning, valuation or surveying advice.</span>
+        <span className="row" style={{ gap: 10 }}><BrixoMark size={22} /> <span><b>Brixo</b> — See Beyond the Property. Public preview · listings and figures are demonstration data.</span></span>
+        <nav aria-label="Legal"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/accessibility">Accessibility</Link><Link to="/sources">Listing feeds</Link></nav>
       </div></footer>
 
       <nav className="tabbar" aria-label="App">
