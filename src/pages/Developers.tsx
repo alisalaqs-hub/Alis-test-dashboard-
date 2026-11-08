@@ -3,15 +3,25 @@ import { DEFAULT_INPUT, estimateRefurb, type Spec } from '../engine/refurb';
 import { gbp, gbpK, Section, Seg, Stat, Tag } from '../components/ui';
 
 const ENDPOINTS = [
+  { m: 'POST', p: '/v1/search', d: 'AI property search: natural language → structured query → ranked, explained results', unit: '£0.02', status: 'Phase 2' },
+  { m: 'POST', p: '/v1/chat/sessions', d: 'Grounded property assistant (tool-calling over the engines)', unit: '£0.03/turn', status: 'Phase 2' },
   { m: 'POST', p: '/v1/estimates/refurbishment', d: 'Trade/room-level refurb estimate with BoQ, ranges & assumptions', unit: '£0.40', status: 'MVP' },
-  { m: 'POST', p: '/v1/analysis/investment', d: 'BTL / BRRR / flip / HMO underwriting incl. SDLT/LTT/LBTT, ICR', unit: '£0.25', status: 'MVP' },
-  { m: 'GET', p: '/v1/tax/transaction', d: 'SDLT, LTT, LBTT + ADS with band breakdown & rate-table version', unit: '£0.02', status: 'MVP' },
-  { m: 'POST', p: '/v1/valuations/rental', d: 'Rental estimate with comparables & confidence', unit: '£0.30', status: 'Phase 2' },
-  { m: 'GET', p: '/v1/properties/{uprn}/constraints', d: 'Flood, conservation, Article 4, listed, planning history', unit: '£0.35', status: 'Phase 2' },
-  { m: 'POST', p: '/v1/development/potential', d: 'Loft / extension / conversion feasibility (non-binding)', unit: '£0.60', status: 'Phase 3' },
-  { m: 'POST', p: '/v1/chat/sessions', d: 'Grounded property assistant (tool-calling over the above)', unit: '£0.03/turn', status: 'Phase 3' },
-  { m: 'GET', p: '/v1/portfolios/{id}/analytics', d: 'Portfolio yield, compliance, risk & refinance windows', unit: 'Seat', status: 'Phase 3' },
+  { m: 'POST', p: '/v1/designs', d: 'Interior design concept + material & labour schedule (image via partner model)', unit: '£0.60', status: 'MVP' },
+  { m: 'POST', p: '/v1/analysis/investment', d: 'BTL / BRRR / flip / HMO / commercial underwriting incl. SDLT/LTT/LBTT', unit: '£0.25', status: 'MVP' },
+  { m: 'GET', p: '/v1/listings/{id}/engagement', d: 'Aggregated engagement analytics & evidence-based insights (k ≥ 10)', unit: 'Seat', status: 'Phase 2' },
+  { m: 'GET', p: '/v1/listings/{id}/reports/weekly', d: 'Owner performance report (Markdown / PDF / JSON)', unit: '£0.15', status: 'Phase 2' },
+  { m: 'GET', p: '/v1/properties/{uprn}/valuation-scenarios', d: 'As-is / post-works ranges from comparables (not RICS)', unit: '£0.30', status: 'Phase 2' },
+  { m: 'GET', p: '/v1/properties/{uprn}/development', d: 'Loft / extension / subdivision / Class MA screening', unit: '£0.60', status: 'Phase 3' },
+  { m: 'GET', p: '/v1/tax/transaction', d: 'SDLT, LTT, LBTT + ADS, residential & non-residential', unit: '£0.02', status: 'MVP' },
 ];
+const WIDGETS = ['AI property search', 'AI property chat', 'Refurbishment estimate', 'Interior design visualiser', 'Investment analysis', 'Listing engagement analytics', 'Owner performance report', 'Valuation scenarios', 'Development intelligence'];
+const PLANS = [
+  { name: 'Starter', price: '£0 + usage', who: 'Developers & small agents', items: ['Sandbox + 1k free calls/mo', '2 widgets, BRIXO-branded', 'Community support'] },
+  { name: 'Growth', price: '£499/mo + usage', who: 'Agencies, lenders, proptechs', items: ['All widgets, custom branding', 'Webhooks, 50 req/s', 'Engagement analytics API', 'Email support, 99.9% SLA'] },
+  { name: 'Enterprise', price: 'From £50k/yr', who: 'Portals, banks, BTR operators', items: ['Full white-label & SSO (SAML)', 'Dedicated tenancy / UK data residency', 'Bulk data & custom models', '99.95% SLA, named CSM'] },
+];
+const ROLES = [['Tenant admin', 'All', 'All', 'All', 'Yes'], ['Branch manager', 'Branch', 'Branch', 'Approve', 'No'], ['Negotiator', 'Assigned', 'Assigned', 'Draft only', 'No'], ['Analyst (read-only)', 'All (aggregate)', '—', '—', 'No'], ['API key (server)', 'Scoped', 'Scoped', '—', 'Scoped']];
+
 
 const USAGE = [3.1, 3.4, 3.2, 4.0, 4.4, 4.1, 5.0, 5.6, 5.2, 6.3, 6.9, 7.4, 7.1, 8.2];
 
@@ -24,13 +34,13 @@ export default function Developers() {
   const est = useMemo(() => estimateRefurb({ ...DEFAULT_INPUT, postcode: pc, floorArea: area, spec }), [area, spec, pc]);
   const req = { postcode: pc, property_type: 'terraced', floor_area_m2: area, era: 'pre-1919', condition: 'poor', spec, scope: { preset: 'full_refurbishment' } };
   const res = { id: 'est_01JDEMO8Q', pricing_basis: est.basis, region: est.region, total_inc_vat: est.total, range: { low: est.low, high: est.high }, confidence: est.confidence, cost_per_m2_ex_vat: est.costPerM2, by_trade: est.byTrade.slice(0, 3).map((t) => ({ trade: t.trade, total: t.total })), '…': '', disclaimer: 'Indicative budget estimate; not a quotation.' };
-  const embed = `<script src="https://cdn.plinth.example/widget/v1.js"\n  data-key="pk_live_…"\n  data-widget="refurb-estimate"\n  data-theme='{"brand":"${brand}","radius":12}'\n  data-partner-name="${partner}"></script>`;
+  const embed = `<script src="https://cdn.brixo.example/widget/v1.js"\n  data-key="pk_live_…"\n  data-widget="refurb-estimate"\n  data-theme='{"brand":"${brand}","radius":12}'\n  data-partner-name="${partner}"></script>`;
 
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
-        <div><div className="eyebrow">B2B infrastructure</div><h2 style={{ marginTop: 6 }}>API & white-label console</h2>
-          <p className="muted" style={{ marginTop: 6 }}>The consumer app is the reference client. Partners get the same engines through versioned REST APIs, webhooks and embeddable widgets, isolated per tenant.</p></div>
+        <div><div className="eyebrow">BRIXO API & Enterprise</div><h2 style={{ marginTop: 6 }}>Put BRIXO intelligence inside your product</h2>
+          <p className="muted" style={{ marginTop: 6 }}>Estate agents, lenders, portals and proptechs use the same engines as BRIXO.com — via versioned REST APIs, webhooks and white-label widgets — in an isolated tenant under their own brand.</p></div>
         <div className="row"><Tag kind="demo">Sandbox tenant</Tag><Tag kind="neutral">OpenAPI 3.1 in /docs</Tag></div>
       </div>
 
@@ -48,7 +58,7 @@ export default function Developers() {
             <label className="field">Floor area m²<input className="input num" type="number" value={area} onChange={(e) => setArea(Math.max(20, Number(e.target.value) || 20))} /></label>
             <label className="field">Spec<Seg value={spec} onChange={setSpec} options={[{ value: 'budget', label: 'B' }, { value: 'standard', label: 'S' }, { value: 'premium', label: 'P' }]} /></label>
           </div>
-          <pre className="code" style={{ marginTop: 12 }}>{`curl https://api.plinth.example/v1/estimates/refurbishment \\\n  -H "Authorization: Bearer sk_test_…" \\\n  -H "Idempotency-Key: 8c1e…" \\\n  -d '${JSON.stringify(req)}'`}</pre>
+          <pre className="code" style={{ marginTop: 12 }}>{`curl https://api.brixo.example/v1/estimates/refurbishment \\\n  -H "Authorization: Bearer sk_test_…" \\\n  -H "Idempotency-Key: 8c1e…" \\\n  -d '${JSON.stringify(req)}'`}</pre>
           <pre className="code" style={{ marginTop: 8, maxHeight: 260 }}>{JSON.stringify(res, null, 2)}</pre>
         </Section>
         <Section title="White-label widget" kicker="Embed on any partner site">
@@ -63,10 +73,25 @@ export default function Developers() {
               <div className="num" style={{ fontSize: 30, margin: '4px 0' }}>{gbpK(est.low)} – {gbpK(est.high)}</div>
               <div style={{ fontSize: 12, color: '#666' }}>Most likely {gbp(est.total)} incl. VAT</div>
               <button style={{ marginTop: 10, background: brand, color: '#fff', border: 0, borderRadius: 999, padding: '8px 14px', fontWeight: 600 }}>Get 3 verified quotes</button>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 10 }}>Powered by Plinth · indicative estimate</div>
+              <div style={{ fontSize: 10.5, color: '#888', marginTop: 10 }}>Powered by BRIXO · indicative estimate</div>
             </div>
           </div>
           <pre className="code" style={{ marginTop: 12 }}>{embed}</pre>
+        </Section>
+      </div>
+
+      <div className="grid g3">
+        {PLANS.map((p) => <div key={p.name} className="card"><div className="eyebrow">{p.who}</div><h3 style={{ marginTop: 6 }}>{p.name}</h3><div className="num" style={{ fontSize: 20, margin: '6px 0' }}>{p.price}</div><ul className="ticks small">{p.items.map((i) => <li key={i}>{i}</li>)}</ul></div>)}
+      </div>
+      <div className="grid g2">
+        <Section title="Embeddable widgets" kicker="White-label catalogue">
+          <ul className="clean small">{WIDGETS.map((w, i) => <li key={w} className="row between"><span>{w}</span><Tag kind={i === 2 ? 'ok' : 'neutral'}>{i === 2 ? 'Live preview above' : 'Prototype in app'}</Tag></li>)}</ul>
+          <p className="xs muted" style={{ marginTop: 8 }}>Each widget renders in an isolated iframe/shadow DOM with the partner’s colours, fonts and logo; calculations run server-side for metering and consistency.</p>
+        </Section>
+        <Section title="Users & permissions" kicker="Per tenant RBAC">
+          <div className="table-wrap"><table className="t"><thead><tr><th>Role</th><th>Listings</th><th>Engagement</th><th>Publishing</th><th>Billing</th></tr></thead>
+            <tbody>{ROLES.map((r) => <tr key={r[0]}>{r.map((c, i) => <td key={i} className={i ? 'small' : ''}>{i ? c : <b className="small">{c}</b>}</td>)}</tr>)}</tbody></table></div>
+          <p className="xs muted" style={{ marginTop: 8 }}>Row-level security isolates every tenant’s data; partners never see other tenants’ engagement or users.</p>
         </Section>
       </div>
 

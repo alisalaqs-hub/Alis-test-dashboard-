@@ -1,11 +1,11 @@
 /**
- * Plinth Refurbishment Cost Engine — v0.1 (deterministic).
+ * BRIXO Refurbishment Cost Engine — v0.1 (deterministic).
  *
  * Structure mirrors how a UK quantity surveyor builds an elemental estimate:
  *   measured works (quantity × unit rate × spec × regional × condition/age/access)
  *   + preliminaries + overheads & profit + contingency + professional fees + VAT.
  *
- * IMPORTANT: unit rates in RATE_LIBRARY are Plinth demonstration rates
+ * IMPORTANT: unit rates in RATE_LIBRARY are BRIXO demonstration rates
  * compiled for prototyping (UK national average, Q4 2026 basis). They are
  * NOT BCIS, Spon's or any licensed price book. Production replaces this
  * table with a versioned rate library calibrated from verified contractor
@@ -13,7 +13,7 @@
  */
 
 export const PRICING_BASIS = {
-  version: 'plinth-demo-rates-0.1',
+  version: 'brixo-demo-rates-0.1',
   basisDate: '2026-11-01',
   source: 'Demonstration rates (national average). Not calibrated against verified quotations.',
 };
@@ -21,7 +21,7 @@ export const PRICING_BASIS = {
 export type Spec = 'budget' | 'standard' | 'premium';
 export type Condition = 'good' | 'fair' | 'poor' | 'derelict';
 export type Era = 'pre-1919' | '1919-1944' | '1945-1979' | '1980-1999' | '2000+';
-export type PropertyType = 'terraced' | 'semi-detached' | 'detached' | 'flat' | 'bungalow';
+export type PropertyType = 'terraced' | 'semi-detached' | 'detached' | 'flat' | 'bungalow' | 'commercial';
 export type Access = 'easy' | 'restricted' | 'difficult';
 
 export type RegionKey =
@@ -76,7 +76,7 @@ export type Trade =
   | 'Strip-out & waste' | 'Structural' | 'Roofing' | 'Windows & doors' | 'Plastering'
   | 'Electrical' | 'Plumbing & heating' | 'Kitchen' | 'Bathroom' | 'Joinery'
   | 'Flooring' | 'Decoration' | 'External works' | 'Damp & timber' | 'Extension' | 'Loft conversion'
-  | 'Energy & insulation';
+  | 'Energy & insulation' | 'Groundworks' | 'Commercial fit-out' | 'Conversion';
 
 export interface RateItem {
   code: string;
@@ -119,6 +119,10 @@ export const RATE_LIBRARY: Record<string, RateItem> = {
   LANDSCAPE: { code: 'LANDSCAPE', trade: 'External works', description: 'Rear garden: patio, turf, fencing', unit: 'm²', rate: 61, labour: 0.6 },
   EXTENSION: { code: 'EXTENSION', trade: 'Extension', description: 'Single-storey rear extension shell & fit-out (excl. kitchen)', unit: 'm²', rate: 1_950, labour: 0.5, specMultipliers: { budget: 0.85, standard: 1, premium: 1.35 } },
   LOFT: { code: 'LOFT', trade: 'Loft conversion', description: 'Rear dormer loft conversion incl. stairs, fire strategy, shower room', unit: 'm²', rate: 1_250, labour: 0.55, specMultipliers: { budget: 0.88, standard: 1, premium: 1.3 } },
+  GROUND: { code: 'GROUND', trade: 'Groundworks', description: 'Groundworks: excavation, drainage connections, hardstanding', unit: 'm²', rate: 140, labour: 0.6 },
+  CAT_A: { code: 'CAT_A', trade: 'Commercial fit-out', description: 'Cat A office fit-out: raised floor, suspended ceiling, LED lighting, M&E distribution', unit: 'm²', rate: 520, labour: 0.5, specMultipliers: { budget: 0.85, standard: 1, premium: 1.3 } },
+  CAT_B: { code: 'CAT_B', trade: 'Commercial fit-out', description: 'Cat B fit-out: partitions, finishes, kitchenette, furniture & AV', unit: 'm²', rate: 640, labour: 0.45, specMultipliers: { budget: 0.75, standard: 1, premium: 1.6 } },
+  O2R: { code: 'O2R', trade: 'Conversion', description: 'Office-to-residential: strip-out, new partitions, compartmentation, M&E, kitchens & bathrooms per flat', unit: 'm²', rate: 1_150, labour: 0.5, specMultipliers: { budget: 0.88, standard: 1, premium: 1.25 } },
   INSULATION: { code: 'INSULATION', trade: 'Energy & insulation', description: 'Loft insulation to 270mm + draught-proofing', unit: 'm²', rate: 13, labour: 0.5 },
   IWI: { code: 'IWI', trade: 'Energy & insulation', description: 'Internal wall insulation to solid external walls', unit: 'm²', rate: 97, labour: 0.55 },
 };
@@ -166,6 +170,9 @@ export interface RefurbInput {
     insulation: boolean;
     solidWallInsulation: boolean;
     ensuites: number;
+    groundworksArea?: number;
+    fitOut?: 'none' | 'cat-a' | 'cat-a+b';
+    officeToResiArea?: number;
   };
   vat: VatTreatment;
   includeProfessionalFees: boolean;
@@ -184,6 +191,8 @@ export interface EstimateLine {
 
 export interface Estimate {
   lines: EstimateLine[];
+  labourAllowance: number;
+  materialsAllowance: number;
   byTrade: { trade: Trade; total: number }[];
   measuredWorks: number;
   preliminaries: number;
@@ -217,7 +226,7 @@ export function deriveQuantities(i: RefurbInput) {
   const internalWallArea = i.floorArea * 2.6; // wall area to both faces, rule of thumb
   const plasterArea = internalWallArea + i.floorArea; // walls + ceilings
   const windows = Math.max(4, Math.round(i.floorArea / 11));
-  const pitchFactor = i.propertyType === 'flat' ? 0 : i.propertyType === 'bungalow' ? 1.35 : 1.25;
+  const pitchFactor = i.propertyType === 'flat' ? 0 : i.propertyType === 'commercial' ? 1.02 : i.propertyType === 'bungalow' ? 1.35 : 1.25;
   const roofArea = footprint * pitchFactor;
   const externalWallArea = perimeter * storeyHeight * i.storeys * (i.propertyType === 'terraced' ? 0.45 : i.propertyType === 'semi-detached' ? 0.72 : i.propertyType === 'flat' ? 0.35 : 1);
   return {
@@ -274,10 +283,13 @@ export function estimateRefurb(i: RefurbInput): Estimate {
   if (s.loftArea > 0) add('LOFT', s.loftArea, 'User input', { conditionSensitive: false });
   if (s.insulation) add('INSULATION', q.footprint, 'Footprint', { conditionSensitive: false, eraSensitive: false });
   if (s.solidWallInsulation) add('IWI', q.externalWallArea, 'Est. exposed external wall', { conditionSensitive: false });
+  if (s.groundworksArea) add('GROUND', s.groundworksArea, 'User input', { conditionSensitive: false, eraSensitive: false });
+  if (s.fitOut && s.fitOut !== 'none') { add('CAT_A', i.floorArea * 0.85, 'NIA ≈ 85% of GIA', { eraSensitive: false }); if (s.fitOut === 'cat-a+b') add('CAT_B', i.floorArea * 0.85, 'NIA ≈ 85% of GIA', { conditionSensitive: false, eraSensitive: false }); }
+  if (s.officeToResiArea) add('O2R', s.officeToResiArea, 'User input (GIA converted)', { eraSensitive: false });
 
   const measuredWorks = lines.reduce((t, l) => t + l.total, 0);
-  const hasMajor = s.extensionArea > 0 || s.loftArea > 0 || s.structuralOpenings > 0;
-  const hasNewSpace = s.extensionArea > 0 || s.loftArea > 0;
+  const hasMajor = s.extensionArea > 0 || s.loftArea > 0 || s.structuralOpenings > 0 || !!s.officeToResiArea;
+  const hasNewSpace = s.extensionArea > 0 || s.loftArea > 0 || !!s.officeToResiArea;
   const prelimRate = (i.access === 'difficult' ? 0.14 : 0.11) + (hasMajor ? 0.02 : 0);
   const preliminaries = measuredWorks * prelimRate;
   const ohpRate = 0.12;
@@ -331,8 +343,9 @@ export function estimateRefurb(i: RefurbInput): Estimate {
     'Principal Designer/Contractor duties under CDM 2015 apply (domestic client duties pass to contractor).',
   ].filter(Boolean);
 
+  const labourAllowance = round(lines.reduce((t, l) => t + l.total * RATE_LIBRARY[l.code].labour, 0));
   return {
-    lines, byTrade,
+    lines, byTrade, labourAllowance, materialsAllowance: round(measuredWorks - labourAllowance),
     measuredWorks: round(measuredWorks), preliminaries: round(preliminaries), overheadsProfit: round(overheadsProfit),
     contingency: round(contingency), professionalFees: round(professionalFees), subtotalExVat: round(subtotalExVat),
     vat: round(vat), total: round(total, 100),
@@ -369,7 +382,7 @@ export function boqCsv(e: Estimate): string {
 
 export interface ContractorQuote { contractor: string; lines: Partial<Record<Trade, number>>; programmeWeeks: number; verified: boolean }
 
-/** Compare quotes against the Plinth benchmark trade-by-trade; flag outliers > ±25%. */
+/** Compare quotes against the BRIXO benchmark trade-by-trade; flag outliers > ±25%. */
 export function compareQuotes(e: Estimate, quotes: ContractorQuote[]) {
   return quotes.map((q) => {
     const rows = e.byTrade.map(({ trade, total }) => {
@@ -388,3 +401,18 @@ export const DEFAULT_INPUT: RefurbInput = {
   scope: { stripOut: true, rewire: true, heating: 'full', replaster: 'full', kitchen: true, windows: true, roof: 'repair', flooring: true, decoration: true, damp: true, external: true, structuralOpenings: 1, extensionArea: 0, loftArea: 0, insulation: true, solidWallInsulation: false, ensuites: 0 },
   vat: 'standard', includeProfessionalFees: true,
 };
+
+/** Hidden-defect risk register — what commonly emerges on opening up, by era/condition/type. */
+export function hiddenDefectRisks(i: RefurbInput): { risk: string; likelihood: 'low' | 'medium' | 'high'; allowance: string }[] {
+  const out: { risk: string; likelihood: 'low' | 'medium' | 'high'; allowance: string }[] = [];
+  const old = i.era === 'pre-1919' || i.era === '1919-1944';
+  if (i.era !== '2000+') out.push({ risk: 'Asbestos-containing materials (textured coatings, floor tiles, boxing)', likelihood: i.era === '1945-1979' ? 'high' : 'medium', allowance: '£1.5k–£8k removal after R&D survey' });
+  if (old) out.push({ risk: 'Timber decay to joists / suspended floors', likelihood: i.condition === 'poor' || i.condition === 'derelict' ? 'high' : 'medium', allowance: '£2k–£10k' });
+  if (old) out.push({ risk: 'Lead water supply pipe', likelihood: 'medium', allowance: '£1k–£3k (water company may share cost)' });
+  if (old) out.push({ risk: 'Lintel / bay movement, failed wall ties', likelihood: i.condition === 'poor' ? 'medium' : 'low', allowance: '£1.5k–£6k' });
+  out.push({ risk: 'Drainage defects (collapsed/root-infested runs)', likelihood: old ? 'medium' : 'low', allowance: '£1k–£5k — CCTV drain survey £250' });
+  if (i.scope.rewire === false && i.era !== '2000+') out.push({ risk: 'Unsafe existing wiring found during works', likelihood: 'medium', allowance: '£2k–£6k' });
+  if (i.propertyType === 'flat' || i.propertyType === 'commercial') out.push({ risk: 'Fire-stopping & compartmentation deficiencies', likelihood: 'medium', allowance: '£2k–£15k+' });
+  if (i.scope.loftArea > 0) out.push({ risk: 'Roof structure needs strengthening beyond design', likelihood: 'medium', allowance: '£2k–£6k' });
+  return out;
+}

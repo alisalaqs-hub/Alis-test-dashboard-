@@ -1,108 +1,132 @@
-# Plinth — Product Strategy
+# BRIXO — Product Strategy, Brand & Information Architecture
 
-> **plinth** /plɪnθ/ — the base course a building stands on.
-> *The intelligence layer beneath every property decision.*
+> **BRIXO** · The Intelligent Property Platform · *See Beyond the Property.*
 
-## 1. Brand identity
+## 1. The strongest unique selling proposition
+
+**Portals show you the property. BRIXO shows you what it could become — and proves it with numbers.**
+
+Every property on BRIXO carries a living intelligence profile that connects five things no UK portal joins up:
+
+| Lens | Question it answers | Engine |
+|---|---|---|
+| Value | Is it fairly priced? What's it worth after works? | Comparable-based valuation scenarios (`engine/valuation.ts`) |
+| Cost | What will the work really cost here? | Regional refurbishment cost engine (`engine/refurb.ts`) |
+| Design | What could it look like — and what does *that* cost? | Design-to-cost studio (`engine/design.ts`) |
+| Return | Is it a good investment under stress? | Investment underwriter (`engine/investment.ts`, `tax.ts`) |
+| Market response | How are buyers actually reacting to it? | Engagement engine (`engine/engagement.ts`) |
+
+The flywheel: consumers explore costs and designs → owners and agents see *aggregated* evidence of what buyers care about → they commission works and quotes through BRIXO → **verified quotes and outcomes recalibrate the cost engine** → estimates get better → more professionals embed BRIXO via API.
+
+**Why this beats "more data":** collecting clicks is not defensible — every portal has clicks. What is defensible is *verified cost and outcome data* tied to properties (quote → invoice → resale/rent), plus integrations that make BRIXO part of agents' and lenders' daily workflow.
+
+### Challenges to the brief (and how we answer them)
+
+1. **"Compete with portals" is a year-3+ goal, not a launch tactic.** Rightmove's moat is agent listing supply. BRIXO wins first as the intelligence layer *on top of* any listing (paste a listing, enter an address, or embed in an agent's site), then attracts listings because BRIXO listings convert better.
+2. **Engagement analytics are only valuable if trusted.** We separate *observed* counts from *inferred* interpretation and *recommendations*, show confidence intervals, and suppress small groups (k ≥ 10). We never treat a photo view as purchase intent.
+3. **AI must not fabricate.** LLMs route, read and explain; deterministic engines produce every number. Answers carry evidence, assumptions and "verify before relying" items.
+4. **Valuation, planning, mortgage and tenant decisions are regulated or high-stakes.** BRIXO screens and explains; RICS valuers, planners, FCA-regulated brokers and humans decide.
+5. **Interior design images are marketing, not engineering.** Every concept is labelled; virtual staging is watermarked (consumer protection: misleading-images risk under the DMCC Act 2024 / CPRs).
+
+## 2. Brand identity
 
 | Element | Choice | Rationale |
 |---|---|---|
-| Name | **Plinth** | A real construction term (the plinth course), short, ownable, and it says "foundation" — what we want to be for other property businesses. Check UKIPO class 9/36/37/42 and domain availability before committing. Alternatives shortlisted: *Groundwork*, *Keystone* (crowded), *Fabric*. |
-| Line | "Don't search for a house. Search for the deal inside it." | Positions against listing portals without naming them. |
-| B2B line | "The intelligence layer beneath every property decision." | Infrastructure framing for API/white-label. |
-| Visual | Warm paper (#F4F1EA), ink (#12161B), brick accent (#B4462A), sage for positive values. Fraunces (display serif) + Inter Tight (UI) + JetBrains Mono (all numbers). | Feels like a financial terminal crossed with an architect's drawing set, not a portal. Monospaced numbers signal "calculated, not marketed". |
-| Voice | Plain British English, candid. Says "none of these meet your target" when true. | Trust is the product. |
-| Labelling system | `Demo data` · `Estimate` · `AI-generated` · `Verified` · `Needs live integration` | Every number on screen carries its provenance. |
+| Name | **BRIXO** | Bricks + X (the unknown, the multiplier) + O (the lens). Short, global, pronounceable. *Check UKIPO/EUIPO classes 9, 35, 36, 37, 42 and domains before launch.* |
+| Mark | Rounded obsidian block with brick courses and a **signal-orange lens** | "See beyond the property": the lens looks through the building. |
+| Wordmark | `BRIX` + an orange ring for the **O** | The lens again; works at favicon size. |
+| Colour | Obsidian `#0B0D12`, Paper `#F6F5F1`, **Signal orange** `#FF5A1F` (brand/action), **Insight violet** `#6B4EFF` (reserved for AI output), **Verified teal** `#0F7B6C` (verified/positive) | Colour carries meaning: violet always means "AI said this", teal means verified. |
+| Type | **Sora** (display), **Inter** (UI), **JetBrains Mono** (every number) | Tech-company feel; monospaced figures signal *calculated, not marketed*. |
+| Voice | Plain British English, specific, candid ("none of these meet your target — here's what would need to be true") | Trust is the product. |
+| Provenance labels | `Demo data` · `Estimate` · `AI` · `Observed` · `Inferred` · `Recommendation` · `Verified` · `Needs live integration` | Every figure declares where it came from. |
 
-## 2. The unique proposition
+Implementation: `src/components/Brand.tsx`, tokens in `src/styles.css` (light + dark themes).
 
-Portals (Rightmove, Zoopla, OnTheMarket) monetise **attention on listings**: agents pay to be seen. Nobody in the UK consumer market prices the **work** — what it will cost to make a property right, and whether the result is worth it. That decision happens in spreadsheets, builder guesswork and forum threads.
+## 3. Information architecture
 
-**Plinth sells underwritten property, not listed property.** Every property is accompanied by:
+```
+BRIXO
+├── Consumer (simple)
+│   ├── Home ─ AI search, four lenses, connected journey
+│   ├── Search ─ conversational query + filters + map + save/compare
+│   ├── Property listing ─ gallery, floor plan, documents, viewing, contact, privacy
+│   │   └── Intelligence profile ─ value · cost · development · market response · knowledge graph · AI Q&A
+│   ├── Design Studio ─ style/budget brief → concept → schedule → quotes / investment
+│   ├── Refurb Costs ─ regional estimator, BoQ, defect risks
+│   ├── Invest ─ BTL · BRRR · flip · HMO · commercial; scenarios; break-evens
+│   ├── Compare · Saved
+│
+├── Professionals (sophisticated)
+│   ├── Owner dashboard ─ engagement, insights, owner AI, weekly report
+│   ├── Agent command centre ─ portfolio analytics, approvals, AI reports & copy
+│   ├── Landlord management ─ compliance, maintenance, applications, landlord AI
+│   ├── Developer intelligence ─ unit-mix demand, residual appraisal, opportunities
+│   ├── Contractor marketplace ─ standard scopes, benchmarked quotes, milestones
+│   ├── AI agents ─ 8 role agents, permissions, approval queue, audit log
+│   └── API & Enterprise ─ endpoints, widgets, plans, RBAC, keys, usage
+│
+└── Shared services
+    ├── Engines (deterministic, versioned)  ├── Assistant skills (grounded AI)
+    ├── Engagement tracking (consented)     ├── Knowledge graph (access-controlled)
+    └── Approvals + audit log
+```
 
-1. a costed refurbishment scope (room-by-room, trade-by-trade, regionalised, with range and assumptions),
-2. an investment case (tax, finance, stress test, scenarios),
-3. a constraint check (planning, flood, heritage, EPC),
+Design principle: **one property, one profile, many views.** The consumer sees the listing and its intelligence; the owner sees how the market responds to it; the agent sees it across a portfolio; partners call it by API.
 
-— and the same engines are sold via API to the businesses that touch those decisions (agents, lenders, landlords, contractors, portals).
+## 4. Competitive positioning
 
-### Challenging the brief
-
-* **"Compete with Rightmove" is the wrong first fight.** Rightmove has ~85%+ share of portal time and >£350m revenue at ~70% operating margins; its moat is agent supply of listings. Do not try to win listing supply in years 1–2. Win the **decision layer** that sits on top of any listing, then let agents bring listings because Plinth-underwritten listings convert better.
-* **Listings data is not freely available.** Portal scraping breaches terms and database rights. Listing supply must come from agent CRM feeds (with agent consent), auction houses, and user-submitted listings. Budget for this to be slow.
-* **The refurbishment cost engine is only as good as its calibration data.** Commercial price books (BCIS, Spon's) require licences and do not cover domestic refurb well. The real moat is *verified* quotes and invoices — which means the contractor marketplace is strategically essential, not a side feature.
-* **AI is the interface, not the calculator.** LLMs must never produce prices, taxes or yields. They interpret, extract and explain; deterministic, versioned engines calculate. This is both a trust position and a regulatory one.
-* **Avoid regulated activity by design in year 1.** Mortgage advice (FCA), client money/escrow (FCA payments), tenant referencing decisions (UK GDPR Art. 22), and RICS valuations are all regulated. Partner rather than build.
-
-## 3. Competitive positioning
-
-| Player | What they do well | Gap Plinth fills |
+| Player | Strength | BRIXO's angle |
 |---|---|---|
-| Rightmove / Zoopla / OnTheMarket | Listing reach, agent relationships | No refurb costing, no underwriting, no contractor loop |
-| PropertyData, Searchland, LandInsight/Nimbus | Investor & developer data, land sourcing | Strong data, weak on refurb cost and execution; spreadsheet-like UX |
-| Hometrack, PriceHubble, Zoopla AVMs | Valuations for lenders | Value-today only; no cost-to-improve |
-| Checkatrade, MyBuilder, Rated People | Trade lead marketplaces | Unstandardised scopes, no benchmark, race to the bottom |
-| Goodlord, Arthur, Hammock, Landlord Studio | Lettings admin | No acquisition/refurb intelligence; separate data silos |
-| Estimating tools (e.g. Buildxact, spreadsheets) | Contractor-side pricing | Not consumer/investor facing, not regionally benchmarked |
+| Rightmove, Zoopla, OnTheMarket | Listing supply & reach | We don't fight for supply first; we make any listing smarter, then convert better |
+| PropertyData, Searchland, Nimbus | Investor/land data | We add cost, design and execution (quotes) |
+| Hometrack, PriceHubble | Lender AVMs | We add cost-to-improve and post-works value |
+| Checkatrade, MyBuilder | Trade leads | Standardised scopes + benchmarks instead of lead auctions |
+| Virtual staging / AI design apps | Pretty images | Every design is costed, scheduled, quotable and investable |
+| Lettings software (Goodlord, Arthur) | Admin | Portfolio intelligence + maintenance prediction + compliance |
 
-**Position:** *the only platform that connects "what is it worth" to "what will it cost" to "who will do it" — with verified outcomes flowing back.*
+## 5. Feature set & status in this prototype
 
-## 4. Five most valuable MVP features
-
-Chosen by: (a) pain severity, (b) data we can legitimately obtain now, (c) willingness to pay, (d) contribution to the data moat.
-
-| # | Feature | Why first | Prototype status |
-|---|---|---|---|
-| 1 | **Refurbishment cost engine** | Highest pain, no good UK consumer tool, feeds everything else | Working: `src/engine/refurb.ts`, `/estimate` |
-| 2 | **Investment underwriter** (BTL/BRRR/flip/HMO, SDLT/LTT/LBTT, ICR) | Investors pay; deterministic so shippable with confidence | Working: `src/engine/investment.ts`, `tax.ts`, `/invest` |
-| 3 | **Property intelligence report** | Shareable artefact; viral loop with agents and investors | Working: `/property/:id` |
-| 4 | **Conversational deal search** | The "wow" moment; reframes search around outcomes | Working with rule-based interpreter: `src/engine/search.ts` |
-| 5 | **Standard scope + quote comparison** | Creates the verified-cost moat and contractor revenue | Working: `/marketplace`, `compareQuotes()` |
-
-## 5. Additional differentiated AI features (24)
-
-Ranked by (genuine problem × data reliability). ✅ = data reliably available today; ◐ = partially; ○ = depends on partnerships.
-
-| # | Feature | Problem solved | Data | |
-|---|---|---|---|---|
-| 1 | **Deal score with explanation** | Too many listings, little time | Engine outputs + comps | ✅ (prototyped) |
-| 2 | **Survey interpreter** | RICS L2/L3 reports are opaque | User-uploaded PDF | ✅ (prototyped, keyword) |
-| 3 | **Hidden refurb risk detection** | Damp, subsidence, asbestos, knotweed discovered too late | Survey + BGS + era + photos | ◐ |
-| 4 | **EPC upgrade pathway** | MEES compliance & energy bills | EPC register (OGL) | ✅ (prototyped) |
-| 5 | **Negotiation preparation** | Buyers anchor on asking price | Comps, DOM, price history | ✅ (prototyped) |
-| 6 | **Total cost of ownership forecast** | Hidden running costs | Council tax bands, EPC, rates | ✅ (prototyped) |
-| 7 | **Investment opportunity alerts** | Deals go in days | Saved underwriting criteria × new listings | ◐ |
-| 8 | **Local market change detection** | Spotting regeneration early | Planning apps, HPI, price paid, new transport | ◐ |
-| 9 | **Digital property passport** | Information lost at every sale | Owner uploads, certificates, works history | ✅ |
-| 10 | **Conveyancing progress predictor** | 20+ week transactions, collapses | Conveyancer case APIs | ○ (UI prototyped) |
-| 11 | **Predictive maintenance** | Reactive repairs cost 3× | Asset age, maintenance logs | ◐ |
-| 12 | **Portfolio optimiser** | Which property to sell/refinance | Portfolio data, rates, yields | ✅ |
-| 13 | **Lifestyle & financial matching** | Search by life, not filters | Commute, schools, budget, goals | ◐ |
-| 14 | **Auction legal-pack analyser** | Buyers bid blind on legal packs | Legal pack PDFs | ✅ |
-| 15 | **Planning precedent finder** | "Will they approve a dormer here?" | planning.data.gov.uk + LPA portals | ◐ |
-| 16 | **Permitted development checker** | PD rules are complex | GPDO rules + constraints layers | ✅ (rules engine, not AI) |
-| 17 | **Contractor quote anomaly detector** | Cowboy quotes, missing scope | Benchmark + quote lines | ✅ (prototyped) |
-| 18 | **Variation fairness check** | Mid-job price creep | BoQ + variation details | ✅ |
-| 19 | **Lease analyser** | Ground rent, service charge, onerous clauses | Lease PDF | ✅ |
-| 20 | **Rent review evidence pack** | Section 13 increases need evidence | Let comps | ◐ (prototyped UI) |
-| 21 | **Tenant maintenance triage** | Landlords overwhelmed by reports | Tenant text/photos | ✅ (prototyped) |
-| 22 | **Compliance autopilot** | Missed gas/EICR/deposit deadlines = fines | Certificates | ✅ (prototyped) |
-| 23 | **Retrofit grant matcher** | Grants are fragmented | BUS, ECO4, GBIS, local schemes | ✅ |
-| 24 | **Refinance window alerts** | Fixed rates expiring, equity trapped | Portfolio + rates + AVM | ◐ |
-
-## 6. Prioritised roadmap
-
-| Horizon | Theme | Features |
+| Part | Feature | Prototype status |
 |---|---|---|
-| **Now (0–3 m)** | Prove the engines | Refurb estimator, investment underwriter, intelligence report, BoQ export, quote comparison (manual quote upload), accounts & saved projects |
-| **Next (3–9 m)** | Discovery + supply | Conversational search on licensed/agent feeds, alerts, survey & legal-pack interpreter, contractor onboarding & verification, Land Registry/EPC/flood integrations |
-| **Later (9–18 m)** | Operate | Agent portal + CRM sync, landlord management & compliance, design studio with image models, conveyancing tracker |
-| **Scale (18 m+)** | Infrastructure | Public API GA, white-label widgets, lender/portal partnerships, Wales/Scotland/NI rule-sets, international assessment |
+| 1 | Marketplace: search buy/rent/commercial/development, filters, map, compare, save, viewings, contact, documents | **Working** on 15 fictional listings |
+| 1 | Conversational AI search incl. all three example queries | **Working** (rule-based interpreter → same structured query an LLM would emit) |
+| 2 | Per-property AI intelligence with Q&A (overpriced? rent? costs? kitchen? extend? risks? compare? invest?) | **Working**, grounded skills with evidence/assumptions/verify |
+| 3 | Engagement engine: 20 signals, observed vs inferred, CIs, k-anonymity | **Working** on simulated, seeded data; consent-gated client tracking demonstrated |
+| 4 | Owner dashboard + owner AI + weekly report | **Working** (Markdown report download) |
+| 5 | Agent command centre, alerts, quality scores, AI copy, seller reports, approval queue | **Working** (approval records decisions; nothing is sent) |
+| 6 | Design studio: 9 styles, kitchen/bath finishes, staging watermark, layout planner, materials, budget designer, before/after, save/share, design-to-cost, design engagement | **Working**; images are illustrations / colour-grade previews (image model not connected) |
+| 7 | Regional refurb engine incl. commercial fit-out, office-to-resi, groundworks, BoQ, labour/materials, defect risks | **Working**, demo rate library |
+| 8 | Investment analyser incl. commercial, break-evens, scenarios, sensitivity, linked to design & refurb | **Working** |
+| 9 | Development potential (loft, rear/side, subdivision, Class MA, energy) | **Working** rules-based screening |
+| 10 | Landlord management + landlord AI + predictive maintenance | **Working** on demo portfolio |
+| 11 | Demand prediction / unit mix for developers | **Working** scenario tool on labelled demo inputs (no trained model) |
+| 12 | Multi-agent system with permissions, approvals, audit | **Working** deterministic agents (no scheduler/LLM) |
+| 13 | Knowledge graph | Visualised per property; schema designed (`db/schema.sql`) |
+| 14 | API, widgets, plans, RBAC | Console + live estimate demo; API server not built |
 
-## 7. Principles we will not compromise
+## 6. Twenty-plus further AI features (prioritised by problem × data reliability)
 
-1. Never fabricate listings or imply data access we lack.
-2. Every number has a source label, a date and editable assumptions.
-3. AI never makes a tenant decision, a planning determination or a valuation.
-4. Verified data and estimates are never blended without labelling.
-5. Contractor and user data is used for model calibration only with explicit consent, aggregated and anonymised.
+1. Survey interpreter → proposed scope (✅ data: user upload)
+2. Auction legal-pack analyser (✅)
+3. Lease analyser — service charge, ground rent, onerous clauses (✅)
+4. Lead-photo A/B testing with significance (✅ first-party)
+5. Listing description generator with verified material-information fields (✅)
+6. Price-reduction impact predictor (◐ needs outcome history)
+7. Buyer-objection miner from viewing feedback (✅ agent input)
+8. EPC upgrade pathway + grant matcher (✅ OGL EPC)
+9. Hidden-defect risk register (✅ rules + survey)
+10. Contractor quote anomaly detector (✅ prototyped)
+11. Variation fairness checker (✅)
+12. Digital property passport (✅ owner uploads)
+13. Conveyancing milestone predictor (○ conveyancer APIs)
+14. Predictive maintenance (◐ prototyped from component ages)
+15. Rent review evidence pack for s13 notices (◐)
+16. Refinance-window alerts (◐)
+17. Local market change detection — planning, transport, price paid (◐)
+18. Planning precedent finder (◐ planning.data.gov.uk)
+19. Permitted-development checker (✅ rules)
+20. Unit-mix optimiser (◐ prototyped)
+21. Lifestyle matching — commute, schools, amenities (◐ open data)
+22. Investment opportunity alerts on saved underwriting criteria (✅)
+23. Portfolio optimiser — sell/hold/refinance (✅ owner data)
+24. Design-preference intelligence for developers' specification (✅ first-party aggregate)

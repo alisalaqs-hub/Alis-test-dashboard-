@@ -141,3 +141,15 @@ export function transactionTax(
   notes.push(`Rates table: ${RATES_EFFECTIVE}. Not tax advice — confirm with a conveyancer or HMRC/WRA/Revenue Scotland calculator.`);
   return { tax: name, total, effectiveRate: price ? total / price : 0, lines, notes };
 }
+
+/* ---------- Non-residential (commercial / mixed-use) ---------- */
+const SDLT_NONRES: Band[] = [{ upTo: 150_000, rate: 0 }, { upTo: 250_000, rate: 0.02 }, { upTo: Infinity, rate: 0.05 }];
+const LTT_NONRES: Band[] = [{ upTo: 225_000, rate: 0 }, { upTo: 250_000, rate: 0.01 }, { upTo: 1_000_000, rate: 0.05 }, { upTo: Infinity, rate: 0.06 }];
+const LBTT_NONRES: Band[] = [{ upTo: 150_000, rate: 0 }, { upTo: 250_000, rate: 0.01 }, { upTo: Infinity, rate: 0.05 }];
+
+export function nonResidentialTax(price: number, nation: Nation): TaxResult {
+  const bands = nation === 'wales' ? LTT_NONRES : nation === 'scotland' ? LBTT_NONRES : SDLT_NONRES;
+  const lines = banded(price, bands);
+  const total = lines.reduce((s, l) => s + l.tax, 0);
+  return { tax: nation === 'wales' ? 'LTT' : nation === 'scotland' ? 'LBTT' : 'SDLT', total, effectiveRate: price ? total / price : 0, lines, notes: ['Non-residential / mixed-use rates. VAT may also apply to commercial purchases (option to tax).', `Not tax advice — confirm with a conveyancer.`] };
+}

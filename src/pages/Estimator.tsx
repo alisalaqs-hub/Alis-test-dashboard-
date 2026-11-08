@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { getProperty } from '../data/properties';
 import { refurbInputFor } from '../engine/insights';
 import {
-  boqCsv, DEFAULT_INPUT, estimateRefurb, REGIONS, regionFromPostcode, scenarios, VAT_RATES,
+  boqCsv, DEFAULT_INPUT, estimateRefurb, hiddenDefectRisks, REGIONS, regionFromPostcode, scenarios, VAT_RATES,
   type Access, type Condition, type Era, type Estimate, type PropertyType, type RefurbInput, type Spec, type VatTreatment,
 } from '../engine/refurb';
 import { download, gbp, gbpK, Meter, Section, Seg, Stacked, Stat, Tag } from '../components/ui';
@@ -81,7 +81,7 @@ export default function Estimator() {
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
         <div>
-          <div className="eyebrow">MVP feature 01</div>
+          <div className="eyebrow">AI regional refurbishment cost engine</div>
           <h2 style={{ marginTop: 6 }}>Refurbishment cost estimator</h2>
           <p className="muted" style={{ marginTop: 6 }}>Elemental UK estimate: measured works × regional, condition, era and access factors, plus preliminaries, overheads & profit, contingency, professional fees and VAT.{prop && <> Prefilled from <Link to={`/property/${prop.id}`}>{prop.title}</Link>.</>}</p>
         </div>
@@ -104,7 +104,18 @@ export default function Estimator() {
               <Field label="Site access"><select className="input" value={input.access} onChange={(e) => set('access', e.target.value as Access)}><option value="easy">Easy (driveway)</option><option value="restricted">Restricted (on-street, CPZ)</option><option value="difficult">Difficult (no parking, upper floor, no lift)</option></select></Field>
             </div>
           </Section>
-          <Section title="Scope of works" kicker="Step 2">
+          <Section title="Project type" kicker="Step 2">
+            <Seg value={input.propertyType === 'commercial' ? (input.scope.officeToResiArea ? 'o2r' : 'fitout') : 'resi'} onChange={(v) => setInput((s) => v === 'resi'
+              ? { ...s, propertyType: s.propertyType === 'commercial' ? 'terraced' : s.propertyType, scope: { ...s.scope, fitOut: 'none', officeToResiArea: 0 } }
+              : v === 'fitout' ? { ...s, propertyType: 'commercial', vat: 'standard', scope: { ...s.scope, fitOut: 'cat-a', officeToResiArea: 0, kitchen: false, damp: false } }
+              : { ...s, propertyType: 'commercial', vat: 'reduced-conversion', scope: { ...s.scope, fitOut: 'none', officeToResiArea: s.floorArea, kitchen: false, damp: false } })}
+              options={[{ value: 'resi', label: 'Residential refurbishment' }, { value: 'fitout', label: 'Commercial fit-out' }, { value: 'o2r', label: 'Office → residential' }]} />
+            {input.propertyType === 'commercial' && <div className="grid g2" style={{ gap: 10, marginTop: 10 }}>
+              <Field label="Fit-out level"><select className="input" value={input.scope.fitOut ?? 'none'} onChange={(e) => scope('fitOut', e.target.value as 'none')}><option value="none">None</option><option value="cat-a">Cat A</option><option value="cat-a+b">Cat A + Cat B</option></select></Field>
+              <Field label="Area converted to resi (m²)"><input className="input num" type="number" min={0} value={input.scope.officeToResiArea ?? 0} onChange={(e) => scope('officeToResiArea', Math.max(0, Number(e.target.value)))} /></Field>
+            </div>}
+          </Section>
+          <Section title="Scope of works" kicker="Step 3">
             <div className="grid g2" style={{ gap: 2 }}>
               {([['stripOut', 'Strip-out & waste'], ['rewire', 'Full rewire'], ['kitchen', 'New kitchen'], ['windows', 'Replace windows & doors'], ['flooring', 'Floor finishes'], ['decoration', 'Decoration & joinery'], ['damp', 'Damp remediation'], ['external', 'External works'], ['insulation', 'Loft insulation'], ['solidWallInsulation', 'Solid-wall insulation']] as const).map(([k, l]) => (
                 <label key={k} className="check"><input type="checkbox" checked={input.scope[k] as boolean} onChange={(e) => scope(k, e.target.checked)} />{l}</label>
@@ -117,12 +128,13 @@ export default function Estimator() {
               <Field label="Structural openings (RSJ)"><input className="input num" type="number" min={0} value={input.scope.structuralOpenings} onChange={(e) => scope('structuralOpenings', Math.max(0, Number(e.target.value)))} /></Field>
               <Field label={`Extension: ${input.scope.extensionArea}m²`}><input type="range" min={0} max={40} value={input.scope.extensionArea} onChange={(e) => scope('extensionArea', Number(e.target.value))} /></Field>
               <Field label={`Loft conversion: ${input.scope.loftArea}m²`}><input type="range" min={0} max={40} value={input.scope.loftArea} onChange={(e) => scope('loftArea', Number(e.target.value))} /></Field>
+              <Field label="Groundworks area (m²)"><input className="input num" type="number" min={0} value={input.scope.groundworksArea ?? 0} onChange={(e) => scope('groundworksArea', Math.max(0, Number(e.target.value)))} /></Field>
               <Field label="New en-suites"><input className="input num" type="number" min={0} value={input.scope.ensuites} onChange={(e) => scope('ensuites', Math.max(0, Number(e.target.value)))} /></Field>
               <Field label="VAT treatment"><select className="input" value={input.vat} onChange={(e) => set('vat', e.target.value as VatTreatment)}>{Object.entries(VAT_RATES).map(([k, v]) => <option key={k} value={k}>{v.label.split(' (')[0].split(' —')[0]}{k.startsWith('reduced') ? ` (${k === 'reduced-empty-2yrs' ? 'empty 2+ yrs' : 'conversion'})` : ''}</option>)}</select></Field>
             </div>
             <label className="check" style={{ marginTop: 6 }}><input type="checkbox" checked={input.includeProfessionalFees} onChange={(e) => set('includeProfessionalFees', e.target.checked)} />Include professional fees (architect, engineer, building control, party wall)</label>
           </Section>
-          <Section title="Photos, plans & surveys" kicker="Step 3 · optional" right={<Tag kind="ai">Prototype extraction</Tag>}>
+          <Section title="Photos, plans & surveys" kicker="Step 4 · optional" right={<Tag kind="ai">Prototype extraction</Tag>}>
             <label className="dropzone" style={{ display: 'block' }}>
               <input type="file" multiple hidden onChange={(e) => onFiles(e.target.files)} accept="image/*,.pdf,.txt,.md,.csv" />
               Drop photos, floor plans or a survey (.txt read in-browser)
@@ -145,7 +157,7 @@ export default function Estimator() {
               <div className="grid g3" style={{ gap: 18, minWidth: 260 }}>
                 <Stat label="Per m² (ex VAT)" value={gbp(est.costPerM2)} />
                 <Stat label="Programme" value={`${est.programmeWeeks} wks`} />
-                <Stat label="Line items" value={est.lines.length} />
+                <Stat label="Labour / materials" value={`${Math.round((est.labourAllowance / Math.max(1, est.measuredWorks)) * 100)}/${Math.round((est.materialsAllowance / Math.max(1, est.measuredWorks)) * 100)}`} sub="% of measured works" />
               </div>
             </div>
             <div style={{ marginTop: 18 }}>
@@ -172,7 +184,7 @@ export default function Estimator() {
 
           <Section title="Breakdown" right={<>
             <Seg value={view} onChange={setView} options={[{ value: 'trade', label: 'By trade' }, { value: 'room', label: 'By room' }, { value: 'boq', label: 'Bill of quantities' }]} />
-            <button className="btn ghost sm" onClick={() => download(`plinth-boq-${input.postcode.replace(/\s/g, '')}.csv`, boqCsv(est))}>Export BoQ (CSV)</button>
+            <button className="btn ghost sm" onClick={() => download(`brixo-boq-${input.postcode.replace(/\s/g, '')}.csv`, boqCsv(est))}>Export BoQ (CSV)</button>
           </>}>
             {view === 'trade' && est.byTrade.map((t) => <Meter key={t.trade} label={t.trade} value={t.total} max={maxTrade} display={gbpK(t.total)} />)}
             {view === 'room' && <>
@@ -197,6 +209,10 @@ export default function Estimator() {
               <div className="eyebrow" style={{ marginBottom: 6 }}>Assumptions</div>
               <ul className="ticks small">{est.assumptions.map((a) => <li key={a}>{a}</li>)}</ul>
             </Section>
+            <Section title="Hidden defect risks" kicker="Allow for these" right={<Tag kind="est" />}>
+              <ul className="clean small">{hiddenDefectRisks(input).map((r) => <li key={r.risk}><Tag kind={r.likelihood === 'high' ? 'warn' : r.likelihood === 'medium' ? 'demo' : 'neutral'}>{r.likelihood}</Tag> {r.risk} <span className="xs muted">· {r.allowance}</span></li>)}</ul>
+              <p className="xs muted" style={{ marginTop: 8 }}>Confidence falls as these risks rise; contingency is sized accordingly. Intrusive surveys narrow the range.</p>
+            </Section>
             <Section title="Exclusions & compliance">
               <ul className="ticks small">{est.exclusions.map((a) => <li key={a}>{a}</li>)}</ul>
               <div className="hr" />
@@ -204,7 +220,7 @@ export default function Estimator() {
             </Section>
           </div>
           <div className="callout info small">
-            <b>Pricing basis:</b> {est.basis.source} Basis date {est.basis.basisDate}. This is a budget estimate for feasibility, not a tender price. Obtain at least three quotations against the exported scope — <Link to="/marketplace">compare them here</Link>. Each verified quote (with consent) recalibrates the regional rate library.
+            <b>Pricing basis:</b> {est.basis.source} Basis date {est.basis.basisDate}. This is a budget estimate for feasibility, not a tender price. Obtain at least three quotations against the exported scope — <Link to="/marketplace">compare them here</Link>. <Link to={`/invest?${prop ? `property=${prop.id}&` : ''}refurb=${est.total}&label=${encodeURIComponent('whole-house estimate')}`}>Use this estimate in the investment analyser →</Link> Each verified quote (with consent) recalibrates the regional rate library.
           </div>
         </div>
       </div>

@@ -3,10 +3,10 @@
  * *suggest* inputs (e.g. a rent estimate) but every number shown to users
  * is produced by these pure functions so it is reproducible and auditable.
  */
-import { transactionTax, type BuyerType, type Nation } from './tax';
+import { nonResidentialTax, transactionTax, type BuyerType, type Nation } from './tax';
 export type { BuyerType, Nation };
 
-export type Strategy = 'btl' | 'brrr' | 'flip' | 'hmo';
+export type Strategy = 'btl' | 'brrr' | 'flip' | 'hmo' | 'commercial';
 
 export interface InvestmentInput {
   strategy: Strategy;
@@ -73,7 +73,7 @@ const pmt = (rate: number, n: number, pv: number) => (rate === 0 ? pv / n : (pv 
 
 export function analyse(i: InvestmentInput): InvestmentResult {
   const warnings: string[] = [];
-  const taxRes = transactionTax(i.price, i.nation, i.companyPurchase ? 'additional' : i.buyer);
+  const taxRes = i.strategy === 'commercial' ? nonResidentialTax(i.price, i.nation) : transactionTax(i.price, i.nation, i.companyPurchase ? 'additional' : i.buyer);
   if (i.companyPurchase && i.nation !== 'scotland' && i.price > 500_000) warnings.push('Company purchases over £500k may attract the 17% SDLT flat rate unless a relief (e.g. property rental business) applies.');
 
   const fees = i.legalFees + i.surveyFees;
@@ -125,9 +125,10 @@ export function analyse(i: InvestmentInput): InvestmentResult {
   const stressedInterest = ltLoan * stressRate;
   const icr = stressedInterest ? annualRent / stressedInterest : Infinity;
   const maxLoanByIcr = annualRent / (icrRequired * stressRate);
-  if (i.strategy !== 'flip' && icr < icrRequired) warnings.push(`Fails a typical lender stress test: ICR ${(icr * 100).toFixed(0)}% vs ${(icrRequired * 100).toFixed(0)}% at ${(stressRate * 100).toFixed(1)}%. Max loan ≈ £${Math.round(maxLoanByIcr).toLocaleString('en-GB')}.`);
+  if (i.strategy === 'commercial') warnings.push('Commercial lenders underwrite on tenant covenant, lease length (WAULT) and debt-service cover; residential ICR shown for reference only.');
+  if (i.strategy !== 'flip' && i.strategy !== 'commercial' && icr < icrRequired) warnings.push(`Fails a typical lender stress test: ICR ${(icr * 100).toFixed(0)}% vs ${(icrRequired * 100).toFixed(0)}% at ${(stressRate * 100).toFixed(1)}%. Max loan ≈ £${Math.round(maxLoanByIcr).toLocaleString('en-GB')}.`);
   if (i.strategy === 'hmo') warnings.push('HMOs with 5+ occupiers need a mandatory licence; check Article 4 directions and additional/selective licensing for the local authority.');
-  if (!i.companyPurchase && i.strategy !== 'flip') warnings.push('Individual landlords: mortgage interest is relieved only as a 20% tax credit (Section 24). Cash flow shown is pre-tax.');
+  if (!i.companyPurchase && i.strategy !== 'flip' && i.strategy !== 'commercial') warnings.push('Individual landlords: mortgage interest is relieved only as a 20% tax credit (Section 24). Cash flow shown is pre-tax.');
 
   const allIn = acquisitionTotal + i.refurbCost;
   return {
@@ -200,3 +201,21 @@ export const DEFAULT_INVESTMENT: InvestmentInput = {
   monthlyRent: 2_450, voidPct: 0.04, managementPct: 0.1, maintenancePct: 0.06, insuranceAnnual: 520, serviceChargeAnnual: 0, hmoBillsMonthly: 0, licensingAnnual: 0,
   gdv: 575_000, refinanceLtv: 0.75, sellingCostsPct: 0.02, holdingMonthly: 320,
 };
+
+/** Break-even points for the stabilised position (deterministic). */
+export function breakEven(i: InvestmentInput) {
+  const r = analyse(i);
+  const fixed = i.insuranceAnnual + i.serviceChargeAnnual + (i.strategy === 'hmo' ? i.hmoBillsMonthly * 12 : 0) + i.licensingAnnual;
+  const variableShare = (1 - i.voidPct) * (1 - i.managementPct - i.maintenancePct);
+  // rent R/month such that 12R·variableShare − fixed − finance = 0
+  const rent = (fixed + r.annualFinance) / (12 * Math.max(0.01, variableShare));
+  // occupancy such that 12·rent·occ·(1−mgmt−maint) − fixed − finance = 0
+  const occ = (fixed + r.annualFinance) / (12 * i.monthlyRent * Math.max(0.01, 1 - i.managementPct - i.maintenancePct));
+  // interest rate (interest-only) at which cash flow = 0
+  const noi = r.annualRent * (1 - i.voidPct) - r.annualCosts;
+  const loan = i.strategy === 'brrr' ? r.refinanceLoan : r.loan;
+  const rate = loan > 0 ? noi / loan : Infinity;
+  // flip: sale price at which profit = 0
+  const salePrice = i.gdv - r.flipProfit / (1 - i.sellingCostsPct);
+  return { rent, occupancy: occ, rate, salePrice };
+}

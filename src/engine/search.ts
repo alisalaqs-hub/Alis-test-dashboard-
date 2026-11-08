@@ -29,6 +29,12 @@ export interface SearchQuery {
   auction?: boolean;
   chainFree?: boolean;
   goodSchools?: boolean;
+  conversion?: boolean;
+  lowServiceCharge?: boolean;
+  needsRefurb?: boolean;
+  goodReturn?: boolean;
+  rentalDemand?: boolean;
+  commercial?: boolean;
   unsupported: string[];
 }
 
@@ -61,10 +67,11 @@ export function parseQuery(text: string): SearchQuery {
   const price = t.match(/\b(?:under|below|less than|max(?:imum)?|up to|budget(?: of)?)\s*(£?\s?[\d,.]+\s?[km]?)\b/);
   if (price) q.maxPrice = money(price[1]);
 
-  const commute = t.match(/within\s+(\d+)\s*(?:min(?:ute)?s?)\s+(?:of|from|to)\s+([a-z\s]+?)(?:,|\.|\bunder\b|\bwith\b|\band\b|$)/);
+  const commute = t.match(/within\s+(\d+)\s*(?:min(?:ute)?s?)\s+(?:of|from|to)\s+([a-z\s]+?)(?:,|\.|\bunder\b|\bwith\b|\band\b|\bfor\b|\bthat\b|$)/);
   if (commute) { q.maxCommuteMins = parseInt(commute[1], 10); q.commuteTo = commute[2].trim(); }
 
   for (const [k, v] of Object.entries(PLACE_ALIASES)) if (new RegExp(`\\b${k}\\b`).test(t)) q.locations.push(...v);
+  if (/near london|around london|london commuter|home counties|hertfordshire|watford/.test(t)) q.locations.push('Watford', 'Hertfordshire');
   q.locations = [...new Set(q.locations)];
 
   if (/\bterrace/.test(t)) q.types.push('terraced');
@@ -80,6 +87,12 @@ export function parseQuery(text: string): SearchQuery {
   if (/\bauction\b/.test(t)) q.auction = true;
   if (/chain[- ]free/.test(t)) q.chainFree = true;
   if (/\bschools?\b/.test(t)) q.goodSchools = true;
+  if (/convert(ed)? into (multiple )?flats|multiple flats|subdivi|split into flats|flat conversion/.test(t)) q.conversion = true;
+  if (/low service charge/.test(t)) q.lowServiceCharge = true;
+  if (/requires? refurb|needs? (refurb|work|modernis)|renovation project|fixer/.test(t)) q.needsRefurb = true;
+  if (/investment return|good return|good investment/.test(t)) { q.goodReturn = true; if (q.intent === 'buy') q.intent = 'invest'; }
+  if (/rental demand|easy to let/.test(t)) q.rentalDemand = true;
+  if (/\b(office|commercial|retail|industrial|class ma|office-to-residential)\b/.test(t)) q.commercial = true;
 
   const profit = t.match(/(?:profit|uplift|equity)(?:\s+of)?(?:\s+(?:at least|over|above|minimum))?\s*(£?\s?[\d,.]+\s?[km]?)/) || t.match(/(£\s?[\d,.]+\s?[km]?)\s+(?:refurb(?:ishment)?\s+)?(?:profit|uplift)/);
   if (profit) q.minRefurbProfit = money(profit[1]);
@@ -116,6 +129,9 @@ export function runSearch(q: SearchQuery, pool = PROPERTIES): SearchHit[] {
     if (q.maxPrice && p.price > q.maxPrice) continue;
     if (q.types.length && !q.types.includes(p.type)) continue;
     if (q.auction && p.listing !== 'auction') continue;
+    if (q.commercial ? p.type !== 'commercial' : p.type === 'commercial') continue;
+    if (q.conversion && (p.conversionPotential ?? 'none') === 'none') continue;
+    if (q.lowServiceCharge && p.type === 'flat' && p.serviceChargeAnnual == null) continue;
     const c = commuteOk(p, q);
     if (!c.ok) continue;
     if (!q.maxCommuteMins && q.locations.length && !q.locations.some((l) => p.town.includes(l))) continue;
@@ -154,6 +170,11 @@ export function runSearch(q: SearchQuery, pool = PROPERTIES): SearchHit[] {
       if (estProfit >= q.minRefurbProfit) { score += 10; reasons.push(`Indicative refurb profit ≈ £${Math.round(estProfit / 1_000)}k (target £${Math.round(q.minRefurbProfit / 1_000)}k)`); }
       else { score -= 20; cautions.push(`Indicative profit ≈ £${Math.round(estProfit / 1_000)}k — below £${Math.round(q.minRefurbProfit / 1_000)}k target`); }
     }
+    if (q.conversion) { score += p.conversionPotential === 'strong' ? 15 : 5; reasons.push(`Conversion potential: ${p.conversionPotential}${p.planningNearby.some((a) => /flats|Class MA/i.test(a.desc) && a.decision === 'Approved') ? ' — similar conversion approved nearby' : ''}`); if (p.planningNearby.some((a) => /flats/i.test(a.desc) && a.decision === 'Refused')) cautions.push('A nearby conversion was refused — check local policy on family-housing loss'); }
+    if (q.lowServiceCharge) { if (p.serviceChargeAnnual != null && p.serviceChargeAnnual <= 1_500) { score += 10; reasons.push(`Service charge £${p.serviceChargeAnnual.toLocaleString('en-GB')} p.a.`); } else if (p.type === 'flat') cautions.push('Service charge not disclosed / above £1,500'); }
+    if (q.needsRefurb) { if (p.condition === 'poor' || p.condition === 'fair' || p.condition === 'derelict') { score += 6; reasons.push(`Condition: ${p.condition} — refurbishment estimate ≈ £${Math.round(ds.refurbEstimate / 1000)}k`); } else { score -= 20; cautions.push('Already in good condition'); } }
+    if (q.rentalDemand) { if (p.rentDemand >= 80) { score += 8; reasons.push(`Rental demand index ${p.rentDemand}/100`); } else cautions.push(`Rental demand index only ${p.rentDemand}/100`); }
+    if (q.goodReturn) { if (ds.total >= 55) reasons.push(`Deal score ${ds.total}/100 (${ds.grade})`); else { score -= 10; cautions.push(`Deal score ${ds.total}/100 — returns look thin at asking price`); } }
     if (q.minYield && ds.grossYield < q.minYield) { score -= 15; cautions.push(`Gross yield ${(ds.grossYield * 100).toFixed(1)}% below ${(q.minYield * 100).toFixed(1)}%`); }
     else if (q.minYield) reasons.push(`Gross yield ${(ds.grossYield * 100).toFixed(1)}%`);
 
@@ -181,5 +202,11 @@ export function describeQuery(q: SearchQuery): string[] {
   if (q.auction) out.push('auction');
   if (q.chainFree) out.push('chain-free');
   if (q.goodSchools) out.push('good schools');
+  if (q.conversion) out.push('conversion to flats');
+  if (q.lowServiceCharge) out.push('low service charge');
+  if (q.needsRefurb) out.push('needs refurbishment');
+  if (q.goodReturn) out.push('investment return');
+  if (q.rentalDemand) out.push('strong rental demand');
+  if (q.commercial) out.push('commercial');
   return out;
 }

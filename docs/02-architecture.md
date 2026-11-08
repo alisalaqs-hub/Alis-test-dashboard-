@@ -1,159 +1,132 @@
-# Plinth — Technical Architecture
+# BRIXO — Technical Architecture
 
-## 1. Recommended stack
+## 1. Stack
 
-| Layer | Choice | Why |
+| Layer | Choice | Notes |
 |---|---|---|
-| Web app | **Next.js (App Router) + React + TypeScript** | SSR for SEO on intelligence reports; the prototype in this repo is Vite + React so the screens port directly |
-| Mobile | Responsive web first; React Native/Expo later sharing the TS engine package | Avoid two codebases before PMF |
-| Calculation engines | **TypeScript package `@plinth/engines`** (pure functions, versioned) | Runs identically in browser, API and widgets; unit-testable (see `src/engine/*.test.ts`) |
-| API | Node (Fastify) for product/API gateway; **Python (FastAPI)** services for data ingestion, ML (hedonic models, cost calibration) | Right tool per job |
-| Database | **PostgreSQL 16 + PostGIS** (managed: AWS RDS/Aurora, UK region) | Spatial joins (constraints, comps), JSONB for estimate snapshots |
-| Search | Postgres + PostGIS for structured filters; **pgvector** for semantic recall of listing text | One less system until scale demands OpenSearch |
-| Queue / jobs | SQS + workers (or Temporal for long workflows like conveyancing) | Ingestion, document parsing, notifications |
-| Object storage | S3 (eu-west-2), per-tenant prefixes, KMS encryption | Photos, surveys, certificates |
-| AI | **Claude (Anthropic API)** for orchestration, tool calling, document understanding; image model API for design concepts | Provider abstraction layer so models can be swapped |
-| Maps | **OS Maps API / OS Data Hub** (GB), Mapbox GL for rendering | Licensed, UPRN-aligned |
-| Auth | Auth0 / Clerk / AWS Cognito (OIDC), WebAuthn passkeys; API keys + OAuth2 client credentials for B2B | |
-| Payments | Stripe Billing (subscriptions + metered usage) | |
-| Infra | AWS UK (eu-west-2), Terraform, ECS Fargate → EKS when needed, CloudFront | UK data residency for GDPR comfort |
-| Observability | OpenTelemetry → Grafana/Datadog; Sentry | |
+| Web | **Next.js (App Router) + React + TypeScript**; Tailwind CSS with BRIXO tokens | This prototype is Vite + React + plain CSS tokens; screens port directly. SSR for SEO on listing/intelligence pages. |
+| Engines | `@brixo/engines` — pure TypeScript, versioned, unit-tested | Same code in browser, API, widgets, agents (see `src/engine/*`). |
+| API | Node (Fastify) gateway + domain services; **Python (FastAPI)** for ingestion, ML (hedonic valuation, cost calibration, demand models) | |
+| Data | **PostgreSQL 16 + PostGIS + pgvector**; ClickHouse (or BigQuery) for event analytics | Postgres for truth; columnar store for engagement aggregates. |
+| Events | First-party collector → Kafka/Kinesis → stream aggregation (Flink or dbt incremental) → aggregates in Postgres | Raw events retained ≤ 13 months; dashboards read aggregates only. |
+| Jobs / agents | **Temporal** workflows for agents, reports, ingestion | Durable, retryable, auditable. |
+| AI | Claude via Anthropic API for tool-calling orchestration, document understanding and explanation; an image model API for design concepts (structure-preserving editing) | Provider-abstracted; zero-retention terms. |
+| Search | Postgres filters + PostGIS + pgvector (semantic recall on descriptions) | OpenSearch only when scale demands. |
+| Maps | OS Data Hub (UPRN, maps) + Mapbox GL rendering | Licensed. |
+| Auth | OIDC (passkeys, magic link, Google/Apple); SAML SSO for enterprise; API keys + OAuth2 client credentials | |
+| Billing | Stripe Billing (subscriptions + metered usage) | |
+| Infra | AWS eu-west-2 (London), Terraform, ECS Fargate → EKS; CloudFront | UK data residency. |
+| Observability | OpenTelemetry → Grafana/Datadog; Sentry; LLM tracing (prompt/tool/latency/cost) | |
 
-## 2. System diagram
-
-```
-            ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
- Consumers ─▶ Next.js web  │   │ Partner sites│   │ Partner backends │
-            └──────┬───────┘   │ (widgets)    │   │ (REST, webhooks) │
-                   │           └──────┬───────┘   └────────┬─────────┘
-                   ▼                  ▼                    ▼
-            ┌────────────────────────────────────────────────────────┐
-            │ API gateway (auth, tenant resolution, rate limit, meter)│
-            └──┬───────────────┬────────────────┬──────────────┬─────┘
-               ▼               ▼                ▼              ▼
-        ┌────────────┐  ┌────────────┐   ┌────────────┐  ┌───────────────┐
-        │ Engines    │  │ AI orchestr.│  │ Marketplace│  │ Lettings / PM │
-        │ (TS, pure) │◀─┤ (tool-call) │  │ quotes/jobs│  │ compliance    │
-        └─────┬──────┘  └─────┬──────┘   └─────┬──────┘  └──────┬────────┘
-              ▼               ▼                ▼                ▼
-        ┌─────────────────────────────────────────────────────────────┐
-        │ PostgreSQL + PostGIS + pgvector  ·  S3  ·  Rate library store│
-        └──────────────────────────▲──────────────────────────────────┘
-                                   │
-        ┌──────────────────────────┴──────────────────────────────────┐
-        │ Ingestion (Python): Land Registry PPD, EPC, EA flood, HE    │
-        │ listed, planning.data.gov.uk, ONS/UK HPI, OS, agent feeds   │
-        └─────────────────────────────────────────────────────────────┘
-```
-
-## 3. Separating AI from deterministic calculation
+## 2. Separation of concerns: AI vs deterministic vs verified
 
 ```
-User text ──▶ LLM (tool calling, JSON-schema output) ──▶ validated SearchQuery / RefurbInput
-                                                          │
-                                   deterministic engine ◀─┘  (versioned rate tables, tax tables)
-                                                          │
-           LLM explanation ◀── engine result + provenance ┘  (LLM may only cite numbers it is given)
+User question
+   │
+   ▼
+LLM orchestrator ──selects──► Skills / tools (deterministic engines, data queries)
+   │                                   │  each result carries: value, source, as_of, version
+   │◄────────── structured results ────┘
+   ▼
+LLM writes explanation  ──►  Grounding check (every £/%/count must appear in tool output)
+   │                              │ fail → regenerate or strip figures
+   ▼                              ▼
+Answer = { text, evidence[], assumptions[], verify[], confidence, tools[] }
 ```
 
-Rules enforced in code:
+* Prototype: `src/ai/assistant.ts` (`route`, `ungroundedFigures`), skills in `src/ai/skills.ts` and `src/ai/landlordSkills.ts`.
+* Every stored estimate/analysis snapshots inputs + `engine_version` + `rate_library_version` + `tax_table_version`.
+* Verified data (licensed feeds, contractor-confirmed invoices) is flagged at row level and never silently blended with estimates.
 
-* LLM tools are `search_properties`, `estimate_refurbishment`, `analyse_investment`, `get_constraints`, `get_comparables` — each returns structured data with `source`, `as_of`, `version`.
-* The response renderer checks that every currency figure in the assistant's text appears in the tool results for that turn (numeric grounding check); otherwise the message is regenerated or numbers are stripped.
-* Every stored estimate snapshots `engine_version`, `rate_library_version`, `tax_table_version` and inputs → reproducible forever.
-* Document extraction (surveys, leases, legal packs) produces **proposed** fields with confidence and page references; the user confirms before they change an estimate.
+## 3. Engagement analytics architecture (Parts 3–5)
 
-## 4. Pricing data loop (the moat)
+**Collection (PECR + UK GDPR):**
+* Non-essential tracking only after opt-in consent (prototype: `src/engine/tracking.ts`; consent control on each listing page).
+* Events: `listing_view, photo_enlarge, floorplan_open, save, compare_add, viewing_request, enquiry, ai_question(topic), refurb_sim, design_style, document_open` with random session id; no name/email/IP in the event stream.
+* Lawful basis: consent for analytics cookies/storage; legitimate interests for aggregated reporting to the listing's owner/agent (with LIA and DPIA). Privacy notice explains owner-facing aggregates.
 
-1. Plinth issues a standard scope/BoQ (codes like `KITCHEN`, `REWIRE`).
-2. Contractors quote line-by-line against those codes (structured, not PDF).
-3. On completion, invoices and variations are attached; owner confirms.
-4. With consent, line items are normalised (region, spec, date via BCIS-style indices or our own index) and stored in `cost_observations`.
-5. A Bayesian hierarchical model (trade × region × spec × era) updates rates; a QS reviews any rate change > ±7% before publishing a new `rate_library_version`.
-6. Estimates show which library version and how many verified observations back each rate ("based on 46 verified quotes in Outer London, last 12 months").
+**Processing:**
+* Stream aggregation to daily `listing_engagement_daily` and segment tables.
+* **k-anonymity (k ≥ 10)** on any segment shown to owners/agents (e.g. style explored, question topic, budget band). Owners see their own listing totals; never individual visitors or question text.
+* Statistics: Wilson intervals for rates; comparisons only claimed when intervals don't overlap; trend claims need minimum sample sizes (`src/engine/engagement.ts`).
+* Insight typing: `observed` (counts), `inferred` (interpretation with caveat), `recommendation` (suggested action) — each with evidence and confidence.
 
-## 5. Database schema
+**Benchmarks:** comparable-listing sets by area/type/price band, computed nightly.
 
-Full DDL: [`db/schema.sql`](../db/schema.sql). Core entities:
+## 4. Property knowledge graph (Part 13)
 
-* **Tenancy & identity**: `organisations` (tenant), `users`, `memberships(role)`, `api_keys`, `usage_events`.
-* **Property graph**: `properties` (UPRN-keyed, PostGIS point), `listings` (source, licence, status), `price_events`, `epc_certificates`, `constraints` (spatial layers cached per UPRN), `planning_applications`.
-* **Estimating**: `rate_libraries`, `rate_items`, `estimates` (inputs + snapshot JSONB), `estimate_lines`, `cost_observations`.
-* **Investment**: `investment_analyses` (inputs/outputs JSONB + versions).
-* **Marketplace**: `contractors`, `contractor_credentials`, `projects`, `scopes`, `quotes`, `quote_lines`, `milestones`, `variations`, `disputes`.
-* **Lettings**: `tenancies`, `tenants`, `compliance_items`, `maintenance_requests`, `rent_ledger`, `applications`, `decisions` (human decision log).
-* **Documents**: `documents`, `document_extractions`.
-* **Governance**: `consents`, `audit_log`.
+Implemented relationally (Postgres) with an edge table, not a separate graph DB, until query patterns demand one.
 
-Multi-tenancy: shared schema with `organisation_id` on every tenant-owned row and **Postgres Row-Level Security** policies keyed on `current_setting('app.org_id')`. Enterprise tenants can be moved to a dedicated database (same schema) if contracts require it.
+* **Nodes:** property (UPRN), listing, owner, agent/organisation, landlord, document, planning application, constraint layer, comparable sale/let, estimate, design, quote, contractor, maintenance job, tenancy, investment model, transaction milestone, engagement aggregate.
+* **Edges:** typed (`has_listing`, `comparable_of`, `within_constraint`, `estimated_by`, `designed_for`, `quoted_against`, `maintained_by`, …) with `source`, `confidence`, `valid_from/to`, `visibility`.
+* **Access control:** every node/edge carries a visibility class — `public`, `verified`, `owner/agent`, `aggregated`, `private` — enforced by Postgres row-level security keyed on `app.org_id` / `app.user_id`. The AI orchestrator queries through the same RLS-enforced views, so it can never retrieve data the user couldn't see.
+* Visualised per property in the prototype (`src/components/KnowledgeGraph.tsx`).
 
-## 6. API architecture
+## 5. Multi-agent system (Part 12)
 
-* REST, resource-oriented, `/v1/...`, OpenAPI 3.1 as source of truth, generated TS/Python SDKs.
-* Idempotency keys on POST; cursor pagination; ETags on reports.
-* Webhooks (signed, retried with backoff): `estimate.completed`, `quote.received`, `compliance.due`, `listing.matched`.
-* Widgets: a small JS loader that renders in a shadow DOM / iframe, using a **publishable key** restricted by allowed origins; all calculation server-side for metering.
-* Metering: every billable call writes a `usage_event` (org, endpoint, units) → aggregated hourly to Stripe metered billing.
-* Rate limits per key (token bucket in Redis); per-plan quotas.
+* Agents: buyer, seller, estate agent, landlord, investor, developer, contractor, property manager (`src/ai/agents.ts`).
+* Each agent = role + **explicit permission scopes** + schedule + tools. Least privilege: no agent reads individual visitor or tenant personal data.
+* Actions are classed: *non-consequential* (generate a report, run an estimate) may complete automatically; *consequential* (publish listing changes, message a person, book, spend, alter tenancy records) go to an **approval queue** and need a named human approver.
+* **Audit log** (append-only, hash-chained in production) records every tool call, proposal and decision; supports replay. Kill switch and per-agent rate limits.
+* Production runtime: Temporal workflow per agent run; LLM plans tool calls within scope; outputs pass the grounding check.
 
-Example endpoints are listed (and live-demoed with the real engine) on `/developers` in the prototype.
+## 6. Design studio pipeline (Part 6)
 
-## 7. Authentication & roles
+1. Upload photo → EXIF stripped, faces/plates blurred, stored per user.
+2. Segmentation + depth/edge maps → image model generates concept **conditioned on structure** (keeps walls, windows, proportions).
+3. Concept spec (style, tier, finishes) → `designCost()` → material & labour schedule → optional quote request / investment hand-off.
+4. Outputs watermarked: "AI concept" and, for staged marketing images, "Virtually staged" (non-removable in exported marketing assets).
 
-| Actor | Auth | Notes |
-|---|---|---|
-| Consumers | OIDC (email magic link, Google/Apple, passkeys) | |
-| Org staff (agents, landlords, contractors) | OIDC + org membership; SSO (SAML) for enterprise | MFA mandatory for admin roles |
-| Machine (partners) | Secret API keys (server), publishable keys (widgets), OAuth2 client credentials for enterprise | Keys hashed at rest, scoped, rotatable |
-
-Roles: `consumer`, `investor`, `landlord`, `agent_admin`, `agent_negotiator`, `property_manager`, `contractor_admin`, `contractor_estimator`, `developer` (API), `qs_reviewer` (internal), `trust_safety` (internal), `platform_admin`. Permissions are capability-based (`estimate:create`, `tenancy:decide`, …) mapped from roles.
-
-## 8. Data ingestion (legitimate sources only)
+## 7. Data ingestion (legitimate sources only)
 
 | Source | Licence | Use |
 |---|---|---|
-| HM Land Registry Price Paid, UK HPI | OGL | Sold comps, area trends |
-| EPC register (England & Wales), Scottish EPC | OGL/terms | Floor area, EPC, construction age |
-| Environment Agency flood maps, NRW, SEPA | OGL | Flood risk |
-| Historic England / Cadw / HES listed buildings; conservation areas | OGL | Constraints |
-| planning.data.gov.uk; LPA portals | OGL / per-LPA terms | Planning history, Article 4 |
-| BGS GeoSure | **Licensed** | Subsidence — paid |
-| OS AddressBase / OS Maps | **Licensed** (PSGA free tier for some) | UPRN, mapping |
-| Ofsted / Estyn / Education Scotland | OGL | Schools |
-| TfL Unified API, NaPTAN, BODS | Open | Commute |
-| police.uk | OGL | Crime |
-| Agent CRM feeds (Reapit, Alto, Street, Jupix) | Per-agent consent + partner agreements | Listings |
-| Auction houses | Partnership | Auction lots & legal packs |
-| Rental data (e.g. ONS PIPR, partner agents) | OGL / commercial | Rent estimates |
+| HM Land Registry Price Paid, UK HPI | OGL | Comparables, trends |
+| EPC registers (E&W, Scotland) | OGL / terms | Floor area, fabric, energy |
+| EA / NRW / SEPA flood | OGL | Risk |
+| Historic England / Cadw / HES; conservation areas; Article 4 | OGL / LPA | Constraints |
+| planning.data.gov.uk + LPA portals | OGL / LPA terms | Planning history & pipeline |
+| BGS GeoSure | Licensed | Subsidence |
+| OS AddressBase / Maps | Licensed (PSGA thresholds) | UPRN, mapping |
+| Ofsted / Estyn / Education Scotland; TfL, NaPTAN, BODS; police.uk | Open | Schools, transport, crime |
+| ONS private rents / PIPR | OGL | Rental context |
+| Agent CRMs (Reapit, Alto, Street, Jupix), auction houses | Partner agreements + agent consent | Listings |
+| Contractor quotes, invoices | User consent | Cost calibration |
 
-Pipeline: Python jobs (Prefect/Airflow) → raw S3 → validated staging → Postgres, with lineage (`source`, `retrieved_at`, `licence`) on every row. **No portal scraping.**
+**No portal scraping.** Every row stores `source`, `retrieved_at`, `licence`.
 
-## 9. Security, GDPR & compliance
+## 8. Security & compliance
 
-* UK GDPR / DPA 2018: ICO registration, DPIA for tenant screening and document AI, records of processing, DSAR tooling, retention schedules per data class.
-* Special-category and protected-characteristic data is not collected for screening; Art. 22 safeguards — no solely automated decisions with legal effect.
-* Encryption in transit (TLS 1.2+) and at rest (KMS); field-level encryption for ID documents; least-privilege IAM.
-* AI processing: zero-retention API terms with model providers; PII redaction before prompts where feasible; prompts and outputs logged for audit (with retention limits).
-* Cyber Essentials Plus in year 1; ISO 27001 before enterprise/lender deals.
-* Regulated activities via partners: FCA-authorised payments/escrow, mortgage brokers, RICS valuers, referencing agencies.
+* UK GDPR / DPA 2018: ICO registration; DPIAs for engagement analytics, document AI, tenant workflows; RoPA; DSAR & deletion tooling; retention schedules.
+* PECR: consent for non-essential storage/tracking; marketing consent separate.
+* Art. 22: no solely automated decisions with legal/similarly significant effect (tenant eligibility, credit). Human decision log (`decisions` table).
+* Consumer protection (DMCC Act 2024 / CPRs, NTSELAT material information): virtual staging labelled; material information from verified fields only.
+* Security: TLS 1.2+, KMS encryption, field-level encryption for ID/tenant data, least-privilege IAM, WAF, secrets in AWS Secrets Manager; Cyber Essentials Plus → ISO 27001 → SOC 2 Type II for enterprise.
+* Regulated activities via partners (FCA payments/escrow, mortgage brokers, RICS valuers, referencing agencies).
 
-## 10. Deployment strategy
+## 9. API & multi-tenancy
 
-* Environments: `dev` (per-PR previews), `staging` (anonymised data), `prod` (eu-west-2, multi-AZ).
-* CI: typecheck, unit tests (engine golden tests incl. HMRC worked examples), contract tests against OpenAPI, Playwright smoke tests.
-* Engine/rate/tax tables released as versioned artefacts with change notes and QS sign-off; old versions remain callable for reproducibility.
-* Blue/green deploys, feature flags (per tenant), database migrations via expand/contract.
-* Targets: 99.9% API availability (99.95% enterprise), p95 < 300ms for estimates.
+* REST `/v1`, OpenAPI 3.1, SDKs; idempotency keys; cursor pagination; signed webhooks.
+* Tenants = organisations; RLS on every tenant-owned table; enterprise option for dedicated database.
+* Keys: secret (server), publishable (widgets, origin-restricted), OAuth2 client credentials; scopes per endpoint.
+* Metering: `usage_events` → hourly aggregation → Stripe metered billing.
+* Widgets: JS loader rendering into shadow DOM/iframe with tenant theme (colours, fonts, logo), server-side calculation.
+
+## 10. Deployment & reliability
+
+* Environments: preview (per PR), staging (anonymised data), production (multi-AZ).
+* CI: typecheck, unit tests (engines incl. HMRC worked examples), contract tests (OpenAPI), Playwright smoke tests, LLM eval suite (grounding, refusal, routing accuracy).
+* Versioned releases of rate libraries and tax tables with QS / tax-specialist sign-off.
+* Targets: 99.9% (99.95% enterprise); p95 < 300 ms for engine endpoints; LLM answers < 4 s p95.
 
 ## 11. What is real in this prototype
 
 | Area | Status |
 |---|---|
-| Refurb engine, BoQ export, scenarios, quote comparison | Real deterministic code, unit tested, **demo rate library** |
-| SDLT / LTT / LBTT + ADS | Real, unit tested against worked examples; rates as configured Nov 2026 — verify before reliance |
-| Investment maths (BTL/BRRR/flip/HMO, ICR, sensitivity) | Real, unit tested |
-| NL search | Rule-based interpreter emitting the same structured query an LLM would; real ranking |
-| Listings, comparables, constraints, landlord/agent/contractor data | **Fictional demo data** |
-| Survey extraction | In-browser keyword extraction (stand-in for document AI) |
-| Design studio | Illustrative SVG + colour-grade preview (image model not connected) |
-| Maps | Schematic SVG (no tile provider) |
+| Refurb, design-to-cost, tax (resi + non-resi), investment, valuation scenarios, development screening, residual appraisal, engagement statistics, reports | Deterministic code, **41 unit tests** |
+| AI assistants | Pattern-routed skills over engines (no LLM call) |
+| AI agents | Deterministic runs; approval queue & audit log in browser storage |
+| Engagement data | **Simulated** (seeded) — no real users; client-side consent-gated tracking demo only |
+| Listings, comparables, market inputs, portfolio | **Fictional demonstration data** |
+| Images, maps | Illustrations / schematic SVG; no image model or tile provider connected |
+| Backend, auth, API server, billing | Designed, not implemented |

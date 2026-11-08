@@ -45,6 +45,11 @@ export interface Property {
   agent: string;
   daysOnMarket: number;
   photoHue: number;         // used to render placeholder art
+  serviceChargeAnnual?: number;
+  groundRentAnnual?: number;
+  conversionPotential?: 'none' | 'possible' | 'strong';
+  use?: 'residential' | 'commercial' | 'mixed';
+  documents?: string[];
 }
 
 const idx = (start: number, drift: number, wobble = 1.2) =>
@@ -228,4 +233,65 @@ export const PROPERTIES: Property[] = [
   },
 ];
 
+PROPERTIES.push(
+  {
+    id: 'cro-013', title: 'Edwardian double-fronted house — potential flat conversion', street: 'Wellesley Gardens (fictional)', district: 'CR0', postcode: 'CR0 2RN', town: 'Croydon, London', nation: 'england',
+    lat: 51.379, lng: -0.094, listing: 'sale', price: 825_000, type: 'detached', tenure: 'freehold', beds: 6, baths: 2, floorArea: 238, storeys: 3,
+    era: 'pre-1919', condition: 'poor', epc: { current: 'E', potential: 'C', score: 46 }, councilTax: 'G',
+    features: ['Double-fronted', 'Large plot', 'Off-street parking', 'Close to East Croydon'], loftPotential: 'possible', extensionPotential: 'possible', estRentPcm: 3_900, estGdv: 1_020_000,
+    commute: { to: 'London Bridge', minutes: 16, mode: 'Rail from East Croydon' }, station: { name: 'East Croydon', walkMins: 9 },
+    schools: [{ name: 'Chestnut Park Primary (demo)', rating: 'Good', distanceKm: 0.6 }],
+    risks: { flood: 'low', conservationArea: false, article4: false, listed: false, subsidence: 'medium', radon: 'low' },
+    priceHistory: [{ date: '1994-08', price: 168_000, event: 'Sold' }, { date: '2026-08', price: 875_000, event: 'Listed' }, { date: '2026-10', price: 825_000, event: 'Reduced' }],
+    areaIndex: idx(100, 0.1), rentDemand: 83,
+    comparables: [
+      { address: 'Wellesley Gdns (flat conversion, 2-bed unit)', price: 335_000, date: '2026-04', beds: 2, distanceM: 140, kind: 'sold', refurbished: true },
+      { address: 'Park Lane Rd (1-bed unit)', price: 245_000, date: '2026-06', beds: 1, distanceM: 380, kind: 'sold', refurbished: true },
+      { address: 'Chepstow Rd (unconverted)', price: 860_000, date: '2025-12', beds: 6, distanceM: 420, kind: 'sold', refurbished: false },
+    ],
+    planningNearby: [
+      { ref: 'DEMO/2025/3301', desc: 'Conversion of single dwelling into 4 self-contained flats', decision: 'Approved', distanceM: 160 },
+      { ref: 'DEMO/2026/0412', desc: 'Conversion into 5 flats with rear dormer', decision: 'Refused', distanceM: 310 },
+    ],
+    agent: 'Southline Property (demo agent)', daysOnMarket: 74, photoHue: 28, conversionPotential: 'strong', use: 'residential',
+    documents: ['EPC', 'Floor plan', 'Title register (requested)'],
+  },
+  {
+    id: 'ley-014', title: 'Two-bed flat, low service charge, dated kitchen', street: 'Marsh Lane Court (fictional)', district: 'E10', postcode: 'E10 7BL', town: 'Leyton, London', nation: 'england',
+    lat: 51.566, lng: -0.012, listing: 'sale', price: 335_000, type: 'flat', tenure: 'leasehold', leaseYears: 142, beds: 2, baths: 1, floorArea: 64, storeys: 1,
+    era: '1980-1999', condition: 'fair', epc: { current: 'C', potential: 'B', score: 71 }, councilTax: 'C',
+    features: ['Share of freehold available', 'Balcony', 'Service charge £1,150 p.a.', 'Allocated parking'], loftPotential: 'none', extensionPotential: 'none', estRentPcm: 1_900, estGdv: 375_000,
+    commute: { to: 'Liverpool Street', minutes: 22, mode: 'Central line from Leyton' }, station: { name: 'Leyton', walkMins: 8 },
+    schools: [{ name: 'Riverley Primary (demo)', rating: 'Good', distanceKm: 0.5 }],
+    risks: { flood: 'low', conservationArea: false, article4: false, listed: false, subsidence: 'low', radon: 'low' },
+    priceHistory: [{ date: '2012-03', price: 205_000, event: 'Sold' }, { date: '2026-10', price: 335_000, event: 'Listed' }],
+    areaIndex: idx(100, 0.16), rentDemand: 90,
+    comparables: [{ address: 'Marsh Lane Ct (comp, refurbished)', price: 372_000, date: '2026-05', beds: 2, distanceM: 40, kind: 'sold', refurbished: true }, { address: 'Marsh Lane Ct (let)', price: 1_925, date: '2026-09', beds: 2, distanceM: 40, kind: 'let', refurbished: true }],
+    planningNearby: [], agent: 'Northbank Estates (demo agent)', daysOnMarket: 15, photoHue: 200, serviceChargeAnnual: 1_150, groundRentAnnual: 0, use: 'residential',
+    documents: ['EPC', 'Floor plan', 'Lease', 'Service charge accounts 2025', 'LPE1 (requested)'],
+  },
+  {
+    id: 'wat-015', title: 'Vacant 1980s office building — office-to-residential (Class MA) candidate', street: 'Clarendon Yard (fictional)', district: 'WD17', postcode: 'WD17 1HP', town: 'Watford, Hertfordshire', nation: 'england',
+    lat: 51.659, lng: -0.401, listing: 'sale', price: 1_450_000, type: 'commercial', tenure: 'freehold', beds: 0, baths: 6, floorArea: 2_150, storeys: 4,
+    era: '1980-1999', condition: 'fair', epc: { current: 'D', potential: 'B', score: 64 }, councilTax: 'Business rates',
+    features: ['Class E office', 'Vacant possession', '22 parking spaces', '5 min to Watford Junction'], loftPotential: 'none', extensionPotential: 'possible', estRentPcm: 0, estGdv: 1_600_000,
+    commute: { to: 'London Euston', minutes: 16, mode: 'Rail from Watford Junction' }, station: { name: 'Watford Junction', walkMins: 5 },
+    schools: [], risks: { flood: 'low', conservationArea: false, article4: true, listed: false, subsidence: 'low', radon: 'low' },
+    priceHistory: [{ date: '2008-02', price: 1_900_000, event: 'Sold' }, { date: '2026-09', price: 1_450_000, event: 'Listed' }],
+    areaIndex: idx(100, 0.12), rentDemand: 78,
+    comparables: [{ address: 'Station Rd conversion (1-bed unit)', price: 255_000, date: '2026-03', beds: 1, distanceM: 400, kind: 'sold', refurbished: true }, { address: 'Station Rd conversion (2-bed unit)', price: 335_000, date: '2026-05', beds: 2, distanceM: 400, kind: 'sold', refurbished: true }],
+    planningNearby: [{ ref: 'DEMO/2025/PA/0218', desc: 'Prior approval Class MA: office to 30 flats (similar 1980s block)', decision: 'Approved', distanceM: 450 }, { ref: 'DEMO/2026/A4/001', desc: 'Article 4 direction removing Class MA (town centre core)', decision: 'Pending', distanceM: 0 }],
+    agent: 'Herts Commercial (demo agent)', daysOnMarket: 58, photoHue: 215, conversionPotential: 'strong', use: 'commercial',
+    documents: ['EPC (non-domestic)', 'Floor plans', 'Measured survey', 'Asbestos register'],
+  },
+);
+
 export const getProperty = (id: string) => PROPERTIES.find((p) => p.id === id);
+
+/** Demo photo set for a listing. Photos are illustrations; ids drive engagement analytics. */
+export function photosFor(p: Property) {
+  const base = p.type === 'commercial'
+    ? ['Front elevation', 'Open-plan office floor', 'Reception', 'Car park', 'Floor plan view']
+    : ['Front elevation', 'Living room', 'Kitchen', p.type === 'flat' ? 'Balcony / view' : 'Rear garden', 'Main bedroom', 'Bathroom'];
+  return base.map((label, i) => ({ id: `${p.id}-ph${i + 1}`, label, index: i }));
+}

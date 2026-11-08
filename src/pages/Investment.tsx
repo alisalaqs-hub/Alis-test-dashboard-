@@ -2,13 +2,13 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getProperty } from '../data/properties';
 import { refurbInputFor } from '../engine/insights';
-import { analyse, DEFAULT_INVESTMENT, scenario, sensitivity, type InvestmentInput, type ScenarioName, type Strategy } from '../engine/investment';
+import { analyse, breakEven, DEFAULT_INVESTMENT, scenario, sensitivity, type InvestmentInput, type ScenarioName, type Strategy } from '../engine/investment';
 import { estimateRefurb } from '../engine/refurb';
 import type { BuyerType, Nation } from '../engine/tax';
 import { gbp, gbpK, Money, Pct, Section, Seg, Stacked, Stat, Tag } from '../components/ui';
 
 const STRATS: { value: Strategy; label: string }[] = [
-  { value: 'btl', label: 'Buy-to-let' }, { value: 'brrr', label: 'BRRR' }, { value: 'flip', label: 'Flip' }, { value: 'hmo', label: 'HMO' },
+  { value: 'btl', label: 'Buy-to-let' }, { value: 'brrr', label: 'BRRR' }, { value: 'flip', label: 'Flip' }, { value: 'hmo', label: 'HMO' }, { value: 'commercial', label: 'Commercial' },
 ];
 
 function heatColour(v: number, base: number) {
@@ -21,8 +21,10 @@ export default function Investment() {
   const [params] = useSearchParams();
   const prop = getProperty(params.get('property') ?? '');
   const [i, setI] = useState<InvestmentInput>(() => {
-    if (!prop || prop.listing === 'rent') return DEFAULT_INVESTMENT;
-    const refurb = estimateRefurb(refurbInputFor(prop)).total;
+    const fromDesign = Number(params.get('refurb')) || 0;
+    if (!prop || prop.listing === 'rent') return fromDesign ? { ...DEFAULT_INVESTMENT, refurbCost: fromDesign } : DEFAULT_INVESTMENT;
+    const refurb = fromDesign || estimateRefurb(refurbInputFor(prop)).total;
+    if (prop.type === 'commercial') return { ...DEFAULT_INVESTMENT, strategy: 'commercial', buyer: 'additional', price: prop.price, nation: prop.nation, refurbCost: Math.round(refurb / 500) * 500, monthlyRent: Math.round((prop.floorArea * 10.764 * 19) / 12), voidPct: 0.1, managementPct: 0.03, maintenancePct: 0.02, gdv: prop.price, depositPct: 0.35, mortgageRate: 0.065 };
     return { ...DEFAULT_INVESTMENT, price: prop.price, nation: prop.nation, refurbCost: Math.round(refurb / 500) * 500, monthlyRent: prop.estRentPcm, gdv: prop.estGdv };
   });
   const [scen, setScen] = useState<ScenarioName>('base');
@@ -36,14 +38,17 @@ export default function Investment() {
   const all = useMemo(() => (['downside', 'base', 'optimistic'] as ScenarioName[]).map((s) => ({ s, r: analyse(scenario(i, s)) })), [i]);
   const sens = useMemo(() => sensitivity(active), [active]);
   const flip = i.strategy === 'flip';
+  const be = useMemo(() => breakEven(active), [active]);
+  const designLabel = params.get('label');
   const baseMetric = flip ? r.flipProfit : r.monthlyCashflow;
 
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
         <div>
-          <div className="eyebrow">MVP feature 02</div>
+          <div className="eyebrow">AI investment analyser</div>
           <h2 style={{ marginTop: 6 }}>Investment underwriter</h2>
+          {designLabel && <div className="callout ok small" style={{ marginTop: 8 }}>Refurbishment of {gbp(Number(params.get('refurb')))} imported from your <b>{designLabel}</b> design concept. <Link to={`/studio?property=${prop?.id ?? ''}`}>Back to studio</Link></div>}
           <p className="muted" style={{ marginTop: 6 }}>Every figure below comes from deterministic, unit-tested calculators. Edit any assumption. {prop && <>Prefilled from <Link to={`/property/${prop.id}`}>{prop.title}</Link> with the engine’s refurb estimate.</>}</p>
         </div>
         <Seg value={i.strategy} onChange={setStrategy} options={STRATS} />
@@ -109,6 +114,18 @@ export default function Investment() {
               <div className="card"><Stat label="Gross / net yield" value={`${(r.grossYield * 100).toFixed(1)}% / ${(r.netYield * 100).toFixed(1)}%`} sub="Net = NOI ÷ all-in cost" /></div>
               <div className="card"><Stat label="Lender stress test" value={<span className={r.icrPass ? 'pos' : 'neg'}>{r.icrPass ? 'Pass' : 'Fail'} · {(r.icr * 100).toFixed(0)}%</span>} sub={`ICR req. ${(r.icrRequired * 100).toFixed(0)}% @ ${(r.stressRate * 100).toFixed(1)}%`} /></div>
             </>}
+          </div>
+
+          <div className="card">
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Break-even points</div>
+            <div className="grid g4 keep2">
+              {flip ? <Stat label="Break-even sale price" value={gbpK(be.salePrice)} sub={`${(((active.gdv - be.salePrice) / active.gdv) * 100).toFixed(1)}% below GDV`} /> : <>
+                <Stat label="Break-even rent" value={`${gbp(be.rent)} pcm`} sub={`${(((active.monthlyRent - be.rent) / active.monthlyRent) * 100).toFixed(0)}% cushion vs assumed rent`} />
+                <Stat label="Break-even occupancy" value={`${Math.min(999, be.occupancy * 100).toFixed(0)}%`} sub="Of months let per year" />
+                <Stat label="Break-even interest rate" value={Number.isFinite(be.rate) ? `${(be.rate * 100).toFixed(2)}%` : '—'} sub="Interest-only equivalent" />
+                <Stat label="ROI on cash (yr 1, pre-tax)" value={Number.isFinite(r.cashOnCash) ? `${(r.cashOnCash * 100).toFixed(1)}%` : '∞'} sub="Cash flow ÷ cash left in" />
+              </>}
+            </div>
           </div>
 
           {i.strategy === 'brrr' && (

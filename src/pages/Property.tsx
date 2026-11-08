@@ -1,10 +1,16 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getProperty, PROPERTIES, type Property } from '../data/properties';
 import { dealScore, epcPathway, loftScenario, ownershipForecast, refurbInputFor } from '../engine/insights';
 import { estimateRefurb } from '../engine/refurb';
 import { transactionTax } from '../engine/tax';
 import { gbp, gbpK, HouseArt, Meter, pct, Section, Spark, Stat, Tag } from '../components/ui';
+import { valuationScenario, rentalScenario } from '../engine/valuation';
+import { developmentOptions } from '../engine/development';
+import { engagementFor, insightsFor, totals, benchmark } from '../engine/engagement';
+import { AssistantPanel } from '../components/Assistant';
+import { propertySkills } from '../ai/skills';
+import { KnowledgeGraph } from '../components/KnowledgeGraph';
 
 function extensionScenario(p: Property) {
   if (p.extensionPotential === 'none' || p.type === 'flat') return null;
@@ -24,17 +30,6 @@ function offerRange(p: Property) {
   return { low, high, leverage };
 }
 
-function answer(p: Property, q: string, ctx: ReturnType<typeof useCtx>): string {
-  const s = q.toLowerCase();
-  if (/cost|refurb|budget|works/.test(s)) return `For a ${ctx.est.factors[1].value.split(' ')[0]}-condition ${p.era} ${p.type} of ${p.floorArea}m², the engine prices the inferred scope at ${gbp(ctx.est.total)} incl. VAT (range ${gbpK(ctx.est.low)}–${gbpK(ctx.est.high)}, ${ctx.est.confidence} confidence). Largest trades: ${ctx.est.byTrade.slice(0, 3).map((t) => `${t.trade} ${gbpK(t.total)}`).join(', ')}. Open the estimator to change the scope.`;
-  if (/offer|negotiat|price/.test(s)) return `Evidence suggests an opening offer around ${gbp(ctx.offer.low)}, walking away above ${gbp(ctx.offer.high)}. Leverage: ${p.daysOnMarket} days on market${p.priceHistory.some((h) => h.event === 'Reduced') ? ', one price reduction already' : ''}. Lead with the refurb cost (${gbpK(ctx.est.total)}) and unrefurbished comparables, not the asking price. This is preparation, not valuation — a RICS valuation or survey should support your offer.`;
-  if (/risk|flood|problem|issue|constraint/.test(s)) return `Flagged: flood risk ${p.risks.flood}; subsidence susceptibility ${p.risks.subsidence}; ${p.risks.conservationArea ? 'conservation area (permitted development restricted, materials controlled)' : 'not in a conservation area'}; ${p.risks.article4 ? 'Article 4 direction in force' : 'no Article 4 direction found'}; ${p.risks.listed ? 'listed building — consent needed for most works' : 'not listed'}. ${p.era === 'pre-1919' ? 'Pre-1919 solid walls: check for damp misdiagnosis and avoid non-breathable materials.' : ''} Commission a RICS Level 3 survey before exchange.`;
-  if (/rent|let|btl|yield|invest/.test(s)) return `Estimated achievable rent ${gbp(p.estRentPcm)} pcm (demand index ${p.rentDemand}/100). On an all-in cost of ${gbpK(p.price + ctx.est.total)} that’s a ${pct(ctx.ds.grossYield)} gross yield. Use the investment dashboard to stress-test finance at today’s rates.`;
-  if (/loft|extension|extend|planning/.test(s)) return `${ctx.loft ? `Loft (~${ctx.loft.area}m²): cost ≈ ${gbpK(ctx.loft.cost)}, value uplift ≈ ${gbpK(ctx.loft.valueUplift)} → net ${gbpK(ctx.loft.net)}.` : 'No realistic loft conversion.'} ${ctx.ext ? `Rear extension (~${ctx.ext.area}m²): cost ≈ ${gbpK(ctx.ext.cost)}, uplift ≈ ${gbpK(ctx.ext.valueUplift)}.` : ''} Nearby decisions: ${p.planningNearby.map((a) => `${a.desc} — ${a.decision}`).join('; ') || 'none on record in demo data'}. This is not a planning opinion; confirm permitted development rights with the LPA or a planning consultant.`;
-  if (/epc|energy|insulat|heat pump/.test(s)) return `EPC ${p.epc.current} (${p.epc.score}) today. The cheapest path to C: ${ctx.epc.steps.filter((x) => x.cumulative <= 72).map((x) => x.measure).slice(0, 3).join(', ') || ctx.epc.steps.slice(0, 2).map((x) => x.measure).join(', ')}. Lettings currently need EPC E or above in England & Wales; plan for proposed tighter standards.`;
-  return 'I can answer about refurbishment cost, offer strategy, risks & constraints, rental yield, loft/extension potential and EPC upgrades for this property. Answers are composed from engine outputs and the data shown on this page.';
-}
-
 function useCtx(p: Property) {
   return useMemo(() => {
     const est = estimateRefurb(refurbInputFor(p));
@@ -47,9 +42,10 @@ export default function PropertyPage() {
   const { id = 'wal-001' } = useParams();
   const p = getProperty(id) ?? PROPERTIES[0];
   const ctx = useCtx(p);
-  const [chat, setChat] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
-  const [input, setInput] = useState('');
-  const ask = (q: string) => { if (!q.trim()) return; setChat((c) => [...c, { role: 'user', text: q }, { role: 'ai', text: answer(p, q, ctx) }]); setInput(''); };
+  const val = useMemo(() => valuationScenario(p), [p]);
+  const rent = useMemo(() => rentalScenario(p), [p]);
+  const dev = useMemo(() => developmentOptions(p), [p]);
+  const eng = useMemo(() => ({ t: totals(engagementFor(p)), bm: benchmark(p), ins: insightsFor(p) }), [p]);
   const tax = transactionTax(p.price, p.nation, 'additional');
   const rental = p.listing === 'rent';
   const { est, ds } = ctx;
@@ -63,7 +59,7 @@ export default function PropertyPage() {
 
   return (
     <div className="stack" style={{ gap: 18 }}>
-      <div className="row small muted"><Link to="/search">← Discover</Link><span>/</span><span>{p.town}</span></div>
+      <div className="row small muted"><Link to="/search">← Search</Link><span>/</span><Link to={`/property/${p.id}`}>Listing</Link><span>/</span><span>Intelligence profile</span></div>
       <div className="grid g2" style={{ gap: 20 }}>
         <div className="card" style={{ padding: 0, overflow: 'hidden', minHeight: 260 }}><HouseArt hue={p.photoHue} type={p.type} /></div>
         <div className="stack" style={{ gap: 12 }}>
@@ -72,7 +68,7 @@ export default function PropertyPage() {
           <div className="muted">{p.street}, {p.town} · {p.postcode}</div>
           <div className="row" style={{ alignItems: 'flex-end', gap: 18 }}>
             <Stat big label={rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price'} value={rental ? `${gbp(p.price)}` : gbp(p.price)} sub={rental ? 'per calendar month' : `${gbp(p.price / p.floorArea)}/m² · ${p.daysOnMarket} days on market`} />
-            {!rental && <div className="row" style={{ gap: 10 }}><div className={`grade grade-${ds.grade}`} style={{ width: 64, height: 64, fontSize: '2rem' }}>{ds.grade}</div><div><div className="num" style={{ fontSize: 22 }}>{ds.total}/100</div><div className="xs muted">Plinth deal score</div></div></div>}
+            {!rental && <div className="row" style={{ gap: 10 }}><div className={`grade grade-${ds.grade}`} style={{ width: 64, height: 64, fontSize: '2rem' }}>{ds.grade}</div><div><div className="num" style={{ fontSize: 22 }}>{ds.total}/100</div><div className="xs muted">BRIXO deal score</div></div></div>}
           </div>
           <div className="grid g3" style={{ gap: 10 }}>
             <div className="card flat" style={{ padding: 12 }}><div className="xs muted">Beds / baths</div><div className="num">{p.beds} / {p.baths}</div></div>
@@ -105,6 +101,48 @@ export default function PropertyPage() {
             </table></div>
             <p className="xs muted" style={{ marginTop: 10 }}>Value uplift for lofts/extensions uses a demo heuristic (share of GDV) pending a calibrated hedonic model from Land Registry + EPC floor-area data. Costs from {est.basis.version}.</p>
           </Section>}
+
+          {!rental && p.type !== 'commercial' && <Section title="Valuation scenarios" kicker="Is it overpriced?" right={<Tag kind="est">Indicative · not RICS</Tag>}>
+            <div className="grid g3">
+              <Stat label="As-is range" value={`${gbpK(val.asIs.low)}–${gbpK(val.asIs.high)}`} sub={`Mid ${gbpK(val.asIs.mid)}`} />
+              <Stat label="Post-works range" value={`${gbpK(val.postWorks.low)}–${gbpK(val.postWorks.high)}`} sub={`Mid ${gbpK(val.postWorks.mid)}`} />
+              <Stat label="Asking vs as-is mid" value={`${val.askingVsMid >= 0 ? '+' : ''}${pct(val.askingVsMid)}`} tone={val.verdict === 'above range' ? 'neg' : val.verdict === 'below range' ? 'pos' : undefined} sub={`${val.verdict} · ${val.confidence} confidence`} />
+            </div>
+            <div style={{ position: 'relative', height: 34, margin: '18px 0 6px', background: 'var(--surface-2)', borderRadius: 8 }}>
+              {(() => { const lo = Math.min(val.asIs.low, p.price) * 0.95; const hi = Math.max(val.postWorks.high, p.price) * 1.02; const x = (n: number) => `${((n - lo) / (hi - lo)) * 100}%`; return <>
+                <div title="As-is range" style={{ position: 'absolute', left: x(val.asIs.low), width: `calc(${x(val.asIs.high)} - ${x(val.asIs.low)})`, top: 6, height: 22, background: 'var(--blue-soft)', border: '1px solid var(--blue)', borderRadius: 6 }} />
+                <div title="Post-works range" style={{ position: 'absolute', left: x(val.postWorks.low), width: `calc(${x(val.postWorks.high)} - ${x(val.postWorks.low)})`, top: 6, height: 22, background: 'var(--sage-soft)', border: '1px solid var(--sage)', borderRadius: 6 }} />
+                <div title="Asking" style={{ position: 'absolute', left: x(p.price), top: 0, bottom: 0, width: 3, background: 'var(--accent)' }} />
+              </>; })()}
+            </div>
+            <div className="row xs" style={{ gap: 12 }}><span><i style={{ display: 'inline-block', width: 9, height: 9, background: 'var(--blue)', borderRadius: 2 }} /> As-is</span><span><i style={{ display: 'inline-block', width: 9, height: 9, background: 'var(--sage)', borderRadius: 2 }} /> Post-works</span><span><i style={{ display: 'inline-block', width: 9, height: 9, background: 'var(--accent)', borderRadius: 2 }} /> Asking {gbpK(p.price)}</span><span className="muted">Rent {gbp(rent.low)}–{gbp(rent.high)} pcm ({rent.basis})</span></div>
+            <ul className="ticks small muted" style={{ marginTop: 10 }}>{val.method.map((m) => <li key={m}>{m}</li>)}</ul>
+          </Section>}
+
+          <section className="card" id="development">
+            <div className="card-head"><div><div className="eyebrow">Development potential</div><h3>What could this property become?</h3></div><Tag kind="warn">Screening only — not a planning opinion</Tag></div>
+            <div className="table-wrap"><table className="t">
+              <thead><tr><th>Option</th><th>Status</th><th className="r">Cost</th><th className="r">Value uplift</th></tr></thead>
+              <tbody>{dev.map((o) => <tr key={o.id}><td><b className="small">{o.name}</b><div className="xs muted">{o.summary}</div>{o.constraints.length > 0 && <div className="xs" style={{ color: 'var(--danger)' }}>⚠ {o.constraints.join(' · ')}</div>}{o.checks.length > 0 && <div className="xs muted">Verify: {o.checks.join(', ')}</div>}</td>
+                <td><Tag kind={o.status === 'likely under PD' || o.status === 'prior approval route' ? 'ok' : o.status === 'needs planning permission' ? 'demo' : o.status === 'constrained' ? 'warn' : 'neutral'}>{o.status}</Tag></td>
+                <td className="r num">{o.cost != null ? gbpK(o.cost) : '—'}</td><td className={`r num ${(o.valueUplift ?? 0) - (o.cost ?? 0) >= 0 ? 'pos' : 'neg'}`}>{o.valueUplift != null ? gbpK(o.valueUplift) : '—'}</td></tr>)}</tbody>
+            </table></div>
+            <p className="xs muted" style={{ marginTop: 8 }}>England permitted-development rules (GPDO) simplified as configured Nov 2026; planning layers are demo data. Structural, legal and planning matters need professional verification.</p>
+          </section>
+
+          {!rental && <Section title="Market response" kicker="Engagement (aggregated, simulated)" right={<Link className="btn ghost sm" to="/owner">Owner dashboard →</Link>}>
+            <div className="grid g4 keep2">
+              <Stat label="Views (28d)" value={eng.t.views.toLocaleString('en-GB')} />
+              <Stat label="Unique visitors" value={eng.t.unique.toLocaleString('en-GB')} />
+              <Stat label="Saves" value={eng.t.saves} />
+              <Stat label="Conversion" value={pct(eng.t.enquiryRate.p)} sub={`Comparables ${pct(eng.bm.rate.p)}`} tone={eng.t.enquiryRate.high < eng.bm.rate.low ? 'neg' : undefined} />
+            </div>
+            <ul className="clean small" style={{ marginTop: 12 }}>{eng.ins.slice(0, 4).map((i) => <li key={i.id}><Tag kind={i.kind === 'observed' ? 'obs' : i.kind === 'inferred' ? 'inf' : 'rec'} /> {i.title}</li>)}</ul>
+          </Section>}
+
+          <Section title="Property knowledge graph" kicker="What BRIXO connects for this property" right={<Tag kind="neutral">Access-controlled</Tag>}>
+            <KnowledgeGraph p={p} />
+          </Section>
 
           {!rental && <Section title="Why this score?" kicker="Explainable deal scoring">
             {ds.components.map((c) => (
@@ -171,17 +209,7 @@ export default function PropertyPage() {
         </div>
 
         <div className="stack" style={{ gap: 16 }}>
-          <Section title="Ask about this property" kicker="Property copilot" right={<Tag kind="ai" />}>
-            <div className="chat" style={{ maxHeight: 360 }}>
-              {chat.length === 0 && <p className="small muted">Answers are composed only from the engine outputs and data on this page — the assistant can’t invent comparables or prices.</p>}
-              {chat.map((m, i) => <div key={i} className={`msg ${m.role}`}>{m.text}</div>)}
-            </div>
-            <div className="chips" style={{ marginTop: 10 }}>{['What will the refurb cost?', 'What should I offer?', 'What are the risks?', 'Is it good for buy-to-let?', 'Loft or extension?', 'How do I improve the EPC?'].map((s) => <button key={s} className="chip xs" onClick={() => ask(s)}>{s}</button>)}</div>
-            <div className="row" style={{ marginTop: 10, flexWrap: 'nowrap' }}>
-              <input className="input" value={input} placeholder="Ask a question…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ask(input)} />
-              <button className="btn sm" onClick={() => ask(input)}>Ask</button>
-            </div>
-          </Section>
+          <AssistantPanel title="Ask anything about this property" kicker="Property intelligence AI" skills={propertySkills} ctx={p} />
           {!rental && <Section title="Offer preparation" kicker="Negotiation" right={<Tag kind="est" />}>
             <div className="row between"><Stat label="Opening" value={gbpK(ctx.offer.low)} /><Stat label="Walk-away" value={gbpK(ctx.offer.high)} /></div>
             <p className="xs muted" style={{ marginTop: 8 }}>From unrefurbished comparables, days on market and price history. Not a valuation.</p>

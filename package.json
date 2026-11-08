@@ -1,9 +1,9 @@
 {
-  "name": "plinth-platform",
+  "name": "brixo-platform",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Plinth — AI-first UK property intelligence platform (prototype)",
+  "description": "BRIXO — The Intelligent Property Platform (prototype)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

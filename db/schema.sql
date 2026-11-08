@@ -1,4 +1,4 @@
--- Plinth — initial PostgreSQL 16 + PostGIS schema (v0.1)
+-- BRIXO — PostgreSQL 16 + PostGIS schema (v0.2)
 -- Multi-tenant: tenant-owned tables carry organisation_id and are protected by RLS.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -142,7 +142,7 @@ CREATE INDEX ON planning_applications USING gist (location);
 
 -- ───────────── Estimating ─────────────
 CREATE TABLE rate_libraries (
-  version       text PRIMARY KEY,             -- e.g. 'plinth-2027.01'
+  version       text PRIMARY KEY,             -- e.g. 'brixo-2027.01'
   basis_date    date NOT NULL,
   status        text NOT NULL CHECK (status IN ('draft','approved','retired')),
   approved_by   uuid REFERENCES users(id),    -- QS reviewer
@@ -361,6 +361,77 @@ CREATE TABLE audit_log (
   organisation_id uuid, actor uuid, action text NOT NULL, subject text, detail jsonb,
   at timestamptz NOT NULL DEFAULT now()
 );
+
+-- ───────────── Engagement analytics (consented, aggregated) ─────────────
+CREATE TABLE analytics_consents (
+  session_id text PRIMARY KEY, user_id uuid REFERENCES users(id),
+  status text NOT NULL CHECK (status IN ('granted','denied')), decided_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Raw events: short retention (≤ 13 months), never exposed to dashboards directly.
+CREATE TABLE engagement_events (
+  id bigserial PRIMARY KEY,
+  listing_id uuid NOT NULL REFERENCES listings(id),
+  session_id text NOT NULL,                  -- random, rotating; no PII
+  name text NOT NULL CHECK (name IN ('listing_view','photo_enlarge','floorplan_open','save','compare_add','viewing_request','enquiry','ai_question','refurb_sim','design_style','document_open')),
+  props jsonb,                               -- e.g. {"photo_id": "...", "topic": "refurb_cost"} — never free text
+  occurred_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ON engagement_events (listing_id, occurred_at);
+
+CREATE TABLE listing_engagement_daily (
+  listing_id uuid NOT NULL REFERENCES listings(id), day date NOT NULL,
+  views int NOT NULL, unique_visitors int NOT NULL, repeat_visits int NOT NULL, saves int NOT NULL,
+  viewing_requests int NOT NULL, enquiries int NOT NULL, avg_seconds int, floorplan_opens int, comparisons int, refurb_sims int,
+  PRIMARY KEY (listing_id, day)
+);
+
+CREATE TABLE listing_engagement_segments (    -- k-anonymised segments (rows with < 10 uniques are not written)
+  listing_id uuid NOT NULL REFERENCES listings(id), period_start date NOT NULL, period_end date NOT NULL,
+  dimension text NOT NULL,                   -- photo, ai_topic, design_style, budget_band, feature, channel, search_query
+  key text NOT NULL, interactions int NOT NULL, unique_visitors int NOT NULL CHECK (unique_visitors >= 10),
+  PRIMARY KEY (listing_id, period_start, dimension, key)
+);
+
+CREATE TABLE listing_insights (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES listings(id),
+  kind text NOT NULL CHECK (kind IN ('observed','inferred','recommendation')),
+  title text NOT NULL, evidence jsonb NOT NULL, confidence text NOT NULL, caveat text,
+  engine_version text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ───────────── Design studio ─────────────
+CREATE TABLE designs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organisation_id uuid NOT NULL REFERENCES organisations(id),
+  property_id uuid REFERENCES properties(id), created_by uuid REFERENCES users(id),
+  room text NOT NULL, style text NOT NULL, tier text NOT NULL, dims jsonb, overrides jsonb,
+  source_document_id uuid REFERENCES documents(id), concept_document_id uuid REFERENCES documents(id),
+  virtually_staged boolean NOT NULL DEFAULT false, total_inc_vat numeric NOT NULL,
+  schedule jsonb NOT NULL,                   -- material & labour lines snapshot
+  share_token text UNIQUE, created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- ───────────── AI agents, approvals, knowledge graph ─────────────
+CREATE TABLE agent_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organisation_id uuid NOT NULL REFERENCES organisations(id),
+  agent text NOT NULL, permissions text[] NOT NULL, tools_called jsonb NOT NULL, findings jsonb NOT NULL,
+  started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz
+);
+CREATE TABLE approvals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organisation_id uuid NOT NULL REFERENCES organisations(id),
+  agent_run_id uuid REFERENCES agent_runs(id), title text NOT NULL, payload jsonb,
+  consequential boolean NOT NULL, status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','executed')),
+  decided_by uuid REFERENCES users(id), decided_at timestamptz
+);
+CREATE TABLE kg_edges (
+  id bigserial PRIMARY KEY,
+  src_type text NOT NULL, src_id text NOT NULL, rel text NOT NULL, dst_type text NOT NULL, dst_id text NOT NULL,
+  visibility text NOT NULL CHECK (visibility IN ('public','verified','owner/agent','aggregated','private')),
+  organisation_id uuid REFERENCES organisations(id), source text NOT NULL, confidence numeric,
+  valid_from timestamptz NOT NULL DEFAULT now(), valid_to timestamptz
+);
+CREATE INDEX ON kg_edges (src_type, src_id); CREATE INDEX ON kg_edges (dst_type, dst_id);
+-- audit_log (above) is append-only in production: revoke UPDATE/DELETE, hash-chain rows.
 
 -- ───────────── Row-level security (example) ─────────────
 ALTER TABLE estimates ENABLE ROW LEVEL SECURITY;

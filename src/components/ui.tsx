@@ -5,8 +5,8 @@ export const gbp = (n: number, dp = 0) =>
 export const gbpK = (n: number) => (Math.abs(n) >= 1_000_000 ? `£${(n / 1_000_000).toFixed(2)}m` : Math.abs(n) >= 10_000 ? `£${Math.round(n / 1_000)}k` : Math.abs(n) >= 1_000 ? `£${(n / 1_000).toFixed(1)}k` : gbp(n));
 export const pct = (n: number, dp = 1) => (Number.isFinite(n) ? `${(n * 100).toFixed(dp)}%` : '∞');
 
-type TagKind = 'demo' | 'est' | 'ai' | 'ok' | 'live' | 'neutral' | 'warn';
-const TAG_TEXT: Partial<Record<TagKind, string>> = { demo: 'Demo data', est: 'Estimate', ai: 'AI-generated', ok: 'Verified', live: 'Needs live integration' };
+type TagKind = 'demo' | 'est' | 'ai' | 'ok' | 'live' | 'neutral' | 'warn' | 'obs' | 'inf' | 'rec';
+const TAG_TEXT: Partial<Record<TagKind, string>> = { demo: 'Demo data', est: 'Estimate', ai: 'AI-generated', ok: 'Verified', live: 'Needs live integration', obs: 'Observed', inf: 'Inferred', rec: 'Recommendation' };
 export function Tag({ kind, children, title }: { kind: TagKind; children?: ReactNode; title?: string }) {
   return <span className={`tag tag-${kind}`} title={title}>{children ?? TAG_TEXT[kind]}</span>;
 }
