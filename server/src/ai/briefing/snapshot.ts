@@ -5,12 +5,12 @@
  * The same shape is used for every dashboard so the briefing engine stays generic:
  *   { title, scope, asOf, metrics: [{label, value, unit}], items: [{id, label, group, fields, notes}], notes }
  * Limits keep requests cheap and predictable: at most 60 items with 16 scalar fields each,
- * short strings only, and about 24 000 characters in total.
+ * short strings only, and about 40 000 characters in total.
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
-export const LIMITS = { items: 60, fieldsPerItem: 16, metrics: 24, notes: 10, itemNotes: 5, chars: 24_000 } as const;
+export const LIMITS = { items: 60, fieldsPerItem: 16, metrics: 24, notes: 10, itemNotes: 5, chars: 40_000 } as const;
 
 const text = (max: number) => z.string().trim().max(max, `Keep this under ${max} characters.`);
 const num = z.number().min(-1e12).max(1e12);

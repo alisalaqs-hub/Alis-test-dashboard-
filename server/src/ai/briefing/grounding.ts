@@ -99,6 +99,6 @@ export const PROHIBITED = /\b(guarantee[ds]?|risk[- ]free|certain to (?:sell|let
 /** Split prose into sentences without breaking decimals ("£1.45m") or common abbreviations. */
 export function sentences(text: string): string[] {
   return text.replace(/\s+/g, ' ').trim()
-    .split(/(?<!\b(?:e\.g|i\.e|etc|approx|vs|no|incl))(?<=[.!?])\s+(?=[A-Z0-9£"“‘(])/)
+    .split(/(?<!\b(?:e\.g|i\.e|etc|approx|vs|incl)\.)(?<=[.!?])\s+(?=[A-Z0-9£"“‘(])/)
     .map((s) => s.trim()).filter(Boolean);
 }
