@@ -12,11 +12,11 @@ const TASKS: { to: string; icon: string; label: string; sub: string; tone: strin
   { to: destination('buy', 'homes for sale in London'), icon: 'search', label: 'Buy a home', sub: 'Search & AI matches', tone: 'ink' },
   { to: destination('rent', 'homes'), icon: 'key', label: 'Rent a home', sub: 'Homes to let', tone: 'ink' },
   { to: '/my-home', icon: 'home', label: 'What’s my home worth?', sub: 'Value, ideas & costs', tone: 'accent' },
-  { to: '/prices', icon: 'pound', label: 'Sold prices', sub: 'What really sold', tone: 'ink' },
+  { to: '/import', icon: 'spark', label: 'Check any listing', sub: 'Paste one from any website', tone: 'ai' },
   { to: '/estimate', icon: 'tools', label: 'Cost a renovation', sub: 'Room-by-room estimate', tone: 'accent' },
   { to: '/studio', icon: 'palette', label: 'Redesign a room', sub: 'See it, then price it', tone: 'ai' },
   { to: '/invest', icon: 'chart', label: 'Check an investment', sub: 'Yield, cash flow, stress test', tone: 'ink' },
-  { to: '/owner', icon: 'tag', label: 'Sell or let', sub: 'See how buyers respond', tone: 'ink' },
+  { to: '/list', icon: 'tag', label: 'List your property', sub: 'Sell or let it yourself', tone: 'accent' },
 ];
 
 export default function Home() {

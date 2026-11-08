@@ -9,6 +9,9 @@ const Compare = lazy(() => import('./pages/Compare'));
 const Saved = lazy(() => import('./pages/Saved'));
 const MyHome = lazy(() => import('./pages/MyHome'));
 const Prices = lazy(() => import('./pages/Prices'));
+const ListProperty = lazy(() => import('./pages/ListProperty'));
+const ImportListing = lazy(() => import('./pages/ImportListing'));
+const Sources = lazy(() => import('./pages/Sources'));
 const Estimator = lazy(() => import('./pages/Estimator'));
 const Investment = lazy(() => import('./pages/Investment'));
 const Studio = lazy(() => import('./pages/Studio'));
@@ -33,6 +36,9 @@ export default function App() {
         <Route path="saved" element={<Saved />} />
         <Route path="my-home" element={<MyHome />} />
         <Route path="prices" element={<Prices />} />
+        <Route path="list" element={<ListProperty />} />
+        <Route path="import" element={<ImportListing />} />
+        <Route path="sources" element={<Sources />} />
         <Route path="estimate" element={<Estimator />} />
         <Route path="invest" element={<Investment />} />
         <Route path="studio" element={<Studio />} />

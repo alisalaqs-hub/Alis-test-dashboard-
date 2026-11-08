@@ -4,14 +4,14 @@
 
 BRIXO connects property discovery, valuation, refurbishment costing, interior design, investment analysis, market-response analytics and management in one AI-first platform — and exposes the same intelligence to agents, landlords, developers and partners via API.
 
-**Status:** interactive prototype. Engines are real and unit-tested (41 tests). **Listings, people, engagement data and market inputs are simulated demonstration data**, labelled throughout the UI. No live data integrations, trained prediction models, LLM calls or backend services are running — see [what is real](docs/02-architecture.md#11-what-is-real-in-this-prototype).
+**Status:** interactive prototype. Engines are real and unit-tested (49 tests). **Listings, people, engagement data and market inputs are simulated demonstration data**, labelled throughout the UI. No live data integrations, trained prediction models, LLM calls or backend services are running — see [what is real](docs/02-architecture.md#11-what-is-real-in-this-prototype).
 
 ## Run
 
 ```bash
 npm install
 npm run dev          # http://localhost:5173
-npm test             # 41 engine/assistant/agent tests
+npm test             # 49 engine/assistant/agent/listing tests
 npm run build        # production build → dist/
 npm run build:single # single self-contained HTML → dist-single/index.html
 ```
@@ -36,6 +36,9 @@ npm run build:single # single self-contained HTML → dist-single/index.html
 | + | AI agents — 8 role agents, approvals, audit | `/#/automation` |
 | + | My Home — value range, ideas, renovation & energy plan for your own home | `/#/my-home` |
 | + | Sold prices | `/#/prices` |
+| + | **List your property** — owner/landlord wizard with price check, AI description, photos & compliance checks | `/#/list` |
+| + | **Check any listing** — paste a listing from another website for private analysis | `/#/import` |
+| + | **Listing sources & feeds** — connect an agent CRM feed (BLM), import report, de-duplication | `/#/sources` |
 | + | Compare · Saved (homes, searches, designs) | `/#/compare`, `/#/saved` |
 
 ## Navigation (v0.3, mobile-first)
@@ -73,6 +76,7 @@ docs/         strategy & brand · architecture · commercial model · roadmap & 
 2. [Technical architecture](docs/02-architecture.md) · [database schema](db/schema.sql)
 3. [Commercial model](docs/03-commercial-model.md)
 4. [Roadmap, go-to-market & next implementation steps](docs/04-roadmap-and-next-steps.md)
+5. [Listing supply: other websites, agent feeds & owner listings (incl. legal position)](docs/05-listing-sources.md)
 
 ## Caveats
 

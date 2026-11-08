@@ -374,3 +374,29 @@ main.home-main { max-width: none; padding: 0 0 80px; }
   .smart-hint { display: none; }
   .home-hero-inner { padding-top: 16px; }
 }
+
+.steps { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.steps::-webkit-scrollbar { display: none; }
+.step { flex: none; display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px 6px 6px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; font-family: var(--sans); min-height: 40px; }
+.step span { width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; font-size: 12px; }
+.step.on { border-color: var(--ink); color: var(--ink); }
+.step.on span { background: var(--ink); color: var(--paper); }
+.step.done span { background: var(--sage); color: #fff; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.photo-item { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--surface-2); }
+.photo-item img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+.photo-actions { padding: 6px; gap: 4px; }
+.cap-lead { position: absolute; left: 6px; top: 6px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+.btn:disabled { cursor: not-allowed; }
+.src-badge { display: inline-flex; gap: 4px; align-items: center; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); }
+input[type='file'].input { min-width: 0; max-width: 100%; overflow: hidden; font-size: 13px; padding: 7px; }
+html { scroll-padding-top: 80px; }
+@media (max-width: 900px) { html { scroll-padding-bottom: 120px; } }
+@media (max-width: 720px) { .btn { white-space: normal; max-width: 100%; text-align: center; } }
+
+.search-head { padding: 12px; }
+.why summary, .filters-sum { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ai); margin-top: 6px; list-style: none; }
+.why summary::-webkit-details-marker, .filters-sum::-webkit-details-marker { display: none; }
+.filters-sum { color: var(--ink); }
+.filters-wrap[open] .filters-sum { margin-bottom: 10px; }
+.filters-wrap { padding: 12px 14px; }

@@ -6,12 +6,13 @@ import { SmartSearch } from './SmartSearch';
 import { useStore } from '../store';
 
 const PRIMARY = [
-  ['/search', 'Search'], ['/prices', 'Sold prices'], ['/studio', 'Design'], ['/estimate', 'Costs'], ['/invest', 'Invest'], ['/my-home', 'My Home'],
+  ['/search', 'Search'], ['/list', 'List a property'], ['/prices', 'Sold prices'], ['/studio', 'Design'], ['/estimate', 'Costs'], ['/invest', 'Invest'], ['/my-home', 'My Home'],
 ] as const;
 const MORE = [
-  { title: 'Explore', items: [['/search', 'search', 'Search homes', 'Buy, rent, commercial'], ['/prices', 'pound', 'Sold prices', 'What things really sold for'], ['/compare', 'chart', 'Compare', 'Side-by-side intelligence'], ['/saved', 'heart', 'Saved', 'Homes, searches & designs']] },
+  { title: 'Explore', items: [['/search', 'search', 'Search homes', 'Buy, rent, commercial'], ['/prices', 'pound', 'Sold prices', 'What things really sold for'], ['/import', 'spark', 'Check any listing', 'From any website, privately'], ['/compare', 'chart', 'Compare', 'Side-by-side intelligence'], ['/saved', 'heart', 'Saved', 'Homes, searches & designs']] },
+  { title: 'Sell & let', items: [['/list', 'tag', 'List your property', 'Sell or let it yourself'], ['/owner', 'chart', 'Owner dashboard', 'How your listing performs']] },
   { title: 'Plan & improve', items: [['/my-home', 'home', 'My Home', 'Value, ideas & costs for your home'], ['/studio', 'palette', 'Design studio', 'Redesign a room, see the cost'], ['/estimate', 'tools', 'Refurb costs', 'Regional estimate & BoQ'], ['/invest', 'chart', 'Investment', 'Yields, BRRR, flips, HMOs']] },
-  { title: 'For professionals', items: [['/owner', 'tag', 'Owner dashboard', 'How your listing performs'], ['/agents', 'briefcase', 'Agent command centre', 'Portfolio analytics & AI'], ['/landlord', 'key', 'Landlords', 'Lettings & compliance'], ['/developer', 'crane', 'Developers', 'Demand & appraisals'], ['/marketplace', 'tools', 'Contractors', 'Scoped, benchmarked quotes'], ['/automation', 'spark', 'AI agents', 'Automations & approvals'], ['/enterprise', 'building', 'API & Enterprise', 'White-label & widgets']] },
+  { title: 'For professionals', items: [['/sources', 'building', 'Listing feeds', 'Connect your CRM to BRIXO'], ['/agents', 'briefcase', 'Agent command centre', 'Portfolio analytics & AI'], ['/landlord', 'key', 'Landlords', 'Lettings & compliance'], ['/developer', 'crane', 'Developers', 'Demand & appraisals'], ['/marketplace', 'tools', 'Contractors', 'Scoped, benchmarked quotes'], ['/automation', 'spark', 'AI agents', 'Automations & approvals'], ['/enterprise', 'building', 'API & Enterprise', 'White-label & widgets']] },
 ] as const;
 
 export default function Layout() {

@@ -32,7 +32,7 @@ export default function PropertyDetails() {
   const [slot, setSlot] = useState('');
   const [msg, setMsg] = useState('');
   const [sent, setSent] = useState(false);
-  const photos = photosFor(p);
+  const photos = p.photos?.length ? p.photos.map((_, i) => ({ id: `${p.id}-u${i}`, label: i === 0 ? 'Lead photo' : `Photo ${i + 1}`, index: i })) : photosFor(p);
   const ds = useMemo(() => dealScore(p), [p]);
   const est = useMemo(() => estimateRefurb(refurbInputFor(p)), [p]);
   const val = useMemo(() => valuationScenario(p), [p]);
@@ -48,16 +48,16 @@ export default function PropertyDetails() {
       <div className="gallery">
         {photos.slice(0, 5).map((ph, i) => (
           <button key={ph.id} onClick={() => { setLightbox(i); track('photo_enlarge', p.id, { photo: ph.label }); }} aria-label={`Enlarge ${ph.label}`}>
-            <HouseArt hue={(p.photoHue + i * 23) % 360} type={i === 0 ? p.type : i % 2 ? 'flat' : p.type} seed={i} after={i > 0 && i % 2 === 0} />
+            {p.photos?.[i] ? <img src={p.photos[i]} alt={ph.label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <HouseArt hue={(p.photoHue + i * 23) % 360} type={i === 0 ? p.type : i % 2 ? 'flat' : p.type} seed={i} after={i > 0 && i % 2 === 0} />}
             <span className="cap">{ph.label}</span>
           </button>
         ))}
       </div>
-      <p className="xs muted" style={{ marginTop: -10 }}>Illustrations stand in for listing photography in this prototype.</p>
+      <p className="xs muted" style={{ marginTop: -10 }}>{p.photos?.length ? `${p.photos.length} photo${p.photos.length > 1 ? 's' : ''} from the ${p.source?.kind === 'landlord' ? 'landlord' : 'owner'}${p.features.includes('Contains virtually staged images') ? ' · some images are virtually staged' : ''}` : 'Illustrations stand in for listing photography in this prototype.'}</p>
       {lightbox != null && (
         <div className="lightbox" onClick={() => setLightbox(null)} role="dialog" aria-label="Photo viewer">
           <div onClick={(e) => e.stopPropagation()}>
-            <div style={{ borderRadius: 16, overflow: 'hidden', aspectRatio: '16/10' }}><HouseArt hue={(p.photoHue + lightbox * 23) % 360} type={p.type} seed={lightbox} /></div>
+            <div style={{ borderRadius: 16, overflow: 'hidden', aspectRatio: '16/10' }}>{p.photos?.[lightbox] ? <img src={p.photos[lightbox]} alt={photos[lightbox].label} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} /> : <HouseArt hue={(p.photoHue + lightbox * 23) % 360} type={p.type} seed={lightbox} />}</div>
             <div className="row between" style={{ color: '#fff', marginTop: 10 }}>
               <button className="btn ghost sm" style={{ color: '#fff' }} onClick={() => setLightbox((lightbox + photos.length - 1) % photos.length)}>← Prev</button>
               <span>{photos[lightbox].label} · {lightbox + 1}/{photos.length}</span>
@@ -70,9 +70,11 @@ export default function PropertyDetails() {
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
           <div className="stack" style={{ gap: 8 }}>
-            <div className="row"><Tag kind="demo">Fictional listing</Tag>{p.listing === 'auction' && <Tag kind="warn">Auction</Tag>}{p.type === 'commercial' && <Tag kind="neutral">Commercial</Tag>}<Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag></div>
+            <div className="row">{p.source ? <Tag kind={p.source.kind === 'agent-feed' ? 'ok' : 'neutral'}>{p.source.name}</Tag> : <Tag kind="demo">Fictional listing</Tag>}{p.source && !p.source.verified && p.source.kind !== 'external-link' && <Tag kind="demo">Verification pending</Tag>}{p.visibility === 'private' && <Tag kind="neutral">Private to you</Tag>}{p.listing === 'auction' && <Tag kind="warn">Auction</Tag>}{p.type === 'commercial' && <Tag kind="neutral">Commercial</Tag>}<Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag></div>
             <h2>{p.title}</h2>
             <div className="muted">{p.street}, {p.town} · {p.postcode}</div>
+            {p.source?.url && <a href={p.source.url} target="_blank" rel="noopener noreferrer" className="small">View the original listing ↗</a>}
+            {p.alsoListedBy?.length ? <div className="xs muted">Also listed by {p.alsoListedBy.join(', ')}</div> : null}
             <div className="row" style={{ alignItems: 'flex-end', gap: 22 }}>
               <Stat big label={rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price'} value={rental ? `${gbp(p.price)} pcm` : gbp(p.price)} sub={`Listed by ${p.agent} · ${p.daysOnMarket} days`} />
               <div className="row">
@@ -98,6 +100,7 @@ export default function PropertyDetails() {
           </section>}
 
           <Section title="About this property">
+            {p.description && <p style={{ marginBottom: 10 }}>{p.description}</p>}
             <ul className="ticks">{p.features.map((f) => <li key={f}>{f}</li>)}</ul>
             <p className="small muted" style={{ marginTop: 10 }}>{p.commute.minutes} minutes to {p.commute.to} ({p.commute.mode}); {p.station.name} is a {p.station.walkMins}-minute walk.</p>
           </Section>
@@ -132,7 +135,7 @@ export default function PropertyDetails() {
               <button className="btn" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }} disabled={!slot} onClick={() => { requestViewing(p.id, slot); track('viewing_request', p.id); }}>Request viewing</button>
             </>}
           </Section>
-          <Section title="Contact the agent">
+          <Section title={p.source?.kind === 'owner' || p.source?.kind === 'landlord' ? 'Message the owner' : p.source?.kind === 'external-link' ? 'Contact via the original listing' : 'Contact the agent'}>
             {sent ? <div className="callout ok small">Message queued. (Demo: no message is sent; production routes via the agent’s CRM.)</div> : <>
               <textarea className="input" rows={3} placeholder="I'd like to know about…" value={msg} onChange={(e) => setMsg(e.target.value)} />
               <button className="btn ghost" style={{ marginTop: 8 }} disabled={!msg.trim()} onClick={() => { setSent(true); track('enquiry', p.id); }}>Send enquiry</button>

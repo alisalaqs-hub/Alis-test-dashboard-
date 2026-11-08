@@ -142,3 +142,44 @@ describe('smart search box', () => {
     expect(suggest('cr0').some((s) => s.kind === 'place' && s.label === 'CR0')).toBe(true);
   });
 });
+
+import { parseBLM, extractListing, complianceChecks, dedupe, buildListing, externalSearchLinks } from './listings';
+import { SAMPLE_BLM, SAMPLE_AGENT, SAMPLE_PASTE } from '../data/sampleFeed';
+import { baseListings } from '../data/properties';
+describe('listing supply', () => {
+  it('parses the BLM feed, rejecting bad rows', () => {
+    const r = parseBLM(SAMPLE_BLM, SAMPLE_AGENT);
+    expect(r.version).toBe('3');
+    expect(r.accepted).toHaveLength(4);
+    expect(r.rejected.map((x) => x.ref).sort()).toEqual(['LVH005', 'LVH006']);
+    const flat = r.accepted.find((p) => p.id.endsWith('lvh002'))!;
+    expect(flat.tenure).toBe('leasehold'); expect(flat.leaseYears).toBe(125); expect(flat.serviceChargeAnnual).toBe(1400); expect(flat.epc.current).toBe('C');
+    expect(r.accepted.find((p) => p.id.endsWith('lvh004'))!.listing).toBe('rent');
+  });
+  it('merges the feed duplicate into the existing listing', () => {
+    const { accepted } = parseBLM(SAMPLE_BLM, SAMPLE_AGENT);
+    const base = baseListings().map((b) => ({ ...b }));
+    const { merged, duplicates } = dedupe([...base, ...accepted]);
+    expect(duplicates).toHaveLength(1);
+    expect(merged.find((p) => p.id === 'wal-001')!.alsoListedBy).toContain(`${SAMPLE_AGENT} (agent feed)`);
+  });
+  it('extracts a pasted listing', () => {
+    const e = extractListing(SAMPLE_PASTE, 'https://www.example-portal.co.uk/listing/123');
+    expect(e.fields).toMatchObject({ price: 375000, beds: 2, baths: 1, postcode: 'SE22 8JL', tenure: 'leasehold', leaseYears: 89, epc: 'D', councilTax: 'C', serviceChargeAnnual: 950, listing: 'sale', type: 'flat' });
+    expect(e.fields.floorArea).toBe(67);
+    expect(e.missing).toEqual([]);
+    expect(extractListing('£1,250 pcm one bed flat').fields).toMatchObject({ listing: 'rent', price: 1250, beds: 1 });
+  });
+  it('blocks discriminatory and bidding rental ads', () => {
+    const base = { listing: 'rent' as const, addressLine: 'x', town: 'London', postcode: 'E17 4QH', type: 'flat' as const, tenure: 'leasehold' as const, leaseYears: 100, beds: 1, baths: 1, floorArea: 40, price: 1200, epc: 'C', councilTax: 'B', serviceChargeAnnual: 0, features: [], source: { kind: 'landlord' as const, name: 'L', licence: '', verified: false } };
+    expect(complianceChecks({ ...base, description: 'No DSS, professionals only' }).find((c) => c.id === 'discrim')!.ok).toBe(false);
+    expect(complianceChecks({ ...base, description: 'Offers over asking considered' }).find((c) => c.id === 'bidding')!.ok).toBe(false);
+    expect(complianceChecks({ ...base, epc: 'F' }).find((c) => c.id === 'epc-let')!.ok).toBe(false);
+    expect(complianceChecks({ ...base, photos: ['a', 'b', 'c'] }).filter((c) => !c.ok)).toHaveLength(0);
+    expect(buildListing(base).nation).toBe('england');
+  });
+  it('deep links', () => {
+    expect(externalSearchLinks('Croydon', 'sale').map((l) => l.site)).toEqual(['Rightmove', 'Zoopla', 'OnTheMarket']);
+    expect(externalSearchLinks('', 'sale')).toEqual([]);
+  });
+});

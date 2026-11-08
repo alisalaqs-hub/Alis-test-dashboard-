@@ -50,6 +50,24 @@ export interface Property {
   conversionPotential?: 'none' | 'possible' | 'strong';
   use?: 'residential' | 'commercial' | 'mixed';
   documents?: string[];
+  /** Where the listing came from and what we're allowed to do with it. Absent = BRIXO demo data. */
+  source?: ListingSource;
+  /** private = only visible to the user who added it (e.g. a listing analysed from another website). */
+  visibility?: 'public' | 'private';
+  photos?: string[];          // data URLs (prototype) / CDN URLs (production)
+  description?: string;
+  status?: 'pending' | 'live' | 'under offer' | 'withdrawn';
+  alsoListedBy?: string[];
+  createdAt?: string;
+}
+
+export type SourceKind = 'demo' | 'owner' | 'landlord' | 'agent-feed' | 'external-link';
+export interface ListingSource {
+  kind: SourceKind;
+  name: string;               // e.g. "Lea Valley Homes (agent feed)", "Private seller"
+  url?: string;               // original listing (external links only — we link out, never copy)
+  licence: string;            // display/usage terms
+  verified: boolean;          // ownership/agent verified
 }
 
 const idx = (start: number, drift: number, wobble = 1.2) =>
@@ -287,6 +305,19 @@ PROPERTIES.push(
 );
 
 export const getProperty = (id: string) => PROPERTIES.find((p) => p.id === id);
+
+/** Base (demo) set, captured before any dynamic listings are registered. */
+const BASE_COUNT = PROPERTIES.length;
+/**
+ * Register user-posted, feed-ingested and privately tracked listings into the
+ * shared registry so every engine and screen can use them. Replaces any
+ * previously registered dynamic listings.
+ */
+export function setDynamicListings(list: Property[]) {
+  PROPERTIES.splice(BASE_COUNT, PROPERTIES.length - BASE_COUNT, ...list.filter((p) => !PROPERTIES.slice(0, BASE_COUNT).some((b) => b.id === p.id)));
+}
+export const baseListings = () => PROPERTIES.slice(0, BASE_COUNT);
+export const publicListings = () => PROPERTIES.filter((p) => p.visibility !== 'private' && p.status !== 'withdrawn');
 
 /** Demo photo set for a listing. Photos are illustrations; ids drive engagement analytics. */
 export function photosFor(p: Property) {

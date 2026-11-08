@@ -128,6 +128,7 @@ function commuteOk(p: Property, q: SearchQuery) {
 export function runSearch(q: SearchQuery, pool = PROPERTIES): SearchHit[] {
   const hits: SearchHit[] = [];
   for (const p of pool) {
+    if (p.visibility === 'private' || p.status === 'withdrawn' || p.status === 'pending') continue;
     const reasons: string[] = [];
     const cautions: string[] = [];
     if (q.intent === 'rent' ? p.listing !== 'rent' : p.listing === 'rent') continue;

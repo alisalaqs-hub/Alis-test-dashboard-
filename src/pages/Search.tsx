@@ -3,6 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { describeQuery, parseQuery, runSearch, type SearchHit, type SearchQuery } from '../engine/search';
 import { gbp, gbpK, HouseArt, Seg, Tag, UKMap } from '../components/ui';
 import { useStore } from '../store';
+import { externalSearchLinks } from '../engine/listings';
+import { publicListings, type Property } from '../data/properties';
+
+function sourceLabel(p: Property) {
+  if (!p.source) return { text: 'BRIXO demo', tone: 'demo' as const };
+  if (p.source.kind === 'agent-feed') return { text: p.source.name.replace(' (agent feed)', ''), tone: 'ok' as const };
+  return { text: p.source.name, tone: 'neutral' as const };
+}
 
 function narrate(q: SearchQuery, hits: SearchHit[]): string[] {
   const out: string[] = [];
@@ -34,7 +42,8 @@ export default function Search() {
   const [maxPrice, setMaxPrice] = useState<number | ''>('');
   const [minBeds, setMinBeds] = useState<number | ''>('');
   const [sort, setSort] = useState<'fit' | 'price' | 'score'>('fit');
-  const { saved, compare, toggleSaved, toggleCompare, savedSearches, toggleSavedSearch, addRecent } = useStore();
+  const { saved, compare, toggleSaved, toggleCompare, savedSearches, toggleSavedSearch, addRecent, myListings, feedListings } = useStore();
+  const [src, setSrc] = useState<'all' | 'agents' | 'private'>('all');
   const searchSaved = savedSearches.some((s) => s.q === submitted);
 
   const q = useMemo(() => {
@@ -51,44 +60,52 @@ export default function Search() {
     if (sort === 'price') return [...h].sort((a, b) => a.property.price - b.property.price);
     if (sort === 'score') return [...h].sort((a, b) => a.dealGrade.localeCompare(b.dealGrade) || b.score - a.score);
     return h;
-  }, [q, sort]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, sort, myListings.length, feedListings.length]);
+  const shown = hits.filter((h) => src === 'all' || (src === 'agents' ? h.property.source?.kind === 'agent-feed' || !h.property.source : h.property.source?.kind === 'owner' || h.property.source?.kind === 'landlord'));
+  const place = q.locations[0] ?? q.districts[0] ?? '';
+  const external = externalSearchLinks(place, q.intent === 'rent' ? 'rent' : 'sale');
   const narrative = useMemo(() => narrate(q, hits), [q, hits]);
   const submit = () => { setSubmitted(text); setParams({ q: text }); addRecent(text, channel === 'rent' ? 'rent' : 'buy'); };
 
   return (
     <div className="stack" style={{ gap: 20 }}>
-      <div className="page-head">
+      <div className="page-head desktop-only">
         <div><div className="eyebrow">AI property search</div><h2 style={{ marginTop: 6 }}>Describe what you want</h2></div>
-        <div className="row"><Tag kind="demo">15 fictional listings</Tag><Tag kind="live">Licensed feeds: agent CRMs · auction partners · owner listings</Tag></div>
+        <div className="row"><Tag kind="demo">{publicListings().length} listings (demo + feeds + owner posts)</Tag><Tag kind="live">Licensed feeds: agent CRMs · auction partners · owner listings</Tag></div>
       </div>
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
-          <div className="card ai-card">
-            <div className="ask" style={{ boxShadow: 'none' }}>
-              <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }} aria-label="Describe the property you want" />
-              <button className="btn accent sm" onClick={submit}>Search</button>
+          <div className="card ai-card search-head">
+            <form className="smart-box" style={{ boxShadow: 'none' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
+              <input value={text} onChange={(e) => setText(e.target.value)} aria-label="Search BRIXO" enterKeyHint="search" placeholder="Place or describe it" />
+              <button className="smart-go" type="submit">Search</button>
+            </form>
+            <div className="row between" style={{ marginTop: 10, flexWrap: 'nowrap', gap: 8 }}>
+              <b className="small">{shown.length} result{shown.length === 1 ? '' : 's'}</b>
+              <button className={`save-btn${searchSaved ? ' on' : ''}`} onClick={() => toggleSavedSearch(submitted, channel === 'rent' ? 'rent' : 'buy')}>{searchSaved ? '♥ Saved' : '♡ Save search'}</button>
             </div>
-            <div className="msg ai" style={{ maxWidth: '100%', marginTop: 12 }}>
-              <div className="row" style={{ marginBottom: 6 }}><Tag kind="ai">BRIXO AI</Tag><span className="xs muted">explanation composed from engine outputs</span></div>
-              <div className="stack" style={{ gap: 6 }}>{narrative.map((n, i) => <p key={i}>{n}</p>)}</div>
-              {q.unsupported.length > 0 && <div className="callout info" style={{ marginTop: 10 }}><b>Not yet covered:</b> {q.unsupported.join(' ')}</div>}
+            <div className="msg ai" style={{ maxWidth: '100%', marginTop: 10 }}>
+              <div className="row" style={{ gap: 6, flexWrap: 'nowrap', alignItems: 'flex-start' }}><Tag kind="ai">AI</Tag><p className="small">{narrative[narrative.length > 2 && /^Honest/.test(narrative[1]) ? 1 : 0]}</p></div>
+              <details className="why"><summary>Why these results?</summary>
+                <div className="stack" style={{ gap: 6, marginTop: 8 }}>{narrative.map((n, i) => <p key={i} className="small">{n}</p>)}</div>
+                {q.unsupported.length > 0 && <div className="callout info small" style={{ marginTop: 10 }}><b>Not yet covered:</b> {q.unsupported.join(' ')}</div>}
+                <div className="parsed" style={{ marginTop: 10 }}>{describeQuery(q).map((d) => <span key={d}>{d}</span>)}</div>
+                <button className="btn ghost sm" style={{ marginTop: 10 }} onClick={() => setShowJson(!showJson)}>{showJson ? 'Hide' : 'Show'} structured query</button>
+                {showJson && <pre className="code" style={{ marginTop: 10 }}>{`// Production: the LLM emits this via tool-calling (JSON-schema validated).\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})`}</pre>}
+              </details>
             </div>
-            <div className="row between" style={{ marginTop: 10 }}>
-              <div className="parsed">{describeQuery(q).map((d) => <span key={d}>{d}</span>)}</div>
-              <button className={`save-btn${searchSaved ? ' on' : ''}`} onClick={() => toggleSavedSearch(submitted, channel === 'rent' ? 'rent' : 'buy')}>{searchSaved ? '♥ Search saved' : '♡ Save search & alerts'}</button>
-              <button className="btn ghost sm" onClick={() => setShowJson(!showJson)}>{showJson ? 'Hide' : 'Show'} structured query</button>
-            </div>
-            {showJson && <pre className="code" style={{ marginTop: 10 }}>{`// Production: the LLM emits this via tool-calling (JSON-schema validated).\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})`}</pre>}
           </div>
 
-          <div className="card flat filters">
+          <details className="card flat filters-wrap" open={typeof window !== 'undefined' && window.innerWidth > 900}><summary className="filters-sum">Filters & sort</summary><div className="filters">
             <label className="field">Market<Seg value={channel} onChange={setChannel} options={[{ value: 'any', label: 'From query' }, { value: 'buy', label: 'Buy' }, { value: 'rent', label: 'Rent' }, { value: 'commercial', label: 'Commercial' }]} /></label>
             <label className="field">Max price<select className="input" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value === '' ? '' : Number(e.target.value))}><option value="">From query</option>{[250_000, 350_000, 500_000, 750_000, 1_000_000, 2_000_000].map((v) => <option key={v} value={v}>{gbpK(v)}</option>)}</select></label>
             <label className="field">Min beds<select className="input" value={minBeds} onChange={(e) => setMinBeds(e.target.value === '' ? '' : Number(e.target.value))}><option value="">From query</option>{[1, 2, 3, 4, 5].map((v) => <option key={v} value={v}>{v}+</option>)}</select></label>
+            <label className="field">Listed by<select className="input" value={src} onChange={(e) => setSrc(e.target.value as typeof src)}><option value="all">Everyone</option><option value="agents">Estate agents</option><option value="private">Private sellers & landlords</option></select></label>
             <label className="field">Sort<select className="input" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}><option value="fit">Best match</option><option value="score">Deal grade</option><option value="price">Price (low–high)</option></select></label>
-          </div>
+          </div></details>
 
-          {hits.map((h, i) => (
+          {shown.map((h, i) => (
             <div key={h.property.id} className={`listing${active === h.property.id ? ' hl' : ''}`} onMouseEnter={() => setActive(h.property.id)}>
               <Link to={`/property/${h.property.id}`} className="ph"><HouseArt hue={h.property.photoHue} type={h.property.type} seed={i} /></Link>
               <div className="stack" style={{ gap: 6, minWidth: 0 }}>
@@ -106,6 +123,8 @@ export default function Search() {
                   <button className={`save-btn${saved.includes(h.property.id) ? ' on' : ''}`} onClick={() => toggleSaved(h.property.id)}>{saved.includes(h.property.id) ? '♥ Saved' : '♡ Save'}</button>
                   <button className={`save-btn${compare.includes(h.property.id) ? ' on' : ''}`} onClick={() => toggleCompare(h.property.id)}>{compare.includes(h.property.id) ? '✓ Comparing' : '+ Compare'}</button>
                   <Link className="save-btn" to={`/property/${h.property.id}/intelligence`} style={{ textDecoration: 'none' }}>Intelligence →</Link>
+                  <Tag kind={sourceLabel(h.property).tone}>{sourceLabel(h.property).text}</Tag>
+                  {h.property.alsoListedBy?.length ? <span className="xs muted">also listed by {h.property.alsoListedBy.join(', ')}</span> : null}
                   {h.property.listing !== 'rent' && <Tag kind="est">Indicative value-add {gbpK(h.estProfit)}</Tag>}
                 </div>
               </div>
@@ -113,7 +132,17 @@ export default function Search() {
           ))}
         </div>
         <div className="sticky stack">
-          <UKMap pins={hits.map((h) => ({ id: h.property.id, lat: h.property.lat, lng: h.property.lng, label: h.property.town.split(',')[0], active: active === h.property.id }))} onPin={setActive} />
+          <section className="card">
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Search everywhere</div>
+            {external.length ? <>
+              <p className="small">See {place} on other sites too:</p>
+              <div className="row" style={{ marginTop: 8 }}>{external.map((l) => <a key={l.site} className="btn ghost sm" href={l.url} target="_blank" rel="noopener noreferrer">{l.site} ↗</a>)}</div>
+            </> : <p className="small">Add a place to your search to open it on other property sites too.</p>}
+            <div className="hr" />
+            <p className="small"><b>Found one you like elsewhere?</b> Paste it into BRIXO for a price check, renovation cost and investment view.</p>
+            <Link to="/import" className="btn sm" style={{ marginTop: 8 }}>Check any listing →</Link>
+          </section>
+          <UKMap pins={shown.map((h) => ({ id: h.property.id, lat: h.property.lat, lng: h.property.lng, label: h.property.town.split(',')[0], active: active === h.property.id }))} onPin={setActive} />
           {compare.length > 0 && <Link to="/compare" className="btn">Compare {compare.length} selected →</Link>}
           <div className="card flat small">
             <div className="eyebrow" style={{ marginBottom: 6 }}>Data provenance</div>

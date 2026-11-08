@@ -175,7 +175,7 @@ const pc = (n: number, dp = 1) => `${(n * 100).toFixed(dp)}%`;
 
 /** Comparable set: same broad area & type where possible, falling back to all sale listings. */
 export function comparableSet(p: Property) {
-  const sale = PROPERTIES.filter((x) => x.id !== p.id && x.listing !== 'rent' && x.type !== 'commercial');
+  const sale = PROPERTIES.filter((x) => x.id !== p.id && x.listing !== 'rent' && x.type !== 'commercial' && !x.source);
   const near = sale.filter((x) => x.town.split(',').pop()!.trim() === p.town.split(',').pop()!.trim());
   return near.length >= 2 ? near : sale;
 }
