@@ -17,6 +17,7 @@ export interface SearchQuery {
   minBeds?: number;
   maxPrice?: number;
   locations: string[];
+  districts: string[];
   maxCommuteMins?: number;
   commuteTo?: string;
   types: Property['type'][];
@@ -45,6 +46,8 @@ const PLACE_ALIASES: Record<string, string[]> = {
   liverpool: ['Liverpool'], sheffield: ['Sheffield'], cardiff: ['Cardiff'], wales: ['Cardiff'], glasgow: ['Glasgow'],
   scotland: ['Glasgow'], nottingham: ['Nottingham'], north: ['Manchester', 'Leeds', 'Liverpool', 'Sheffield'],
   midlands: ['Birmingham', 'Nottingham'],
+  croydon: ['Croydon'], walthamstow: ['Walthamstow'], leyton: ['Leyton'], watford: ['Watford'], fallowfield: ['Fallowfield'], headingley: ['Headingley'],
+  clifton: ['Clifton'], bishopston: ['Bishopston'], wavertree: ['Wavertree'], ecclesall: ['Ecclesall'], roath: ['Roath'], shawlands: ['Shawlands'], 'selly oak': ['Selly Oak'], hertfordshire: ['Hertfordshire'],
 };
 
 function money(raw: string): number {
@@ -56,7 +59,7 @@ function money(raw: string): number {
 
 export function parseQuery(text: string): SearchQuery {
   const t = ` ${text.toLowerCase()} `;
-  const q: SearchQuery = { intent: 'buy', locations: [], types: [], unsupported: [] };
+  const q: SearchQuery = { intent: 'buy', locations: [], districts: [], types: [], unsupported: [] };
 
   if (/\b(to rent|to let|renting|tenant|per month|pcm)\b/.test(t)) q.intent = 'rent';
   else if (/\b(invest|yield|btl|buy[- ]to[- ]let|brrr|flip|hmo|portfolio|profit)\b/.test(t)) q.intent = 'invest';
@@ -73,6 +76,9 @@ export function parseQuery(text: string): SearchQuery {
   for (const [k, v] of Object.entries(PLACE_ALIASES)) if (new RegExp(`\\b${k}\\b`).test(t)) q.locations.push(...v);
   if (/near london|around london|london commuter|home counties|hertfordshire|watford/.test(t)) q.locations.push('Watford', 'Hertfordshire');
   q.locations = [...new Set(q.locations)];
+  // Postcode districts (outward codes) e.g. E17, CR0, M14, LS6
+  for (const m of t.matchAll(/\b([a-z]{1,2}\d{1,2}[a-z]?)\b/g)) if (!/^\d/.test(m[1]) && !/^(k|m)\d+$/.test(m[1]) || /^m\d{1,2}$/.test(m[1])) q.districts.push(m[1].toUpperCase());
+  q.districts = [...new Set(q.districts)].filter((d) => /^[A-Z]{1,2}\d{1,2}[A-Z]?$/.test(d));
 
   if (/\bterrace/.test(t)) q.types.push('terraced');
   if (/\bsemi\b|semi-detached/.test(t)) q.types.push('semi-detached');
@@ -134,7 +140,8 @@ export function runSearch(q: SearchQuery, pool = PROPERTIES): SearchHit[] {
     if (q.lowServiceCharge && p.type === 'flat' && p.serviceChargeAnnual == null) continue;
     const c = commuteOk(p, q);
     if (!c.ok) continue;
-    if (!q.maxCommuteMins && q.locations.length && !q.locations.some((l) => p.town.includes(l))) continue;
+    if (q.districts.length && !q.districts.includes(p.district.toUpperCase())) continue;
+    if (!q.maxCommuteMins && !q.districts.length && q.locations.length && !q.locations.some((l) => p.town.includes(l))) continue;
 
     const ds = dealScore(p);
     let score = ds.total;
@@ -192,6 +199,7 @@ export function describeQuery(q: SearchQuery): string[] {
   if (q.types.length) out.push(q.types.join(' / '));
   if (q.maxPrice) out.push(`≤ £${q.maxPrice.toLocaleString('en-GB')}`);
   if (q.maxCommuteMins) out.push(`≤ ${q.maxCommuteMins} min to ${q.commuteTo}`);
+  if (q.districts.length) out.push(q.districts.join(', '));
   if (q.locations.length && !q.maxCommuteMins) out.push(q.locations.join(', '));
   if (q.wantsLoft) out.push('loft potential');
   if (q.wantsExtension) out.push('extension potential');

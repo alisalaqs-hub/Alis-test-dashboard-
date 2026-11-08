@@ -34,7 +34,17 @@ npm run build:single # single self-contained HTML → dist-single/index.html
 | 13 | Contractor marketplace — benchmarked quotes | `/#/marketplace` |
 | 14 | API & enterprise portal — endpoints, widgets, plans, RBAC | `/#/enterprise` |
 | + | AI agents — 8 role agents, approvals, audit | `/#/automation` |
-| + | Compare · Saved | `/#/compare`, `/#/saved` |
+| + | My Home — value range, ideas, renovation & energy plan for your own home | `/#/my-home` |
+| + | Sold prices | `/#/prices` |
+| + | Compare · Saved (homes, searches, designs) | `/#/compare`, `/#/saved` |
+
+## Navigation (v0.3, mobile-first)
+
+* **One smart search box** on the home screen accepts a place, a postcode district or a sentence — no “Classic vs AI” switch. Live suggestions show places, listings and an “ask AI” option; recent searches appear on focus.
+* **Intent tabs:** Buy · Rent · Sold prices · Commercial · Invest. **Quick chips** add common criteria in one tap.
+* **Task grid:** every main job (buy, rent, value my home, sold prices, cost a renovation, redesign a room, check an investment, sell or let) is one tap from the home screen.
+* **Bottom tab bar on phones:** Search · Saved · **Ask** (AI sheet) · My Home · More (everything else, grouped).
+* **Personalised:** “pick up where you left off” with save-search hearts; “For you” carousel with deal grade, works cost and value-add on every card.
 
 ## Try these AI workflows
 

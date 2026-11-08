@@ -29,11 +29,13 @@ export default function Search() {
   const [submitted, setSubmitted] = useState(initial);
   const [active, setActive] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
-  const [channel, setChannel] = useState<Channel>('any');
+  const modeParam = params.get('mode');
+  const [channel, setChannel] = useState<Channel>(modeParam === 'rent' ? 'rent' : modeParam === 'commercial' ? 'commercial' : 'any');
   const [maxPrice, setMaxPrice] = useState<number | ''>('');
   const [minBeds, setMinBeds] = useState<number | ''>('');
   const [sort, setSort] = useState<'fit' | 'price' | 'score'>('fit');
-  const { saved, compare, toggleSaved, toggleCompare } = useStore();
+  const { saved, compare, toggleSaved, toggleCompare, savedSearches, toggleSavedSearch, addRecent } = useStore();
+  const searchSaved = savedSearches.some((s) => s.q === submitted);
 
   const q = useMemo(() => {
     const base = parseQuery(submitted);
@@ -51,7 +53,7 @@ export default function Search() {
     return h;
   }, [q, sort]);
   const narrative = useMemo(() => narrate(q, hits), [q, hits]);
-  const submit = () => { setSubmitted(text); setParams({ q: text }); };
+  const submit = () => { setSubmitted(text); setParams({ q: text }); addRecent(text, channel === 'rent' ? 'rent' : 'buy'); };
 
   return (
     <div className="stack" style={{ gap: 20 }}>
@@ -73,6 +75,7 @@ export default function Search() {
             </div>
             <div className="row between" style={{ marginTop: 10 }}>
               <div className="parsed">{describeQuery(q).map((d) => <span key={d}>{d}</span>)}</div>
+              <button className={`save-btn${searchSaved ? ' on' : ''}`} onClick={() => toggleSavedSearch(submitted, channel === 'rent' ? 'rent' : 'buy')}>{searchSaved ? '♥ Search saved' : '♡ Save search & alerts'}</button>
               <button className="btn ghost sm" onClick={() => setShowJson(!showJson)}>{showJson ? 'Hide' : 'Show'} structured query</button>
             </div>
             {showJson && <pre className="code" style={{ marginTop: 10 }}>{`// Production: the LLM emits this via tool-calling (JSON-schema validated).\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})`}</pre>}

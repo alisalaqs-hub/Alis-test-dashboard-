@@ -6,9 +6,10 @@ import type { ProposedAction } from './ai/agents';
 export interface SavedDesign { id: string; propertyId: string; room: string; style: string; budget: number; total: number; createdAt: string }
 export interface AuditEntry { at: string; actor: string; action: string; detail: string }
 export interface Viewing { id: string; propertyId: string; slot: string; status: 'requested' }
+export interface RecentSearch { q: string; mode: string; at: string }
 
-interface State { saved: string[]; compare: string[]; designs: SavedDesign[]; queue: ProposedAction[]; audit: AuditEntry[]; viewings: Viewing[] }
-const EMPTY: State = { saved: [], compare: [], designs: [], queue: [], audit: [], viewings: [] };
+interface State { saved: string[]; compare: string[]; designs: SavedDesign[]; queue: ProposedAction[]; audit: AuditEntry[]; viewings: Viewing[]; recent: RecentSearch[]; savedSearches: RecentSearch[] }
+const EMPTY: State = { saved: [], compare: [], designs: [], queue: [], audit: [], viewings: [], recent: [], savedSearches: [] };
 const KEY = 'brixo-state-v1';
 
 function load(): State { try { const raw = localStorage.getItem(KEY); return raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY; } catch { return EMPTY; } }
@@ -21,6 +22,8 @@ interface Ctx extends State {
   decide: (id: string, approved: boolean, actor?: string) => void;
   log: (actor: string, action: string, detail: string) => void;
   requestViewing: (propertyId: string, slot: string) => void;
+  addRecent: (q: string, mode: string) => void;
+  toggleSavedSearch: (q: string, mode: string) => void;
 }
 const StoreCtx = createContext<Ctx | null>(null);
 
@@ -36,6 +39,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     enqueue: (a) => set((x) => ({ ...x, queue: [...a.filter((n) => n.consequential), ...x.queue].slice(0, 50), audit: [...a.map((n) => ({ at: new Date().toISOString(), actor: `agent:${n.agent}`, action: n.consequential ? 'proposed (awaiting approval)' : 'completed (non-consequential)', detail: n.title })), ...x.audit].slice(0, 200) })),
     decide: (id, approved, actor = 'you') => set((x) => { const a = x.queue.find((q) => q.id === id); return { ...x, queue: x.queue.filter((q) => q.id !== id), audit: a ? [{ at: new Date().toISOString(), actor, action: approved ? 'approved' : 'rejected', detail: a.title }, ...x.audit] : x.audit }; }),
     log,
+    addRecent: (q, mode) => set((x) => ({ ...x, recent: [{ q, mode, at: new Date().toISOString() }, ...x.recent.filter((r) => r.q.toLowerCase() !== q.toLowerCase())].slice(0, 6) })),
+    toggleSavedSearch: (q, mode) => set((x) => ({ ...x, savedSearches: x.savedSearches.some((r) => r.q === q) ? x.savedSearches.filter((r) => r.q !== q) : [{ q, mode, at: new Date().toISOString() }, ...x.savedSearches].slice(0, 20) })),
     requestViewing: (propertyId, slot) => set((x) => ({ ...x, viewings: [...x.viewings, { id: `v${Date.now()}`, propertyId, slot, status: 'requested' }], audit: [{ at: new Date().toISOString(), actor: 'you', action: 'viewing requested', detail: `${propertyId} · ${slot}` }, ...x.audit] })),
   }), [s, log]);
   return <StoreCtx.Provider value={api}>{children}</StoreCtx.Provider>;

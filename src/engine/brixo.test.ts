@@ -123,3 +123,22 @@ describe('investment additions', () => {
     expect(Math.abs(analyse({ ...f, gdv: breakEven(f).salePrice }).flipProfit)).toBeLessThan(5);
   });
 });
+
+import { suggest } from './suggest';
+describe('smart search box', () => {
+  it('place-only queries work (town and postcode district)', () => {
+    expect(runSearch(parseQuery('Croydon')).every((h) => h.property.town.includes('Croydon'))).toBe(true);
+    expect(runSearch(parseQuery('Croydon')).length).toBeGreaterThan(0);
+    const e17 = runSearch(parseQuery('E17'));
+    expect(e17.length).toBe(1); expect(e17[0].property.id).toBe('wal-001');
+    expect(runSearch(parseQuery('3 bed in M14')).every((h) => h.property.district === 'M14')).toBe(true);
+  });
+  it('£ amounts are not mistaken for postcodes', () => {
+    expect(parseQuery('under £500k').districts).toEqual([]);
+  });
+  it('suggests places, listings and AI', () => {
+    expect(suggest('Croy')[0]).toMatchObject({ kind: 'place', label: 'Croydon' });
+    expect(suggest('3 bed house with a garden under £450k')[0].kind).toBe('ai');
+    expect(suggest('cr0').some((s) => s.kind === 'place' && s.label === 'CR0')).toBe(true);
+  });
+});
