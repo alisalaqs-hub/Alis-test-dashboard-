@@ -1,10 +1,9 @@
-# Build, test and publish Streetkey to GitHub Pages on every push to the default branch.
+# Optional static demo on GitHub Pages (no accounts or AI: those need the Netlify back end).
+# Runs only when started by hand: Actions → Deploy static demo → Run workflow.
 # One-time setup: repository Settings → Pages → Build and deployment → Source: "GitHub Actions".
-name: Deploy site
+name: Deploy static demo (GitHub Pages)
 
 on:
-  push:
-    branches: [claude/ai-property-platform-uk-kwzcrf, main]
   workflow_dispatch:
 
 permissions:

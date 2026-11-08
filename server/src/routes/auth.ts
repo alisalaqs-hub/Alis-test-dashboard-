@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { DUMMY_HASH, hashPassword, newToken, passwordProblem, sha256, verifyPassword } from '../auth/crypto';
 import { createSession, destroySession, getUser, publicUser } from '../auth/session';
+import { config } from '../config';
 import { one, q, tx } from '../db';
 import { mails } from '../services/email';
 import { limit } from '../services/ratelimit';
@@ -83,6 +84,12 @@ export async function authRoutes(app: FastifyInstance) {
     const b = parse(z.object({ token: z.string().min(10).max(100) }), req.body);
     const userId = await useEmailToken(b.token, 'verify');
     await q('UPDATE users SET email_verified_at = coalesce(email_verified_at, now()), updated_at = now() WHERE id = $1', [userId]);
+    // First-admin bootstrap for hosts without a shell (e.g. Netlify): the owner of ADMIN_EMAIL becomes
+    // admin once they've proved they control that inbox, but only while no admin exists yet.
+    if (config.adminEmail) {
+      const promoted = await one(`UPDATE users SET role = 'admin' WHERE id = $1 AND lower(email) = lower($2) AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin' AND deleted_at IS NULL) RETURNING id`, [userId, config.adminEmail]);
+      if (promoted) await audit(req, 'admin.bootstrapped', `user:${userId}`);
+    }
     return { ok: true, user: req.user?.id === userId ? publicUser((await getUser(userId))!) : undefined };
   });
 

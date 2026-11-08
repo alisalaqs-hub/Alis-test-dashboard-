@@ -1,9 +1,9 @@
 /** AI status (what's switched on) and background job polling. */
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config';
-import { one } from '../db';
+import { one, q } from '../db';
 import { aiAvailable, modelsInUse } from '../ai/core';
-import { getJob, dispatch, jobDTO, processJob } from '../ai/jobs';
+import { getJob, dispatch, isInlineSafe, jobDTO, processJob } from '../ai/jobs';
 import { forbidden, notFound, requireAdmin } from '../services/http';
 
 export async function aiCoreRoutes(app: FastifyInstance) {
@@ -36,9 +36,16 @@ export async function aiCoreRoutes(app: FastifyInstance) {
     if (!job.user_id && req.user?.role !== 'admin' && !job.subject?.startsWith('anon:')) throw forbidden();
     const ageSec = (Date.now() - job.created_at.getTime()) / 1000;
     if (job.status === 'queued' && ageSec > 8) {
-      // The worker didn't start it: try again, or (if that keeps failing) run it right here.
-      if (config.jobs.mode === 'netlify' && ageSec < 40) await dispatch(id);
-      else { await processJob(id); job = (await getJob(id))!; }
+      // The worker hasn't started it. Quick jobs can run right here; slow ones are re-sent to the
+      // background worker, and fail with an explanation if no worker ever picks them up.
+      if (config.jobs.mode !== 'netlify' || isInlineSafe(job.kind)) { await processJob(id); job = (await getJob(id))!; }
+      else if (ageSec < 150) await dispatch(id);
+      else {
+        await q(`UPDATE ai_jobs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1 AND status = 'queued'`,
+          [id, 'This AI task couldn’t start because background processing isn’t running on this site. Please try again later.']);
+        console.warn('[ai-jobs] a job waited over 150s without a worker: check that Netlify Background Functions are available on this plan');
+        job = (await getJob(id))!;
+      }
     }
     return { job: jobDTO(job) };
   });

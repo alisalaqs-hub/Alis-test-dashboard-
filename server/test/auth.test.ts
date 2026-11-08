@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { config } from '../src/config';
 import { client, lastMail, PASSWORD, signUp, tokenIn } from './helpers';
 
 describe('accounts', () => {
@@ -32,6 +33,18 @@ describe('accounts', () => {
     expect((await c.get('/api/auth/me')).json.user.emailVerified).toBe(true);
     const again = await c.post('/api/auth/verify', { token: tokenIn(mail.text) });
     expect(again.status).toBe(400);
+  });
+
+  it('makes the ADMIN_EMAIL owner the first admin once they confirm their email', async () => {
+    const prev = config.adminEmail;
+    try {
+      config.adminEmail = 'Owner@Example.com';
+      const c = client();
+      await c.post('/api/auth/register', { email: 'owner@example.com', password: PASSWORD, name: 'Owner', acceptTerms: true });
+      expect((await c.get('/api/auth/me')).json.user.role).toBe('member');
+      await c.post('/api/auth/verify', { token: tokenIn(lastMail('owner@example.com')!.text) });
+      expect((await c.get('/api/auth/me')).json.user.role).toBe('admin');
+    } finally { config.adminEmail = prev; }
   });
 
   it('logs in and out; wrong passwords get one generic message', async () => {

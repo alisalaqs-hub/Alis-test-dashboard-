@@ -17,12 +17,17 @@ import { AiError } from './core';
 
 export interface JobRow { id: string; kind: string; user_id: string | null; subject: string | null; status: 'queued' | 'running' | 'done' | 'failed'; input: any; output: any; error: string | null; attempts: number; progress: string | null; created_at: Date; started_at: Date | null; finished_at: Date | null } // eslint-disable-line @typescript-eslint/no-explicit-any
 export interface JobCtx { progress: (text: string) => Promise<void> }
-interface Handler { run: (job: JobRow, ctx: JobCtx) => Promise<unknown>; maxAttempts: number; leaseSec: number }
+interface Handler { run: (job: JobRow, ctx: JobCtx) => Promise<unknown>; maxAttempts: number; leaseSec: number; inlineSafe: boolean }
 const handlers = new Map<string, Handler>();
 
-export function registerJob(kind: string, run: Handler['run'], o: { maxAttempts?: number; leaseSec?: number } = {}) {
-  handlers.set(kind, { run, maxAttempts: o.maxAttempts ?? 2, leaseSec: o.leaseSec ?? 600 });
+/**
+ * @param o.inlineSafe the job reliably finishes in < 20s, so it may run inside a normal request
+ *        when no background worker picked it up (e.g. text analysis). Image work must leave this false.
+ */
+export function registerJob(kind: string, run: Handler['run'], o: { maxAttempts?: number; leaseSec?: number; inlineSafe?: boolean } = {}) {
+  handlers.set(kind, { run, maxAttempts: o.maxAttempts ?? 2, leaseSec: o.leaseSec ?? 600, inlineSafe: o.inlineSafe ?? false });
 }
+export const isInlineSafe = (kind: string) => handlers.get(kind)?.inlineSafe ?? false;
 export const jobKinds = () => [...handlers.keys()];
 
 export async function enqueue(kind: string, input: unknown, o: { userId?: string | null; subject?: string | null; dedupe?: boolean } = {}) {

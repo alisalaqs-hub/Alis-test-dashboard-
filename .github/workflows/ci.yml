@@ -24,8 +24,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node scripts/gen-migrations.mjs --check
       - run: npm run typecheck
       - run: npm run server:typecheck
       - run: npm test
       - run: npm run server:test
       - run: npm run build:all
+      - name: Netlify functions bundle and run against the database
+        run: npm run netlify:bundle-check -- --run
+        env:
+          DATABASE_URL: postgres://streetkey:streetkey@localhost:5432/streetkey_test
