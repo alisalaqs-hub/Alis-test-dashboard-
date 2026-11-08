@@ -111,7 +111,7 @@ export default function Owner() {
               {e.featureInterest.map((f) => <Meter key={f.feature} label={f.feature} value={f.interactions} max={e.featureInterest[0].interactions} display={f.interactions.toLocaleString('en-GB')} />)}
             </Section>
             <Section title="Marketing campaigns">
-              <div className="table-wrap"><table className="t"><thead><tr><th>Channel</th><th className="r">Clicks</th><th className="r">Enquiries</th><th className="r">Rate</th></tr></thead>
+              <div className="table-wrap" tabIndex={0}><table className="t"><thead><tr><th>Channel</th><th className="r">Clicks</th><th className="r">Enquiries</th><th className="r">Rate</th></tr></thead>
                 <tbody>{e.campaigns.map((c) => <tr key={c.channel}><td className="small">{c.channel}{c.spend ? <div className="xs muted">£{c.spend} spend</div> : null}</td><td className="r num">{c.clicks}</td><td className="r num">{suppress(c.enquiries)}</td><td className="r num">{pct(c.enquiries / Math.max(1, c.clicks))}</td></tr>)}</tbody></table></div>
               <div className="eyebrow" style={{ margin: '12px 0 4px' }}>Aggregated search demand</div>
               <ul className="clean small">{e.searchDemand.map((s) => <li key={s.query} className="row between"><span>“{s.query}”</span><span className="num">{s.impressions.toLocaleString('en-GB')}</span></li>)}</ul>
@@ -119,7 +119,7 @@ export default function Owner() {
           </div>
 
           <Section title="Against similar listings nearby" kicker="Local comparison">
-            <div className="table-wrap"><table className="t"><thead><tr><th>Listing</th><th className="r">Price</th><th className="r">Views</th><th className="r">Conversion</th><th className="r">Days</th></tr></thead>
+            <div className="table-wrap" tabIndex={0}><table className="t"><thead><tr><th>Listing</th><th className="r">Price</th><th className="r">Views</th><th className="r">Conversion</th><th className="r">Days</th></tr></thead>
               <tbody>
                 <tr style={{ background: 'var(--accent-soft)' }}><td><b>Your property</b></td><td className="r num">{gbpK(p.price)}</td><td className="r num">{t.views}</td><td className="r num">{pct(t.enquiryRate.p)}</td><td className="r num">{p.daysOnMarket}</td></tr>
                 {comps.map(({ c, t: ct }) => <tr key={c.id}><td className="small"><Link to={`/property/${c.id}`}>{c.street.replace(' (fictional)', '')}</Link><div className="xs muted">{c.beds} bed {c.type}</div></td><td className="r num">{gbpK(c.price)}</td><td className="r num">{ct.views}</td><td className="r num">{pct(ct.enquiryRate.p)}</td><td className="r num">{c.daysOnMarket}</td></tr>)}

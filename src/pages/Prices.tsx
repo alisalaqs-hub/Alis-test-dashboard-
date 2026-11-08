@@ -35,7 +35,7 @@ export default function Prices() {
       </div>
       <Section title={`${rows.length} sales`} kicker="Most recent first">
         {rows.length === 0 ? <p className="small muted">No demo sales for that search. Try one of the areas above.</p> :
-          <div className="table-wrap"><table className="t"><thead><tr><th>Address</th><th>Beds</th><th className="r">Price</th><th>Date</th></tr></thead>
+          <div className="table-wrap" tabIndex={0}><table className="t"><thead><tr><th>Address</th><th>Beds</th><th className="r">Price</th><th>Date</th></tr></thead>
             <tbody>{rows.map((r) => <tr key={r.key}><td className="small"><b>{r.address.replace(' (fictional)', '')}</b><div className="xs muted">{r.area} · {r.note} · <Link to={`/property/${r.near.id}`}>nearby listing</Link></div></td><td className="num">{r.beds}</td><td className="r num">{gbp(r.price)}</td><td className="small">{r.date}</td></tr>)}</tbody></table></div>}
       </Section>
     </div>

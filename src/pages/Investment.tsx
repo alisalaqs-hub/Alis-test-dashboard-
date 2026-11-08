@@ -149,7 +149,7 @@ export default function Investment() {
           </Section>
 
           <Section title="Scenario comparison" kicker="Downside · base · optimistic">
-            <div className="table-wrap"><table className="t">
+            <div className="table-wrap" tabIndex={0}><table className="t">
               <thead><tr><th>Metric</th>{all.map((a) => <th key={a.s} className="r">{a.s}</th>)}</tr></thead>
               <tbody>
                 {flip ? <>
@@ -167,7 +167,7 @@ export default function Investment() {
           </Section>
 
           <Section title={`Sensitivity: ${flip ? 'profit' : 'monthly cash flow'}`} kicker={`${sens.rowLabel} × ${sens.colLabel}`}>
-            <div className="table-wrap"><table className="t heat">
+            <div className="table-wrap" tabIndex={0}><table className="t heat">
               <thead><tr><th>{sens.rowLabel} ↓ / {sens.colLabel} →</th>{sens.cols.map((c) => <th key={c} className="r">{c > 0 ? '+' : ''}{Math.round(c * 100)}%</th>)}</tr></thead>
               <tbody>{sens.rows.map((row) => (
                 <tr key={row.shift}><td style={{ textAlign: 'left', fontFamily: 'var(--sans)' }}>{flip ? `${row.shift > 0 ? '+' : ''}${Math.round(row.shift * 100)}%` : `${((active.mortgageRate + row.shift) * 100).toFixed(2)}%`}</td>

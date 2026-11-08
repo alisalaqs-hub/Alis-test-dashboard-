@@ -34,7 +34,7 @@ export default function Compare() {
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head"><div><div className="eyebrow">Compare</div><h2 style={{ marginTop: 6 }}>Side-by-side intelligence</h2><p className="muted" style={{ marginTop: 6 }}>Best value in each row is highlighted. Add properties from search (up to 3).</p></div><Tag kind="demo" /></div>
-      <div className="card"><div className="table-wrap"><table className="t">
+      <div className="card"><div className="table-wrap" tabIndex={0}><table className="t">
         <thead><tr><th />{props.map((p) => <th key={p.id} style={{ minWidth: 180 }}><div style={{ height: 90, borderRadius: 10, overflow: 'hidden', marginBottom: 6 }}><HouseArt hue={p.photoHue} type={p.type} /></div><Link to={`/property/${p.id}`} style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13, color: 'var(--ink)' }}>{p.street.replace(' (fictional)', '')}, {p.town.split(',')[0]}</Link>{compare.includes(p.id) && <button className="btn ghost sm" style={{ marginLeft: 6 }} onClick={() => toggleCompare(p.id)}>✕</button>}</th>)}</tr></thead>
         <tbody>{rows.map((r) => { const vals = props.map(r.get); const nums = vals.filter((v): v is number => typeof v === 'number'); const best = r.best && nums.length === vals.length ? (r.best === 'min' ? Math.min(...nums) : Math.max(...nums)) : null; return (
           <tr key={r.label}><td className="small muted">{r.label}</td>{vals.map((v, k) => <td key={k} className="num" style={best != null && v === best ? { background: 'var(--sage-soft)', fontWeight: 700 } : undefined}>{typeof v === 'number' ? (r.fmt ? r.fmt(v) : v) : v}</td>)}</tr>

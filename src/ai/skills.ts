@@ -20,7 +20,7 @@ export const propertySkills: Skill<Property>[] = [
   { id: 'overpriced', label: 'Is this property overpriced?', match: /overpric|fair price|worth|value|underpric/i, run: (p) => {
     const v = valuationScenario(p);
     return { confidence: v.confidence, tools: ['valuation.valuationScenario', 'refurb.estimateRefurb'],
-      text: v.verdict === 'insufficient evidence' ? 'There is not enough sold evidence to judge the price.' : `The asking price of ${g(p.price)} is ${v.verdict} of BRIXO's indicative as-is range of ${k(v.asIs.low)}–${k(v.asIs.high)} (${v.askingVsMid >= 0 ? '+' : ''}${pc(v.askingVsMid)} vs midpoint).`,
+      text: v.verdict === 'insufficient evidence' ? 'There is not enough sold evidence to judge the price.' : `The asking price of ${g(p.price)} is ${v.verdict} of Brixo's indicative as-is range of ${k(v.asIs.low)}–${k(v.asIs.high)} (${v.askingVsMid >= 0 ? '+' : ''}${pc(v.askingVsMid)} vs midpoint).`,
       evidence: [`${v.evidenceCount} sold comparable(s)`, `Post-works value ${k(v.postWorks.mid)}`, ...v.method.slice(0, 2)],
       assumptions: ['Bedroom adjustment ±7% per bedroom (heuristic)', '12% margin a buyer needs for taking on works'],
       verify: ['RICS valuation or mortgage valuation', 'Measured floor areas of comparables', 'Condition via RICS Level 3 survey'] };
@@ -35,8 +35,8 @@ export const propertySkills: Skill<Property>[] = [
   { id: 'refurb', label: 'What are the likely refurbishment costs?', match: /refurb|renovat|cost|budget|works/i, run: (p) => {
     const e = estimateRefurb(refurbInputFor(p));
     return { confidence: e.confidence, tools: ['refurb.estimateRefurb'],
-      text: `For the scope implied by its ${p.condition} condition, BRIXO estimates ${g(e.total)} incl. VAT (likely ${k(e.low)}–${k(e.high)}), about ${e.programmeWeeks} weeks on site.`,
-      evidence: e.byTrade.slice(0, 4).map((t) => `${t.trade}: ${k(t.total)}`), assumptions: e.assumptions.slice(0, 3), verify: ['Asbestos survey (pre-2000 building)', 'Three contractor quotes against the BRIXO scope', ...e.exclusions.slice(2, 3)],
+      text: `For the scope implied by its ${p.condition} condition, Brixo estimates ${g(e.total)} incl. VAT (likely ${k(e.low)}–${k(e.high)}), about ${e.programmeWeeks} weeks on site.`,
+      evidence: e.byTrade.slice(0, 4).map((t) => `${t.trade}: ${k(t.total)}`), assumptions: e.assumptions.slice(0, 3), verify: ['Asbestos survey (pre-2000 building)', 'Three contractor quotes against the Brixo scope', ...e.exclusions.slice(2, 3)],
       link: { label: 'Open the refurbishment calculator', to: `/estimate?property=${p.id}` } };
   } },
   { id: 'kitchen', label: 'What would it look like with a modern kitchen?', match: /kitchen|look like|design|modern|visual/i, run: (p) => ({
@@ -59,7 +59,7 @@ export const propertySkills: Skill<Property>[] = [
     const peers = PROPERTIES.filter((x) => x.id !== p.id && x.listing === p.listing && x.type !== 'commercial').map((x) => ({ x, ds: dealScore(x) })).sort((a, b) => b.ds.total - a.ds.total).slice(0, 3);
     const me = dealScore(p);
     return { confidence: 'medium', tools: ['insights.dealScore'], text: `This property scores ${me.total}/100 (${me.grade}). Top comparable opportunities in the dataset: ${peers.map((q) => `${q.x.town.split(',')[0]} ${q.ds.total}/100`).join(', ')}.`,
-      evidence: [`£/m² here ${g(p.price / Math.max(1, p.floorArea))}`, ...peers.map((q) => `${q.x.title}: ${g(q.x.price / Math.max(1, q.x.floorArea))}/m²`)], assumptions: ['Deal score weights are BRIXO defaults'], verify: ['Visit comparables; check condition differences'], link: { label: 'Compare side by side', to: `/compare?ids=${[p.id, ...peers.map((q) => q.x.id)].slice(0, 3).join(',')}` } };
+      evidence: [`£/m² here ${g(p.price / Math.max(1, p.floorArea))}`, ...peers.map((q) => `${q.x.title}: ${g(q.x.price / Math.max(1, q.x.floorArea))}/m²`)], assumptions: ['Deal score weights are Brixo defaults'], verify: ['Visit comparables; check condition differences'], link: { label: 'Compare side by side', to: `/compare?ids=${[p.id, ...peers.map((q) => q.x.id)].slice(0, 3).join(',')}` } };
   } },
   { id: 'invest', label: 'Would this be a good investment?', match: /invest|good deal|buy it|worth buying|return|roi|profit/i, run: (p) => {
     const ds = dealScore(p); const loft = loftScenario(p);
@@ -78,7 +78,7 @@ export const ownerSkills: Skill<Property>[] = [
     const ins = insightsFor(p); const t = totals(engagementFor(p)); const bm = benchmark(p); const v = valuationScenario(p);
     const reasons: string[] = [];
     if (t.enquiryRate.high < bm.rate.low) reasons.push('visitors are looking but not enquiring at the rate comparable listings achieve');
-    if (v.verdict === 'above range') reasons.push(`the asking price sits above BRIXO's indicative as-is range (${k(v.asIs.low)}–${k(v.asIs.high)})`);
+    if (v.verdict === 'above range') reasons.push(`the asking price sits above Brixo's indicative as-is range (${k(v.asIs.low)}–${k(v.asIs.high)})`);
     if (ins.some((i) => i.id === 'photo-test')) reasons.push('the lead photograph under-performs other images');
     if (ins.some((i) => i.id === 'refurb-interest')) reasons.push('buyers are trying to work out renovation costs themselves');
     return { confidence: 'medium', tools: ['engagement.insightsFor', 'engagement.benchmark', 'valuation.valuationScenario'], text: reasons.length ? `The evidence points to: ${reasons.join('; ')}.` : 'Engagement and conversion are in line with comparables; it may simply need more time.',

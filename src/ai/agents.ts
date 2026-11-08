@@ -1,5 +1,5 @@
 /**
- * BRIXO multi-agent runtime (prototype).
+ * Brixo multi-agent runtime (prototype).
  *
  * Each agent has: a role, an explicit permission set, a schedule, and a run()
  * that calls deterministic tools and returns findings + proposed actions.

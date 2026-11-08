@@ -50,7 +50,7 @@ export interface Property {
   conversionPotential?: 'none' | 'possible' | 'strong';
   use?: 'residential' | 'commercial' | 'mixed';
   documents?: string[];
-  /** Where the listing came from and what we're allowed to do with it. Absent = BRIXO demo data. */
+  /** Where the listing came from and what we're allowed to do with it. Absent = Brixo demo data. */
   source?: ListingSource;
   /** private = only visible to the user who added it (e.g. a listing analysed from another website). */
   visibility?: 'public' | 'private';

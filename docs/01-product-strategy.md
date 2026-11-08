@@ -30,6 +30,8 @@ The flywheel: consumers explore costs and designs → owners and agents see *agg
 
 ## 2. Brand identity
 
+> **Superseded by brand v2** — see [06-brand-and-accessibility.md](06-brand-and-accessibility.md) (navy/orange/purple house mark, Montserrat + JetBrains Mono, drafting-grid paper, X-ray lens). The table below records the earlier concept.
+
 | Element | Choice | Rationale |
 |---|---|---|
 | Name | **BRIXO** | Bricks + X (the unknown, the multiplier) + O (the lens). Short, global, pronounceable. *Check UKIPO/EUIPO classes 9, 35, 36, 37, 42 and domains before launch.* |

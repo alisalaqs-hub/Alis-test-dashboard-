@@ -48,7 +48,7 @@ export default function Agent() {
   const proposeCopy = (p: Property) => {
     const ds = dealScore(p);
     const top = [...engagementFor(p).photos].sort((a, b) => b.enlargements / b.impressions - a.enlargements / a.impressions)[0];
-    const copy = `${p.title}. A ${p.beds}-bedroom ${p.type} of ${p.floorArea}m², ${p.station.walkMins} minutes’ walk from ${p.station.name} (${p.commute.minutes} min to ${p.commute.to}). Highlights: ${p.features.slice(0, 3).join(', ').toLowerCase()}.\n\nBRIXO Intelligence: indicative refurbishment budget ${gbpK(ds.refurbEstimate)}; ${p.loftPotential !== 'none' ? 'loft conversion potential; ' : ''}EPC ${p.epc.current} with a costed route to ${p.epc.potential}.\n\nSuggested lead photo: “${top.label}” (highest engagement).\n\nMaterial information (inserted from verified fields, not generated): ${p.tenure}; council tax ${p.councilTax}; flood risk ${p.risks.flood}.`;
+    const copy = `${p.title}. A ${p.beds}-bedroom ${p.type} of ${p.floorArea}m², ${p.station.walkMins} minutes’ walk from ${p.station.name} (${p.commute.minutes} min to ${p.commute.to}). Highlights: ${p.features.slice(0, 3).join(', ').toLowerCase()}.\n\nBrixo Intelligence: indicative refurbishment budget ${gbpK(ds.refurbEstimate)}; ${p.loftPotential !== 'none' ? 'loft conversion potential; ' : ''}EPC ${p.epc.current} with a costed route to ${p.epc.potential}.\n\nSuggested lead photo: “${top.label}” (highest engagement).\n\nMaterial information (inserted from verified fields, not generated): ${p.tenure}; council tax ${p.councilTax}; flood risk ${p.risks.flood}.`;
     enqueue([{ id: `copy-${p.id}-${Date.now()}`, agent: 'estate-agent', title: `Publish revised description & lead photo for ${street(p)}`, detail: 'AI draft — edits to a live listing need approval.', consequential: true, payload: copy }]);
   };
 
@@ -67,8 +67,8 @@ export default function Agent() {
         <div className="card"><Stat label="Awaiting your approval" value={queue.length} tone={queue.length ? 'neg' : undefined} sub="AI drafts & agent proposals" /></div>
       </div>
 
-      <Section title="Listing performance" kicker="Portfolio overview" right={<select className="input" style={{ width: 'auto' }} value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}><option value="gap">Sort: weakest conversion</option><option value="views">Sort: most viewed</option><option value="quality">Sort: lowest quality score</option></select>}>
-        <div className="table-wrap"><table className="t">
+      <Section title="Listing performance" kicker="Portfolio overview" right={<select className="input" aria-label="Sort listings" style={{ width: 'auto' }} value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}><option value="gap">Sort: weakest conversion</option><option value="views">Sort: most viewed</option><option value="quality">Sort: lowest quality score</option></select>}>
+        <div className="table-wrap" tabIndex={0}><table className="t">
           <thead><tr><th>Listing</th><th className="r">Price</th><th className="r">Views 7d</th><th className="r">Conversion</th><th className="r">vs comps</th><th className="r">Quality</th><th>Alert</th><th>Actions</th></tr></thead>
           <tbody>{rows.map((r) => (
             <tr key={r.p.id}>
@@ -102,7 +102,7 @@ export default function Agent() {
                   <button className="btn sm" onClick={() => decide(q.id, true)}>Approve</button>
                   <button className="btn ghost sm" onClick={() => decide(q.id, false)}>Reject</button>
                 </div>
-                {preview === q.id && <pre className="code" style={{ marginTop: 8, whiteSpace: 'pre-wrap', maxHeight: 320 }}>{q.payload}</pre>}
+                {preview === q.id && <pre tabIndex={0} className="code" style={{ marginTop: 8, whiteSpace: 'pre-wrap', maxHeight: 320 }}>{q.payload}</pre>}
               </li>
             ))}</ul>
             <p className="xs muted" style={{ marginTop: 8 }}>Prototype: approval records the decision in the audit log; no email is sent and no listing is changed.</p>

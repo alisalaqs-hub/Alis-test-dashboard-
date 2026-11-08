@@ -68,7 +68,7 @@ export default function PropertyPage() {
           <div className="muted">{p.street}, {p.town} · {p.postcode}</div>
           <div className="row" style={{ alignItems: 'flex-end', gap: 18 }}>
             <Stat big label={rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price'} value={rental ? `${gbp(p.price)}` : gbp(p.price)} sub={rental ? 'per calendar month' : `${gbp(p.price / p.floorArea)}/m² · ${p.daysOnMarket} days on market`} />
-            {!rental && <div className="row" style={{ gap: 10 }}><div className={`grade grade-${ds.grade}`} style={{ width: 64, height: 64, fontSize: '2rem' }}>{ds.grade}</div><div><div className="num" style={{ fontSize: 22 }}>{ds.total}/100</div><div className="xs muted">BRIXO deal score</div></div></div>}
+            {!rental && <div className="row" style={{ gap: 10 }}><div className={`grade grade-${ds.grade}`} style={{ width: 64, height: 64, fontSize: '2rem' }}>{ds.grade}</div><div><div className="num" style={{ fontSize: 22 }}>{ds.total}/100</div><div className="xs muted">Brixo deal score</div></div></div>}
           </div>
           <div className="grid g3" style={{ gap: 10 }}>
             <div className="card flat" style={{ padding: 12 }}><div className="xs muted">Beds / baths</div><div className="num">{p.beds} / {p.baths}</div></div>
@@ -95,7 +95,7 @@ export default function PropertyPage() {
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
           {!rental && <Section title="Value-add plays" kicker="Engine-costed scenarios" right={<Tag kind="est" />}>
-            <div className="table-wrap"><table className="t">
+            <div className="table-wrap" tabIndex={0}><table className="t">
               <thead><tr><th>Play</th><th className="r">Cost (incl. VAT)</th><th className="r">Value uplift</th><th className="r">Net</th></tr></thead>
               <tbody>{plays.map((pl) => <tr key={pl.name}><td>{pl.name}</td><td className="r num">{gbpK(pl.cost)}</td><td className="r num">{gbpK(pl.uplift)}</td><td className={`r num ${pl.net >= 0 ? 'pos' : 'neg'}`}>{gbpK(pl.net)}</td></tr>)}</tbody>
             </table></div>
@@ -121,7 +121,7 @@ export default function PropertyPage() {
 
           <section className="card" id="development">
             <div className="card-head"><div><div className="eyebrow">Development potential</div><h3>What could this property become?</h3></div><Tag kind="warn">Screening only — not a planning opinion</Tag></div>
-            <div className="table-wrap"><table className="t">
+            <div className="table-wrap" tabIndex={0}><table className="t">
               <thead><tr><th>Option</th><th>Status</th><th className="r">Cost</th><th className="r">Value uplift</th></tr></thead>
               <tbody>{dev.map((o) => <tr key={o.id}><td><b className="small">{o.name}</b><div className="xs muted">{o.summary}</div>{o.constraints.length > 0 && <div className="xs" style={{ color: 'var(--danger)' }}>⚠ {o.constraints.join(' · ')}</div>}{o.checks.length > 0 && <div className="xs muted">Verify: {o.checks.join(', ')}</div>}</td>
                 <td><Tag kind={o.status === 'likely under PD' || o.status === 'prior approval route' ? 'ok' : o.status === 'needs planning permission' ? 'demo' : o.status === 'constrained' ? 'warn' : 'neutral'}>{o.status}</Tag></td>
@@ -140,7 +140,7 @@ export default function PropertyPage() {
             <ul className="clean small" style={{ marginTop: 12 }}>{eng.ins.slice(0, 4).map((i) => <li key={i.id}><Tag kind={i.kind === 'observed' ? 'obs' : i.kind === 'inferred' ? 'inf' : 'rec'} /> {i.title}</li>)}</ul>
           </Section>}
 
-          <Section title="Property knowledge graph" kicker="What BRIXO connects for this property" right={<Tag kind="neutral">Access-controlled</Tag>}>
+          <Section title="Property knowledge graph" kicker="What Brixo connects for this property" right={<Tag kind="neutral">Access-controlled</Tag>}>
             <KnowledgeGraph p={p} />
           </Section>
 
@@ -155,7 +155,7 @@ export default function PropertyPage() {
 
           <div className="grid g2">
             <Section title="Comparables" kicker="Evidence" right={<Tag kind="demo" />}>
-              <div className="table-wrap"><table className="t">
+              <div className="table-wrap" tabIndex={0}><table className="t">
                 <thead><tr><th>Address</th><th className="r">Price</th><th>Date</th></tr></thead>
                 <tbody>{p.comparables.map((c) => <tr key={c.address}><td>{c.address}<div className="xs muted">{c.beds} bed · {c.distanceM}m · {c.kind}{c.refurbished ? ' · refurbished' : ''}</div></td><td className="r num">{c.kind === 'let' ? `${gbp(c.price)} pcm` : gbpK(c.price)}</td><td className="small">{c.date}</td></tr>)}</tbody>
               </table></div>
@@ -183,7 +183,7 @@ export default function PropertyPage() {
 
           <div className="grid g2">
             <Section title="EPC upgrade pathway" kicker="Energy" right={<Tag kind="est" />}>
-              <div className="table-wrap"><table className="t">
+              <div className="table-wrap" tabIndex={0}><table className="t">
                 <thead><tr><th>Measure (cheapest per SAP point first)</th><th className="r">Cost</th><th className="r">Band</th></tr></thead>
                 <tbody>
                   <tr><td className="muted">Today</td><td /><td className="r num">{p.epc.current} ({p.epc.score})</td></tr>

@@ -92,7 +92,7 @@ export default function MyHome() {
           <Section title="Energy upgrade plan" kicker={`EPC ${f.epc} today`}>
             <ul className="clean small">{epc.steps.slice(0, 4).map((s) => <li key={s.measure} className="row between"><span>{s.measure}</span><span className="num">{gbpK(s.cost)} → {s.band}</span></li>)}</ul>
           </Section>
-          <p className="xs muted">BRIXO is not a RICS valuer. For lending, probate or tax purposes you need a formal valuation.</p>
+          <p className="xs muted">Brixo is not a RICS valuer. For lending, probate or tax purposes you need a formal valuation.</p>
           <div className="small"><Link to={`/estimate`}>Cost works</Link> · <Link to="/studio">Redesign a room</Link> · <Link to="/invest">Investment view</Link> · <span className="muted">Values update as you edit — {gbp(Math.round(ev?.refurbishedPerM2 ?? 0))}/m² refurbished benchmark</span></div>
         </div>
       </div>

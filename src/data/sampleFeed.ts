@@ -1,6 +1,6 @@
 /**
  * Sample BLM v3 bulk feed from a FICTIONAL agency, as a UK agency CRM would export it.
- * Includes: a listing that duplicates an existing BRIXO listing (to demonstrate merging),
+ * Includes: a listing that duplicates an existing Brixo listing (to demonstrate merging),
  * a letting, a row with a bad postcode (rejected) and a let-agreed row (skipped).
  */
 export const SAMPLE_AGENT = 'Lea Valley Homes (demo agency)';

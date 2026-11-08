@@ -1,4 +1,4 @@
-# BRIXO — The Intelligent Property Platform
+# Brixo — The Intelligent Property Platform
 
 > **See Beyond the Property.**
 
@@ -77,6 +77,7 @@ docs/         strategy & brand · architecture · commercial model · roadmap & 
 3. [Commercial model](docs/03-commercial-model.md)
 4. [Roadmap, go-to-market & next implementation steps](docs/04-roadmap-and-next-steps.md)
 5. [Listing supply: other websites, agent feeds & owner listings (incl. legal position)](docs/05-listing-sources.md)
+6. [Brand system & accessibility (WCAG 2.2 AA, axe-audited)](docs/06-brand-and-accessibility.md)
 
 ## Caveats
 

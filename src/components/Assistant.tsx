@@ -8,7 +8,7 @@ type Msg = { q: string; a: AiAnswer & { skill: string } };
 export function AnswerView({ a }: { a: AiAnswer }) {
   return (
     <div className="answer">
-      <div className="row between" style={{ marginBottom: 6 }}><Tag kind="ai">BRIXO AI</Tag><span className="xs muted">confidence: <b>{a.confidence}</b>{a.tools.length ? ` · tools: ${a.tools.join(', ')}` : ''}</span></div>
+      <div className="row between" style={{ marginBottom: 6 }}><Tag kind="ai">Brixo AI</Tag><span className="xs muted">confidence: <b>{a.confidence}</b>{a.tools.length ? ` · tools: ${a.tools.join(', ')}` : ''}</span></div>
       <p>{a.text}</p>
       {a.evidence.length > 0 && <><h4>Evidence</h4><ul>{a.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></>}
       {a.assumptions.length > 0 && <><h4>Assumptions</h4><ul>{a.assumptions.map((e, i) => <li key={i}>{e}</li>)}</ul></>}
@@ -39,7 +39,7 @@ export function AssistantPanel<C>({ title, kicker, skills, ctx, onAnswer, placeh
       <div className="stack" style={{ marginTop: 12 }}>
         {msgs.map((m, i) => <div key={i} className="stack" style={{ gap: 6 }}><div className="msg user">{m.q}</div><AnswerView a={m.a} /></div>)}
       </div>
-      <p className="xs muted" style={{ marginTop: 10 }}>Prototype: questions are routed to BRIXO skills by pattern; production uses an LLM choosing the same skills via tool-calling, with a check that every figure in its prose came from a tool.</p>
+      <p className="xs muted" style={{ marginTop: 10 }}>Prototype: questions are routed to Brixo skills by pattern; production uses an LLM choosing the same skills via tool-calling, with a check that every figure in its prose came from a tool.</p>
     </section>
   );
 }

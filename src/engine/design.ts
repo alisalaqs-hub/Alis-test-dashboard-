@@ -4,7 +4,7 @@
  * labour rate, regionalised) so a design can be costed, budget-fitted, sent
  * for quotes and fed into the investment analyser.
  *
- * Rates: BRIXO demonstration catalogue (national average, ex VAT). Not
+ * Rates: Brixo demonstration catalogue (national average, ex VAT). Not
  * supplier prices; production links to supplier feeds and verified quotes.
  */
 import { REGIONS, regionFromPostcode } from './refurb';

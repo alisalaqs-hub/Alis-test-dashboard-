@@ -16,7 +16,7 @@ const ENDPOINTS = [
 ];
 const WIDGETS = ['AI property search', 'AI property chat', 'Refurbishment estimate', 'Interior design visualiser', 'Investment analysis', 'Listing engagement analytics', 'Owner performance report', 'Valuation scenarios', 'Development intelligence'];
 const PLANS = [
-  { name: 'Starter', price: '£0 + usage', who: 'Developers & small agents', items: ['Sandbox + 1k free calls/mo', '2 widgets, BRIXO-branded', 'Community support'] },
+  { name: 'Starter', price: '£0 + usage', who: 'Developers & small agents', items: ['Sandbox + 1k free calls/mo', '2 widgets, Brixo-branded', 'Community support'] },
   { name: 'Growth', price: '£499/mo + usage', who: 'Agencies, lenders, proptechs', items: ['All widgets, custom branding', 'Webhooks, 50 req/s', 'Engagement analytics API', 'Email support, 99.9% SLA'] },
   { name: 'Enterprise', price: 'From £50k/yr', who: 'Portals, banks, BTR operators', items: ['Full white-label & SSO (SAML)', 'Dedicated tenancy / UK data residency', 'Bulk data & custom models', '99.95% SLA, named CSM'] },
 ];
@@ -39,8 +39,8 @@ export default function Developers() {
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
-        <div><div className="eyebrow">BRIXO API & Enterprise</div><h2 style={{ marginTop: 6 }}>Put BRIXO intelligence inside your product</h2>
-          <p className="muted" style={{ marginTop: 6 }}>Estate agents, lenders, portals and proptechs use the same engines as BRIXO.com — via versioned REST APIs, webhooks and white-label widgets — in an isolated tenant under their own brand.</p></div>
+        <div><div className="eyebrow">Brixo API & Enterprise</div><h2 style={{ marginTop: 6 }}>Put Brixo intelligence inside your product</h2>
+          <p className="muted" style={{ marginTop: 6 }}>Estate agents, lenders, portals and proptechs use the same engines as Brixo.com — via versioned REST APIs, webhooks and white-label widgets — in an isolated tenant under their own brand.</p></div>
         <div className="row"><Tag kind="demo">Sandbox tenant</Tag><Tag kind="neutral">OpenAPI 3.1 in /docs</Tag></div>
       </div>
 
@@ -58,8 +58,8 @@ export default function Developers() {
             <label className="field">Floor area m²<input className="input num" type="number" value={area} onChange={(e) => setArea(Math.max(20, Number(e.target.value) || 20))} /></label>
             <label className="field">Spec<Seg value={spec} onChange={setSpec} options={[{ value: 'budget', label: 'B' }, { value: 'standard', label: 'S' }, { value: 'premium', label: 'P' }]} /></label>
           </div>
-          <pre className="code" style={{ marginTop: 12 }}>{`curl https://api.brixo.example/v1/estimates/refurbishment \\\n  -H "Authorization: Bearer sk_test_…" \\\n  -H "Idempotency-Key: 8c1e…" \\\n  -d '${JSON.stringify(req)}'`}</pre>
-          <pre className="code" style={{ marginTop: 8, maxHeight: 260 }}>{JSON.stringify(res, null, 2)}</pre>
+          <pre tabIndex={0} className="code" style={{ marginTop: 12 }}>{`curl https://api.brixo.example/v1/estimates/refurbishment \\\n  -H "Authorization: Bearer sk_test_…" \\\n  -H "Idempotency-Key: 8c1e…" \\\n  -d '${JSON.stringify(req)}'`}</pre>
+          <pre tabIndex={0} className="code" style={{ marginTop: 8, maxHeight: 260 }}>{JSON.stringify(res, null, 2)}</pre>
         </Section>
         <Section title="White-label widget" kicker="Embed on any partner site">
           <div className="grid g2" style={{ gap: 10 }}>
@@ -73,10 +73,10 @@ export default function Developers() {
               <div className="num" style={{ fontSize: 30, margin: '4px 0' }}>{gbpK(est.low)} – {gbpK(est.high)}</div>
               <div style={{ fontSize: 12, color: '#666' }}>Most likely {gbp(est.total)} incl. VAT</div>
               <button style={{ marginTop: 10, background: brand, color: '#fff', border: 0, borderRadius: 999, padding: '8px 14px', fontWeight: 600 }}>Get 3 verified quotes</button>
-              <div style={{ fontSize: 10.5, color: '#888', marginTop: 10 }}>Powered by BRIXO · indicative estimate</div>
+              <div style={{ fontSize: 10.5, color: '#5B6070', marginTop: 10 }}>Powered by Brixo · indicative estimate</div>
             </div>
           </div>
-          <pre className="code" style={{ marginTop: 12 }}>{embed}</pre>
+          <pre tabIndex={0} className="code" style={{ marginTop: 12 }}>{embed}</pre>
         </Section>
       </div>
 
@@ -89,7 +89,7 @@ export default function Developers() {
           <p className="xs muted" style={{ marginTop: 8 }}>Each widget renders in an isolated iframe/shadow DOM with the partner’s colours, fonts and logo; calculations run server-side for metering and consistency.</p>
         </Section>
         <Section title="Users & permissions" kicker="Per tenant RBAC">
-          <div className="table-wrap"><table className="t"><thead><tr><th>Role</th><th>Listings</th><th>Engagement</th><th>Publishing</th><th>Billing</th></tr></thead>
+          <div className="table-wrap" tabIndex={0}><table className="t"><thead><tr><th>Role</th><th>Listings</th><th>Engagement</th><th>Publishing</th><th>Billing</th></tr></thead>
             <tbody>{ROLES.map((r) => <tr key={r[0]}>{r.map((c, i) => <td key={i} className={i ? 'small' : ''}>{i ? c : <b className="small">{c}</b>}</td>)}</tr>)}</tbody></table></div>
           <p className="xs muted" style={{ marginTop: 8 }}>Row-level security isolates every tenant’s data; partners never see other tenants’ engagement or users.</p>
         </Section>
@@ -97,7 +97,7 @@ export default function Developers() {
 
       <div className="split-r">
         <Section title="Endpoints & pricing" kicker="Usage-based">
-          <div className="table-wrap"><table className="t">
+          <div className="table-wrap" tabIndex={0}><table className="t">
             <thead><tr><th>Endpoint</th><th>Description</th><th className="r">Per call</th><th>Status</th></tr></thead>
             <tbody>{ENDPOINTS.map((e) => <tr key={e.p}><td className="mono xs"><b>{e.m}</b> {e.p}</td><td className="small">{e.d}</td><td className="r num small">{e.unit}</td><td><Tag kind={e.status === 'MVP' ? 'ok' : 'neutral'}>{e.status}</Tag></td></tr>)}</tbody>
           </table></div>

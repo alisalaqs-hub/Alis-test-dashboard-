@@ -7,6 +7,7 @@ import { destination, SmartSearch, type Mode } from '../components/SmartSearch';
 import { Icon } from '../components/Icons';
 import { gbp, gbpK, HouseArt, Tag } from '../components/ui';
 import { useStore } from '../store';
+import { XRayHero } from '../components/XRay';
 
 const TASKS: { to: string; icon: string; label: string; sub: string; tone: string }[] = [
   { to: destination('buy', 'homes for sale in London'), icon: 'search', label: 'Buy a home', sub: 'Search & AI matches', tone: 'ink' },
@@ -28,11 +29,15 @@ export default function Home() {
 
   return (
     <div className="home">
-      <section className="home-hero">
+      <section className="home-hero" aria-labelledby="hero-h">
         <div className="home-hero-inner">
-          <div className="row" style={{ gap: 8 }}><span className="hero-eyebrow">See beyond the property</span><Tag kind="demo">Demo data</Tag></div>
-          <h1>Find a home.<br /><span>See what it could become.</span></h1>
-          <SmartSearch />
+          <div className="hero-copy">
+            <div className="row" style={{ gap: 8 }}><span className="label-mono">01 / Find</span><Tag kind="demo">Demo data</Tag></div>
+            <h1 id="hero-h">Find a home.<br /><span>See beyond the property<b>.</b></span></h1>
+            <p className="hero-sub">Every listing comes with its true cost of works, a price check and what it could become.</p>
+            <SmartSearch />
+          </div>
+          <div className="hero-xray"><XRayHero /></div>
         </div>
       </section>
 
@@ -53,6 +58,7 @@ export default function Home() {
         </section>
 
         <section>
+          <span className="label-mono">02 / Do</span>
           <h2 className="home-h">What would you like to do?</h2>
           <div className="task-grid">
             {TASKS.map((t) => (
@@ -66,8 +72,9 @@ export default function Home() {
         </section>
 
         <section>
-          <div className="row between"><h2 className="home-h">For you</h2><Link to={destination('buy', 'homes for sale')} className="small" style={{ fontWeight: 600 }}>See all →</Link></div>
-          <p className="small muted" style={{ marginTop: -6, marginBottom: 12 }}>Ranked by BRIXO deal score — every card shows the price check and renovation cost.</p>
+          <span className="label-mono">03 / For you</span>
+          <div className="row between"><h2 className="home-h">Picked for you</h2><Link to={destination('buy', 'homes for sale')} className="small" style={{ fontWeight: 600 }}>See all →</Link></div>
+          <p className="small muted" style={{ marginTop: -6, marginBottom: 12 }}>Ranked by Brixo deal score — every card shows the price check and renovation cost.</p>
           <div className="carousel">
             {forYou.map(({ p, ds }, i) => (
               <article key={p.id} className="pcard">
@@ -102,6 +109,7 @@ export default function Home() {
         </section>
 
         <section>
+          <span className="label-mono">04 / Professionals</span>
           <h2 className="home-h">For professionals</h2>
           <div className="chips">
             {[['/agents', 'Estate agents'], ['/landlord', 'Landlords'], ['/developer', 'Developers'], ['/marketplace', 'Contractors'], ['/automation', 'AI agents'], ['/enterprise', 'API & white-label']].map(([to, l]) => <Link key={to} to={to} className="chip">{l} →</Link>)}

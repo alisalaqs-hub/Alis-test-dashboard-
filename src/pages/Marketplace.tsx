@@ -36,17 +36,17 @@ export default function Marketplace() {
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
         <div><div className="eyebrow">MVP feature 05 · contractor marketplace</div><h2 style={{ marginTop: 6 }}>Like-for-like quotes against a standard scope</h2>
-          <p className="muted" style={{ marginTop: 6 }}>Project: full refurbishment, 92m² pre-1919 terrace, E17. Scope issued from the BRIXO BoQ so every contractor prices the same thing.</p></div>
+          <p className="muted" style={{ marginTop: 6 }}>Project: full refurbishment, 92m² pre-1919 terrace, E17. Scope issued from the Brixo BoQ so every contractor prices the same thing.</p></div>
         <Seg value={view} onChange={setView} options={[{ value: 'owner', label: 'Property owner view' }, { value: 'contractor', label: 'Contractor view' }]} />
       </div>
 
       {view === 'owner' ? <>
         <div className="grid g4 keep2">
-          <div className="card"><Stat label="BRIXO benchmark (ex VAT, excl. contingency/fees)" value={gbpK(benchTotal)} /></div>
+          <div className="card"><Stat label="Brixo benchmark (ex VAT, excl. contingency/fees)" value={gbpK(benchTotal)} /></div>
           {cmp.map((c) => <div className="card" key={c.contractor}><Stat label={c.contractor.replace(' (demo)', '')} value={gbpK(c.quotedTotal)} tone={c.missing.length ? 'neg' : undefined} sub={`${c.programmeWeeks} weeks · ${c.missing.length ? `${c.missing.length} trades missing` : 'complete scope'}`} /></div>)}
         </div>
         <Section title="Trade-by-trade comparison" kicker="Variance vs benchmark (±25% flagged)" right={<Tag kind="demo">Demo quotes</Tag>}>
-          <div className="table-wrap"><table className="t">
+          <div className="table-wrap" tabIndex={0}><table className="t">
             <thead><tr><th>Trade</th><th className="r">Benchmark</th>{cmp.map((c) => <th key={c.contractor} className="r">{c.contractor.split(' ')[0]} {c.contractor.split(' ')[1]}</th>)}</tr></thead>
             <tbody>{bench.byTrade.map((t, k) => (
               <tr key={t.trade}><td>{t.trade}</td><td className="r num">{gbpK(t.total)}</td>
@@ -63,14 +63,14 @@ export default function Marketplace() {
         </Section>
         <div className="grid g2">
           <Section title="Verification" kicker="Trust & safety">
-            <div className="table-wrap"><table className="t">
+            <div className="table-wrap" tabIndex={0}><table className="t">
               <thead><tr><th>Contractor</th><th>Companies House</th><th>Insurance</th><th>TrustMark</th><th>Gas Safe</th><th>NICEIC/NAPIT</th></tr></thead>
               <tbody>{CONTRACTORS.map((c) => (
                 <tr key={c.name}><td className="small">{c.name}<div className="xs muted">★ {c.rating} · {c.jobs} jobs · {c.verifiedQuotes} verified quotes</div></td>
                   <td>{c.checks.companiesHouse ? '✓' : '✗'}</td><td className="xs">{c.checks.insurance}</td><td>{c.checks.trustmark ? '✓' : '—'}</td><td>{c.checks.gasSafe ? '✓' : '—'}</td><td>{c.checks.niceic ? '✓' : '—'}</td></tr>
               ))}</tbody>
             </table></div>
-            <p className="xs muted" style={{ marginTop: 8 }}>Production checks: Companies House API (live), Gas Safe & competent-person register lookups, insurance certificate OCR with expiry monitoring, reviews only from completed, paid BRIXO jobs.</p>
+            <p className="xs muted" style={{ marginTop: 8 }}>Production checks: Companies House API (live), Gas Safe & competent-person register lookups, insurance certificate OCR with expiry monitoring, reviews only from completed, paid Brixo jobs.</p>
           </Section>
           <Section title="Progress, payments & variations" kicker="Live project · Lea Bridge Build">
             <ul className="clean">{MILESTONES.map((m) => (

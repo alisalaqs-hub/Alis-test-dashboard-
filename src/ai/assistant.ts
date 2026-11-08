@@ -1,5 +1,5 @@
 /**
- * BRIXO assistant framework.
+ * Brixo assistant framework.
  *
  * Every answer is a structured object: text + evidence + assumptions + what
  * must be verified + confidence + which deterministic tools produced it.
@@ -34,7 +34,7 @@ export function route<C>(skills: Skill<C>[], ctx: C, question: string): AiAnswer
   if (!s) {
     return {
       skill: 'fallback', confidence: 'low', tools: [], evidence: [], assumptions: [], verify: [],
-      text: `I can answer questions like: ${skills.slice(0, 5).map((k) => `“${k.label}”`).join(', ')}. I only answer from BRIXO's calculations and the data shown here, so I won't guess beyond that.`,
+      text: `I can answer questions like: ${skills.slice(0, 5).map((k) => `“${k.label}”`).join(', ')}. I only answer from Brixo's calculations and the data shown here, so I won't guess beyond that.`,
     };
   }
   return { skill: s.id, ...s.run(ctx, question) };

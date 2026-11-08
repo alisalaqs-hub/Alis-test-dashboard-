@@ -47,7 +47,7 @@ export function SmartSearch({ autoFocus, onDone, compact }: { autoFocus?: boolea
       </div>
       <form className="smart-box" onSubmit={(e) => { e.preventDefault(); if (hi >= 0 && list[hi]) { const s = list[hi]; if (s.kind === 'recent') go(s.label, s.mode); else pick(s); } else go(text); }}>
         <span className="smart-icon"><Icon name="search" /></span>
-        <input ref={ref} value={text} placeholder={compact ? 'Place, postcode or describe it…' : m.placeholder} aria-label="Search BRIXO" autoComplete="off" enterKeyHint="search"
+        <input ref={ref} value={text} placeholder={compact ? 'Place, postcode or describe it…' : m.placeholder} aria-label="Search Brixo" autoComplete="off" enterKeyHint="search"
           onChange={(e) => { setText(e.target.value); setOpen(true); setHi(-1); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
           onKeyDown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(list.length - 1, h + 1)); } if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(-1, h - 1)); } if (e.key === 'Escape') setOpen(false); }} />
         {text && <button type="button" className="smart-clear" aria-label="Clear" onClick={() => { setText(''); ref.current?.focus(); }}><Icon name="x" size={18} /></button>}

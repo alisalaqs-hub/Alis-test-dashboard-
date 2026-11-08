@@ -51,7 +51,7 @@ export default function Automation() {
             <p className="xs muted" style={{ marginTop: 8 }}>Prototype: approving records the decision only. Production executes the approved action with the approver’s identity attached.</p>
           </Section>
           <Section title="Permission matrix" kicker="Least privilege">
-            <div className="table-wrap"><table className="t">
+            <div className="table-wrap" tabIndex={0}><table className="t">
               <thead><tr><th>Permission</th>{AGENTS.map((a) => <th key={a.id} className="r" title={a.name}>{a.name.split(' ')[0]}</th>)}</tr></thead>
               <tbody>{ALL_PERMS.map((p) => <tr key={p}><td className="mono xs">{p}</td>{AGENTS.map((a) => <td key={a.id} className="r">{a.permissions.includes(p) ? '●' : ''}</td>)}</tr>)}</tbody>
             </table></div>

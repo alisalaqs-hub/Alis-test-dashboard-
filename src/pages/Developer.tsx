@@ -8,7 +8,7 @@ import { gbp, gbpK, Meter, Section, Stat, Tag } from '../components/ui';
 /**
  * DEMONSTRATION market inputs. These are illustrative assumptions for the
  * prototype — not market statistics. Production derives them from Land
- * Registry, EPC, ONS rental data, licensed rental listings, BRIXO search
+ * Registry, EPC, ONS rental data, licensed rental listings, Brixo search
  * demand and planning pipeline data, with sources and dates shown.
  */
 const MARKETS: Record<string, { label: string; types: UnitType[]; demand: DemandSignal[]; pipeline: number; buildCost: number; cil: number; searchShare: Record<string, number> }> = {
@@ -51,7 +51,7 @@ export default function Developer() {
       <div className="page-head">
         <div><div className="eyebrow">Developer intelligence</div><h2 style={{ marginTop: 6 }}>What should I build — and what can I pay for the land?</h2>
           <p className="muted" style={{ marginTop: 6 }}>Explore demand by unit type, test a unit mix, and run a residual land appraisal. Scenarios show ranges, not point predictions.</p></div>
-        <div className="row"><Tag kind="demo">Demonstration market inputs</Tag><Tag kind="live">Land Registry · ONS · planning pipeline · BRIXO search demand</Tag></div>
+        <div className="row"><Tag kind="demo">Demonstration market inputs</Tag><Tag kind="live">Land Registry · ONS · planning pipeline · Brixo search demand</Tag></div>
       </div>
 
       <div className="card flat filters">
@@ -65,7 +65,7 @@ export default function Developer() {
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
           <Section title="Demand by unit type" kicker="Explainable scenario" right={<Tag kind="est">Confidence ranges</Tag>}>
-            <div className="table-wrap"><table className="t">
+            <div className="table-wrap" tabIndex={0}><table className="t">
               <thead><tr><th>Unit type</th><th className="r">NDSS min</th><th className="r">Demand index</th><th className="r">Search share</th><th className="r">Absorption / month</th><th className="r">Units</th><th className="r">Months to sell</th></tr></thead>
               <tbody>{absorption.map(({ t, d, n, monthsLow, monthsHigh }) => (
                 <tr key={t.key}>
@@ -74,14 +74,14 @@ export default function Developer() {
                   <td className="r"><div className="bar" style={{ width: 70, display: 'inline-block', verticalAlign: 'middle' }}><i style={{ width: `${d.demandIndex}%`, background: d.demandIndex > 75 ? 'var(--sage)' : d.demandIndex > 55 ? 'var(--gold)' : 'var(--accent)' }} /></div> <span className="num small">{d.demandIndex}</span></td>
                   <td className="r num small">{Math.round(m.searchShare[t.key] * 100)}%</td>
                   <td className="r num small">{d.monthlyAbsorption[0]}–{d.monthlyAbsorption[1]}</td>
-                  <td className="r"><input className="input num" style={{ width: 64, padding: '4px 6px' }} type="number" min={0} value={mix[t.key] ?? 0} onChange={(e) => setMix((x) => ({ ...x, [t.key]: Math.max(0, Number(e.target.value) || 0) }))} /></td>
+                  <td className="r"><input className="input num" aria-label={`Number of ${t.label} units`} style={{ width: 64, padding: '4px 6px' }} type="number" min={0} value={mix[t.key] ?? 0} onChange={(e) => setMix((x) => ({ ...x, [t.key]: Math.max(0, Number(e.target.value) || 0) }))} /></td>
                   <td className={`r num small ${monthsHigh > 18 ? 'neg' : ''}`}>{n ? `${monthsLow.toFixed(0)}–${monthsHigh.toFixed(0)}` : '—'}</td>
                 </tr>
               ))}</tbody>
               <tfoot><tr><td>Total</td><td /><td /><td /><td /><td className={`r num ${count !== total ? 'neg' : ''}`}>{count}</td><td className="r num">{sellOut[0].toFixed(0)}–{sellOut[1].toFixed(0)} mo</td></tr></tfoot>
             </table></div>
             <ul className="ticks xs muted" style={{ marginTop: 8 }}>
-              <li>Demand index blends (demo) enquiry-to-listing ratio, days-to-sell/let and BRIXO search share for the postcode district.</li>
+              <li>Demand index blends (demo) enquiry-to-listing ratio, days-to-sell/let and Brixo search share for the postcode district.</li>
               <li>Months-to-sell range = units ÷ absorption range; types with &gt;18 months of supply are flagged.</li>
               <li>The suggested mix keeps ≥10% family units and caps each type at ~6 months of upper-bound absorption. Local plan housing-mix policy prevails.</li>
             </ul>
@@ -94,7 +94,7 @@ export default function Developer() {
               <label className="field">Programme (months)<input className="input num" type="number" value={months} onChange={(e) => setMonths(Number(e.target.value) || 12)} /></label>
               <label className="field">Land asking price<div className="input-prefix"><span>£</span><input className="input num" type="number" step={10000} value={land} onChange={(e) => setLand(Number(e.target.value) || 0)} /></div></label>
             </div>
-            <div className="table-wrap" style={{ marginTop: 12 }}><table className="t">
+            <div className="table-wrap" tabIndex={0} style={{ marginTop: 12 }}><table className="t">
               <tbody>
                 <tr><td>Gross development value ({count} units, {Math.round(appraisal.nia)}m² NIA)</td><td className="r num">{gbp(appraisal.gdv)}</td></tr>
                 <tr><td>Build cost ({Math.round(appraisal.gia)}m² GIA @ {gbp(build)})</td><td className="r num">−{gbp(appraisal.build)}</td></tr>
@@ -110,7 +110,7 @@ export default function Developer() {
             <p className="xs muted" style={{ marginTop: 8 }}>Excludes SDLT on land, affordable housing (assumed nil — usually not true above policy thresholds), and VAT. A viability consultant should run a full appraisal (e.g. Argus) before bidding.</p>
           </Section>
 
-          <Section title="Conversion & development opportunities" kicker="From BRIXO listings" right={<Tag kind="warn">Screening only</Tag>}>
+          <Section title="Conversion & development opportunities" kicker="From Brixo listings" right={<Tag kind="warn">Screening only</Tag>}>
             <ul className="clean">{opps.map(({ p, o }) => (
               <li key={p.id + o.id} className="card flat" style={{ padding: 12 }}>
                 <div className="row between"><Link to={`/property/${p.id}/intelligence#development`}><b className="small">{p.street.replace(' (fictional)', '')}, {p.town.split(',')[0]}</b></Link><Tag kind={o.status === 'constrained' ? 'warn' : 'demo'}>{o.status}</Tag></div>
@@ -131,13 +131,13 @@ export default function Developer() {
             <Stat label="Headroom vs asking" value={gbpK(appraisal.residual - land)} tone={appraisal.residual >= land ? 'pos' : 'neg'} />
           </section>
           <Section title="Sensitivity" kicker="Residual land value">
-            <div className="table-wrap"><table className="t heat"><thead><tr><th>Build ↓ / GDV →</th>{[-0.05, 0, 0.05].map((g) => <th key={g} className="r">{g > 0 ? '+' : ''}{g * 100}%</th>)}</tr></thead>
+            <div className="table-wrap" tabIndex={0}><table className="t heat"><thead><tr><th>Build ↓ / GDV →</th>{[-0.05, 0, 0.05].map((g) => <th key={g} className="r">{g > 0 ? '+' : ''}{g * 100}%</th>)}</tr></thead>
               <tbody>{[-0.05, 0, 0.1].map((b) => <tr key={b}><td style={{ textAlign: 'left', fontFamily: 'var(--sans)' }}>{b > 0 ? '+' : ''}{b * 100}%</td>{[-0.05, 0, 0.05].map((g) => { const r = residualAppraisal({ units: m.types.map((t) => ({ key: t.key, count: mix[t.key] ?? 0, size: t.size, price: t.price * (1 + g) })), buildCostPerM2: build * (1 + b), netToGross: scheme === 'conversion' ? 0.78 : 0.8, feesPct: 0.12, contingencyPct: scheme === 'conversion' ? 0.08 : 0.05, financeRate: 0.085, months, profitOnGdv: profit, salesPct: 0.025, cil: scheme === 'conversion' ? 0 : m.cil }).residual; return <td key={g} style={{ background: r < land ? 'color-mix(in srgb, var(--danger) 18%, transparent)' : 'color-mix(in srgb, var(--sage) 15%, transparent)' }}>{gbpK(r)}</td>; })}</tr>)}</tbody></table></div>
           </Section>
           <Section title="Preferred specification" kicker="Design styles explored by buyers" right={<Tag kind="obs">Aggregated</Tag>}>
             {styles.map(([s, n]) => <Meter key={s} label={s} value={n} max={styles[0][1]} display={n.toLocaleString('en-GB')} color="var(--accent)" />)}
           </Section>
-          <div className="callout info xs">Demand figures are illustrative scenario inputs, not market statistics. BRIXO will only display market data with a named source, date and sample size.</div>
+          <div className="callout info xs">Demand figures are illustrative scenario inputs, not market statistics. Brixo will only display market data with a named source, date and sample size.</div>
         </div>
       </div>
     </div>

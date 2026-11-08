@@ -117,7 +117,7 @@ export default function Studio() {
           <button className="btn accent sm" onClick={runBrief}>Design it</button>
         </div>
         <div className="chips" style={{ marginTop: 8 }}>{['Redesign this living room for £5,000', 'Modernise this rental flat bathroom for £4,000', 'Give this kitchen a luxury appearance for £8,000', 'Scandinavian bedroom for £3,500'].map((x) => <button key={x} className="chip xs" onClick={() => setBrief(x)}>{x}</button>)}</div>
-        {briefMsg && <div className="msg ai" style={{ maxWidth: '100%', marginTop: 10 }}><Tag kind="ai">BRIXO AI</Tag> {briefMsg}</div>}
+        {briefMsg && <div className="msg ai" style={{ maxWidth: '100%', marginTop: 10 }}><Tag kind="ai">Brixo AI</Tag> {briefMsg}</div>}
       </div>
 
       <div className="split-r">
@@ -154,8 +154,8 @@ export default function Studio() {
               <label className="field">Overall specification<Seg value={tier} onChange={(t) => { setTier(t); setOverrides({}); }} options={TIERS.map((t) => ({ value: t, label: t }))} /></label>
               <div className="eyebrow" style={{ marginTop: 6 }}>Paint colour</div>
               <div className="row">{PAINTS.map(([n, c]) => <button key={n} title={n} onClick={() => setPaint(c)} className="save-btn" style={{ borderColor: paint === c ? 'var(--ink)' : undefined }}><i style={{ display: 'inline-block', width: 12, height: 12, borderRadius: 3, background: c || style.palette.wall, border: '1px solid var(--line)', verticalAlign: 'middle', marginRight: 6 }} />{n}</button>)}</div>
-              <div className="table-wrap" style={{ marginTop: 6 }}><table className="t"><thead><tr><th>Element</th><th>Specification</th></tr></thead>
-                <tbody>{cost.lines.filter((l) => l.code !== 'STAGE').map((l) => <tr key={l.code}><td className="small">{l.name}</td><td><select className="input" value={overrides[l.code] ?? tier} onChange={(e) => setOverrides((o) => ({ ...o, [l.code]: e.target.value as Tier }))}>{TIERS.map((t) => <option key={t} value={t}>{t} — {designCost(room, t, dims, prop.postcode, { overrides: {} }).lines.find((x) => x.code === l.code)?.spec}</option>)}</select></td></tr>)}</tbody></table></div>
+              <div className="table-wrap" tabIndex={0} style={{ marginTop: 6 }}><table className="t"><thead><tr><th>Element</th><th>Specification</th></tr></thead>
+                <tbody>{cost.lines.filter((l) => l.code !== 'STAGE').map((l) => <tr key={l.code}><td className="small">{l.name}</td><td><select className="input" aria-label={`${l.name} specification`} value={overrides[l.code] ?? tier} onChange={(e) => setOverrides((o) => ({ ...o, [l.code]: e.target.value as Tier }))}>{TIERS.map((t) => <option key={t} value={t}>{t} — {designCost(room, t, dims, prop.postcode, { overrides: {} }).lines.find((x) => x.code === l.code)?.spec}</option>)}</select></td></tr>)}</tbody></table></div>
             </div>}
             {tab === 'layout' && <div className="stack">
               <div className="grid g3" style={{ gap: 10 }}>
@@ -185,7 +185,7 @@ export default function Studio() {
             </div>
           </section>
           <Section title="Material & labour schedule" kicker="Indicative" right={<Tag kind="est" />}>
-            <div className="table-wrap"><table className="t">
+            <div className="table-wrap" tabIndex={0}><table className="t">
               <thead><tr><th>Item</th><th className="r">Qty</th><th className="r">Mat.</th><th className="r">Lab.</th></tr></thead>
               <tbody>{groups.map((g) => cost.lines.filter((l) => l.group === g).map((l) => <tr key={l.code}><td className="small">{l.name}<div className="xs muted">{l.spec}</div></td><td className="r num xs">{l.qty} {l.unit}</td><td className="r num xs">{gbpK(l.materials)}</td><td className="r num xs">{gbpK(l.labour)}</td></tr>))}</tbody>
               <tfoot>
@@ -204,7 +204,7 @@ export default function Studio() {
             {designs.length === 0 ? <p className="small muted">Save concepts to compare them side by side or share with contractors, agents or family.</p> :
               <ul className="clean small">{designs.slice(0, 6).map((d) => <li key={d.id} className="row between"><span>{d.style} {d.room} <span className="xs muted">· {getProperty(d.propertyId)?.town.split(',')[0]}</span></span><span className="num">{gbpK(d.total)}</span></li>)}</ul>}
           </Section>
-          <Section title="Design engagement intelligence" kicker="Styles explored across BRIXO" right={<Tag kind="obs">Aggregated</Tag>}>
+          <Section title="Design engagement intelligence" kicker="Styles explored across Brixo" right={<Tag kind="obs">Aggregated</Tag>}>
             {portfolioStyles.slice(0, 6).map(([s, n]) => <Meter key={s} label={s} value={n} max={portfolioStyles[0][1]} display={n.toLocaleString('en-GB')} color="var(--accent)" />)}
             <p className="xs muted" style={{ marginTop: 8 }}>Simulated aggregate across demo listings. Owners and agents see this per listing to shape marketing and refurbishment decisions.</p>
           </Section>

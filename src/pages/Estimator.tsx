@@ -193,7 +193,7 @@ export default function Estimator() {
               {rooms.whole.map((r) => <Meter key={r.name} label={r.name} value={r.total} max={Math.max(...rooms.rooms.map((x) => x.total), ...rooms.whole.map((x) => x.total))} display={gbpK(r.total)} color="var(--gold)" />)}
               <p className="xs muted" style={{ marginTop: 8 }}>Measured works only (before prelims, OH&P, contingency, fees, VAT). Area-based trades are apportioned by typical room area.</p>
             </>}
-            {view === 'boq' && <div className="table-wrap"><table className="t">
+            {view === 'boq' && <div className="table-wrap" tabIndex={0}><table className="t">
               <thead><tr><th>#</th><th>Description</th><th className="r">Qty</th><th>Unit</th><th className="r">Rate</th><th className="r">Total</th></tr></thead>
               <tbody>{est.lines.map((l, i) => <tr key={l.code}><td className="muted">{i + 1}</td><td>{l.description}<div className="xs muted">{l.trade} · {l.quantityBasis}</div></td><td className="r num">{l.quantity}</td><td>{l.unit}</td><td className="r num">{gbp(l.rate)}</td><td className="r num">{gbp(l.total)}</td></tr>)}</tbody>
               <tfoot>

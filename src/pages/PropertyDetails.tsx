@@ -90,7 +90,7 @@ export default function PropertyDetails() {
           </div>
 
           {!rental && <section className="card ai-card">
-            <div className="card-head"><div><div className="eyebrow">BRIXO intelligence</div><h3>See beyond this property</h3></div><Link className="btn sm" to={`/property/${p.id}/intelligence`}>Full intelligence profile →</Link></div>
+            <div className="card-head"><div><div className="eyebrow">Brixo intelligence</div><h3>See beyond this property</h3></div><Link className="btn sm" to={`/property/${p.id}/intelligence`}>Full intelligence profile →</Link></div>
             <div className="grid g4 keep2">
               <Link to={`/property/${p.id}/intelligence`} style={{ textDecoration: 'none' }}><Stat label={<>Price check <Tag kind="est" /></>} value={val.verdict} sub={`As-is ${gbpK(val.asIs.low)}–${gbpK(val.asIs.high)}`} /></Link>
               <Link to={`/estimate?property=${p.id}`} style={{ textDecoration: 'none' }} onClick={() => track('refurb_sim', p.id)}><Stat label="Refurb estimate" value={gbpK(est.total)} sub={`${gbpK(est.low)}–${gbpK(est.high)}`} /></Link>
@@ -141,8 +141,8 @@ export default function PropertyDetails() {
               <button className="btn ghost" style={{ marginTop: 8 }} disabled={!msg.trim()} onClick={() => { setSent(true); track('enquiry', p.id); }}>Send enquiry</button>
             </>}
           </Section>
-          <Section title="Your privacy" kicker="What BRIXO records">
-            <p className="small">With your consent, BRIXO records anonymous interactions (e.g. photo enlarged, floor plan opened) to give owners <b>aggregated</b> insights. Groups under 10 people are never shown.</p>
+          <Section title="Your privacy" kicker="What Brixo records">
+            <p className="small">With your consent, Brixo records anonymous interactions (e.g. photo enlarged, floor plan opened) to give owners <b>aggregated</b> insights. Groups under 10 people are never shown.</p>
             <div className="row" style={{ marginTop: 8 }}>
               <button className={`save-btn${consent === 'granted' ? ' on' : ''}`} onClick={() => { setConsent('granted'); setC('granted'); }}>Allow analytics</button>
               <button className={`save-btn${consent === 'denied' ? ' on' : ''}`} onClick={() => { setConsent('denied'); setC('denied'); setEvents([]); }}>Essential only</button>
