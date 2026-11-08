@@ -431,7 +431,6 @@ main:focus { outline: none; }
 /* Header & logo */
 .topbar { background: color-mix(in srgb, var(--paper) 90%, transparent); border-bottom: 1px solid var(--line); }
 .logo { font-family: var(--display); }
-.wordmark-lockup { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); }
 .wordmark { font-family: var(--display); font-weight: 800; font-size: 1.45rem; letter-spacing: 0.01em; line-height: 1; }
 .wordmark-words { display: flex; flex-direction: column; }
 .wordmark-tag { font-size: 0.78rem; font-weight: 500; margin-top: 3px; }
@@ -570,7 +569,6 @@ h1, h2, h3, h4 { font-family: var(--display); font-weight: 800; letter-spacing: 
   .tabbar .on svg { stroke: var(--accent-ink); }
 }
 :root[data-theme='dark'] .ask-bubble, :root:not([data-theme='light']) .ask-bubble { border-color: var(--paper); }
-.wordmark-lockup { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); }
 .wordmark { font-family: var(--display); font-weight: 800; font-size: 1.5rem; letter-spacing: -0.03em; line-height: 1; }
 .wordmark .k { color: var(--accent); }
 .wordmark-tag .dot { color: var(--accent); }
@@ -579,54 +577,6 @@ h1, h2, h3, h4 { font-family: var(--display); font-weight: 800; letter-spacing: 
 .insight-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 15px; background: var(--ink); color: var(--paper); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
 .insight-pill svg { width: 15px; height: 15px; fill: none; stroke: var(--glow); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
-/* Streetkey interactive logo (brand master, scaled 1200×800 stage) */
-.skl { container-type: inline-size; width: 100%; }
-.sk-frame { position: relative; width: 100%; margin: 0 auto; aspect-ratio: 3 / 2; overflow: hidden; border-radius: 22px; border: 1px solid var(--line); box-shadow: var(--shadow); }
-.sk-stage { position: absolute; left: 0; top: 0; width: 1200px; height: 800px; transform-origin: 0 0; overflow: hidden; touch-action: pan-y; background: #F7F5F0; color: #0E1424; font-family: var(--display); }
-.sk-stage button, .sk-stage input { font: inherit; }
-.sk-stage button:focus-visible, .sk-stage input:focus-visible { outline: 3px solid #0E1424; outline-offset: 4px; }
-.sk-skylayer { position: absolute; left: 0; top: 0; pointer-events: none; }
-.sk-label { position: absolute; left: 56px; top: 32px; margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
-.sk-pin { position: absolute; transform: translateX(-50%) translateY(12px); opacity: 0; pointer-events: none; }
-.sk-pill { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 17px; background: #0E1424; color: #FFFFFF; font-size: 13px; font-weight: 700; white-space: nowrap; }
-.sk-pill svg { width: 16px; height: 16px; fill: none; stroke: #FFC24B; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.sk-stem { position: absolute; left: 50%; top: 34px; width: 2px; margin-left: -1px; background: #0E1424; }
-.sk-key { position: absolute; left: 275px; top: 190px; width: 650px; height: 200px; padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer; perspective: 900px; }
-.sk-rig { display: block; width: 650px; height: 200px; }
-.sk-key svg { display: block; overflow: visible; }
-.sk-ring { fill: none; stroke: #0E1424; stroke-width: 26; stroke-dasharray: 1; }
-.sk-blade { fill: #0E1424; transform-box: fill-box; transform-origin: 0% 50%; }
-.sk-road { stroke-width: 3; stroke-dasharray: 12 10; }
-.sk-car { fill: #F07415; transition: opacity 300ms ease; }
-.sk-house { transform-box: fill-box; transform-origin: 50% 100%; }
-.sk-house polygon, .sk-house .sk-chimney { fill: #0E1424; }
-.sk-dot { fill: #F07415; transform-box: fill-box; transform-origin: 50% 50%; }
-.sk-hit { position: absolute; width: 52px; padding: 0; border: 0; background: transparent; cursor: pointer; }
-.sk-words { position: absolute; left: 0; top: 420px; width: 1200px; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
-.sk-wordmark { margin: 0; display: flex; font-size: 112px; line-height: 1; font-weight: 800; letter-spacing: -0.02em; }
-.sk-l { display: inline-block; }
-.sk-tagline { margin: 14px 0 0; font-size: 30px; line-height: 1.2; font-weight: 600; }
-.sk-status { margin: 22px 0 0; font-size: 15px; font-weight: 500; }
-.sk-controls { position: absolute; left: 56px; right: 56px; bottom: 32px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-.sk-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.sk-btn { display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 20px; border-radius: 12px; font-size: 16px; font-weight: 700; cursor: pointer; }
-.sk-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
-.sk-btn-primary { border: 0; background: #F07415; color: #0E1424; padding: 0 22px; }
-.sk-btn-outline { border: 2px solid #0E1424; background: transparent; color: #0E1424; }
-.sk-timelabel { font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
-.sk-icon { width: 20px; height: 20px; fill: none; stroke: #0E1424; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.sk-time { width: 200px; height: 44px; margin: 0; accent-color: #F07415; cursor: pointer; }
-.sk-auto { height: 44px; padding: 0 16px; font-size: 15px; }
-/* Small frames: the scaled controls would be too small to use, so a full-size set sits under the logo */
-.sk-under { display: none; flex-direction: column; gap: 10px; padding: 12px 2px 0; }
-.sk-under .row { gap: 8px; }
-.sk-under .sk-range { width: 100%; accent-color: var(--accent); height: 36px; }
-.sk-under-status { font-size: 13px; color: var(--muted); }
-@container (max-width: 700px) {
-  .sk-controls, .sk-label, .sk-status { display: none !important; }
-  .sk-under { display: flex; }
-}
-.sk-u-turn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Plus Jakarta's heavy full stop has wide side-bearings; pull it in on large headings */
 .stop { font-style: normal; margin-left: -0.08em; }
@@ -637,6 +587,47 @@ h1, h2, h3, h4 { font-family: var(--display); font-weight: 800; letter-spacing: 
 .insight-pill { color: #F7F5F0; }
 @media (max-width: 900px) { .ask-bubble { background: var(--insight-bg); color: var(--glow); } }
 
-.sk-u-houses { display: flex; flex-wrap: wrap; gap: 6px; }
-.sk-u-house { min-height: 36px; }
-@container (max-width: 700px) { .sk-hit { display: none; } }
+
+/* ===== v0.6 · Header logo (interactive) & hero street backdrop ===== */
+.logo { perspective: 600px; }
+.wordmark-lockup { display: inline-flex; align-items: flex-end; gap: 9px; color: var(--ink); line-height: 1; }
+.wordmark-lockup .wordmark { font-size: 27px; line-height: 1; }
+.sk-mark { display: block; flex: none; color: var(--ink); overflow: visible; transition: transform 900ms cubic-bezier(.65, 0, .35, 1); }
+.sk-mark-win { fill: var(--paper); transition: fill 260ms ease calc(var(--i) * 70ms); }
+.sk-mark-dot { fill: var(--accent); transition: transform 140ms linear; }
+.logo:hover .sk-mark, .logo:focus-visible .sk-mark { transform: rotateX(360deg); }
+.logo:hover .sk-mark-win, .logo:focus-visible .sk-mark-win { fill: #FFC24B; }
+:root[data-theme='dark'] .sk-mark-win { fill: #FFC24B; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .sk-mark-win { fill: #FFC24B; } }
+
+.home-hero { position: relative; overflow: hidden; isolation: isolate; }
+.home-hero-inner { position: relative; z-index: 1; display: block; max-width: 1320px; padding: 64px 24px 72px; min-height: 560px; pointer-events: none; }
+.hero-copy { max-width: 600px; pointer-events: auto; }
+.sk-bd { position: relative; }
+.sk-bd svg { display: block; width: 100%; height: 100%; }
+.sk-bd-full { position: absolute; inset: 0; z-index: 0; }
+.sk-bd-band { display: none; padding: 0 16px; }
+.sk-bd-band svg { height: auto; max-height: 190px; }
+.sk-bd-key { position: absolute; z-index: 2; border: 0; padding: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.sk-bd-key:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.sk-bd-street > path, .sk-bd-street > line, .sk-bd-street > circle:not(.sk-bd-dot) { opacity: 0.16; transition: opacity 500ms ease; }
+.sk-bd-house { opacity: 0.16; transition: opacity 400ms ease, transform 420ms cubic-bezier(.34, 1.56, .64, 1); }
+.sk-bd-house.up { transform: translateY(-10px); }
+.sk-bd-house.on, .sk-bd-house.up { opacity: 1; }
+.sk-bd-win { transition: fill 280ms ease calc(var(--i) * 80ms); }
+.sk-bd-tag { opacity: 0; transition: opacity 260ms ease; }
+.sk-bd-house.up .sk-bd-tag { opacity: 1; transition-delay: 0ms; }
+.sk-bd.unlocked .sk-bd-tag { opacity: 1; transition-delay: calc(400ms + var(--i) * 90ms); }
+.sk-bd.unlocked .sk-bd-street > path, .sk-bd.unlocked .sk-bd-street > line, .sk-bd.unlocked .sk-bd-street > circle { opacity: 1; }
+.sk-bd.night .sk-bd-street > path, .sk-bd.night .sk-bd-street > line, .sk-bd.night .sk-bd-street > circle, .sk-bd.night .sk-bd-house { opacity: 0.9; }
+.sk-bd-car { opacity: 0; transition: opacity 300ms ease; }
+.sk-bd.unlocked .sk-bd-car { opacity: 1; }
+.sk-bd-dot { transition: transform 140ms linear; }
+@media (max-width: 1179px) {
+  .sk-bd-full { display: none; }
+  .sk-bd-band { display: block; }
+  .home-hero-inner { min-height: 0; padding: 26px 16px 8px; }
+  .hero-copy { max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) { .sk-mark, .logo:hover .sk-mark { transform: none !important; } }
+.wordmark-lockup .wordmark { position: relative; top: 1px; }

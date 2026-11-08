@@ -52,7 +52,7 @@ export default function Layout() {
       <div className="preview-bar" role="note"><div><b>PUBLIC PREVIEW</b><span className="pv-long">Listings and figures are demonstration data. Estimates are not advice.</span><span className="pv-short">Demo data · not advice</span><Link to="/terms">Terms</Link></div></div>
       <header className="topbar">
         <div className="topbar-inner">
-          <Link to="/" className="logo" aria-label="Streetkey home"><StreetkeyWordmark /></Link>
+          <Link to="/" className="logo" aria-label="Streetkey home" onClick={() => { if (pathname === '/') window.dispatchEvent(new Event('streetkey:turn')); }}><StreetkeyWordmark /></Link>
           <nav className="nav desktop-only" aria-label="Primary">
             {PRIMARY.map(([to, label]) => <NavLink key={to} to={to} className={({ isActive }) => (isActive ? 'active' : '')}>{label}</NavLink>)}
           </nav>

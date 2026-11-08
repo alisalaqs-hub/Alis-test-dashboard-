@@ -11,7 +11,8 @@
 | Type | Plus Jakarta Sans only (self-hosted, variable 200–800). Figures use tabular numerals. Labels: 11.5px, 700, uppercase, 0.16em tracking. |
 | Shapes | 12px buttons, 16px cards and search, fully rounded pills and tags |
 | Insight pill | Navy pill, amber icon (from the logo's house tags) — used for anything Streetkey's AI or engines tell you |
-| Interactive logo | **Faithful port of the brand master** (`src/components/StreetkeyLogo.tsx`): key-turn unlock with 3D rotation, tappable houses with insight tags (Value, Schools, Travel, Energy, Internet, Parks), day → sunset → night slider with “Run the day”, pointer-following locator dot, moving road and car, build-up intro. Homepage hero. |
+| Header logo (interactive) | Key-and-street mark + wordmark, wordmark baseline aligned to the key's street line (`StreetkeyWordmark` in `src/components/Brand.tsx`). Hover/focus turns the key and lights the windows in sequence; the locator dot follows the pointer; Night theme lights the windows; clicking it on the home page unlocks the hero street. Reduced motion: no turn, no tracking. |
+| Hero background | `src/components/StreetBackdrop.tsx`: the key laid along the bottom of the hero (bow + dot, blade as the road, six houses). Quiet at rest; pointer near a house lifts it, lights it and shows its insight tag; the key (a real button) unlocks the whole street — all tags, lit windows, a car on the road. Night theme = night sky, moon, stars. Phones: a slim band under the search. |
 | Product visual | “Look inside” lens on a listing (`src/components/XRay.tsx`) revealing its plans with live figures |
 
 ### Colour roles
