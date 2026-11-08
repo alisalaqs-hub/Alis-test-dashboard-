@@ -1,5 +1,5 @@
 /**
- * Brixo Engagement Engine (deterministic analytics).
+ * Streetkey Engagement Engine (deterministic analytics).
  *
  * DATA: the engagement figures here are SIMULATED from a seeded generator so
  * the dashboards are reproducible. Nothing is collected from real users in
@@ -121,7 +121,7 @@ export function engagementFor(p: Property): ListingEngagement {
   const feats = [...p.features, 'Kitchen', p.loftPotential !== 'none' ? 'Loft potential' : 'Storage', 'Commute', 'Schools'];
   const featureInterest = feats.map((f) => ({ feature: f, interactions: Math.round(totalViews * (0.04 + rnd() * 0.12) * (f === 'Kitchen' ? prof.kitchenInterest ?? 1 : 1)) })).sort((a, b) => b.interactions - a.interactions).slice(0, 7);
   const campaigns = [
-    { channel: 'Brixo search (organic)', share: 0.55, conv: 1.1, spend: 0 },
+    { channel: 'Streetkey search (organic)', share: 0.55, conv: 1.1, spend: 0 },
     { channel: 'Partner portal syndication', share: 0.25, conv: 0.8, spend: 0 },
     { channel: 'Social campaign', share: 0.12, conv: 0.45, spend: 180 },
     { channel: 'Email to matched buyers', share: 0.08, conv: 2.6, spend: 0 },

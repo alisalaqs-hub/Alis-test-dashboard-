@@ -1,4 +1,4 @@
-# Build, test and publish Brixo to GitHub Pages on every push to the default branch.
+# Build, test and publish Streetkey to GitHub Pages on every push to the default branch.
 # One-time setup: repository Settings → Pages → Build and deployment → Source: "GitHub Actions".
 name: Deploy site
 

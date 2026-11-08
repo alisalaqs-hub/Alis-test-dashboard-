@@ -1,4 +1,4 @@
--- BRIXO — PostgreSQL 16 + PostGIS schema (v0.2)
+-- STREETKEY — PostgreSQL 16 + PostGIS schema (v0.2)
 -- Multi-tenant: tenant-owned tables carry organisation_id and are protected by RLS.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -142,7 +142,7 @@ CREATE INDEX ON planning_applications USING gist (location);
 
 -- ───────────── Estimating ─────────────
 CREATE TABLE rate_libraries (
-  version       text PRIMARY KEY,             -- e.g. 'brixo-2027.01'
+  version       text PRIMARY KEY,             -- e.g. 'streetkey-2027.01'
   basis_date    date NOT NULL,
   status        text NOT NULL CHECK (status IN ('draft','approved','retired')),
   approved_by   uuid REFERENCES users(id),    -- QS reviewer

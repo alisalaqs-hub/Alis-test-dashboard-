@@ -8,7 +8,7 @@ import { gbp, gbpK, Meter, Section, Stat, Tag } from '../components/ui';
 /**
  * DEMONSTRATION market inputs. These are illustrative assumptions for the
  * prototype — not market statistics. Production derives them from Land
- * Registry, EPC, ONS rental data, licensed rental listings, Brixo search
+ * Registry, EPC, ONS rental data, licensed rental listings, Streetkey search
  * demand and planning pipeline data, with sources and dates shown.
  */
 const MARKETS: Record<string, { label: string; types: UnitType[]; demand: DemandSignal[]; pipeline: number; buildCost: number; cil: number; searchShare: Record<string, number> }> = {
@@ -51,7 +51,7 @@ export default function Developer() {
       <div className="page-head">
         <div><div className="eyebrow">Developer intelligence</div><h2 style={{ marginTop: 6 }}>What should I build — and what can I pay for the land?</h2>
           <p className="muted" style={{ marginTop: 6 }}>Explore demand by unit type, test a unit mix, and run a residual land appraisal. Scenarios show ranges, not point predictions.</p></div>
-        <div className="row"><Tag kind="demo">Demonstration market inputs</Tag><Tag kind="live">Land Registry · ONS · planning pipeline · Brixo search demand</Tag></div>
+        <div className="row"><Tag kind="demo">Demonstration market inputs</Tag><Tag kind="live">Land Registry · ONS · planning pipeline · Streetkey search demand</Tag></div>
       </div>
 
       <div className="card flat filters">
@@ -81,7 +81,7 @@ export default function Developer() {
               <tfoot><tr><td>Total</td><td /><td /><td /><td /><td className={`r num ${count !== total ? 'neg' : ''}`}>{count}</td><td className="r num">{sellOut[0].toFixed(0)}–{sellOut[1].toFixed(0)} mo</td></tr></tfoot>
             </table></div>
             <ul className="ticks xs muted" style={{ marginTop: 8 }}>
-              <li>Demand index blends (demo) enquiry-to-listing ratio, days-to-sell/let and Brixo search share for the postcode district.</li>
+              <li>Demand index blends (demo) enquiry-to-listing ratio, days-to-sell/let and Streetkey search share for the postcode district.</li>
               <li>Months-to-sell range = units ÷ absorption range; types with &gt;18 months of supply are flagged.</li>
               <li>The suggested mix keeps ≥10% family units and caps each type at ~6 months of upper-bound absorption. Local plan housing-mix policy prevails.</li>
             </ul>
@@ -110,7 +110,7 @@ export default function Developer() {
             <p className="xs muted" style={{ marginTop: 8 }}>Excludes SDLT on land, affordable housing (assumed nil — usually not true above policy thresholds), and VAT. A viability consultant should run a full appraisal (e.g. Argus) before bidding.</p>
           </Section>
 
-          <Section title="Conversion & development opportunities" kicker="From Brixo listings" right={<Tag kind="warn">Screening only</Tag>}>
+          <Section title="Conversion & development opportunities" kicker="From Streetkey listings" right={<Tag kind="warn">Screening only</Tag>}>
             <ul className="clean">{opps.map(({ p, o }) => (
               <li key={p.id + o.id} className="card flat" style={{ padding: 12 }}>
                 <div className="row between"><Link to={`/property/${p.id}/intelligence#development`}><b className="small">{p.street.replace(' (fictional)', '')}, {p.town.split(',')[0]}</b></Link><Tag kind={o.status === 'constrained' ? 'warn' : 'demo'}>{o.status}</Tag></div>
@@ -137,7 +137,7 @@ export default function Developer() {
           <Section title="Preferred specification" kicker="Design styles explored by buyers" right={<Tag kind="obs">Aggregated</Tag>}>
             {styles.map(([s, n]) => <Meter key={s} label={s} value={n} max={styles[0][1]} display={n.toLocaleString('en-GB')} color="var(--accent)" />)}
           </Section>
-          <div className="callout info xs">Demand figures are illustrative scenario inputs, not market statistics. Brixo will only display market data with a named source, date and sample size.</div>
+          <div className="callout info xs">Demand figures are illustrative scenario inputs, not market statistics. Streetkey will only display market data with a named source, date and sample size.</div>
         </div>
       </div>
     </div>

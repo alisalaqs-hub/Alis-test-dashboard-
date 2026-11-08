@@ -36,7 +36,7 @@ export function suggest(text: string, limit = 7): Suggestion[] {
     .sort((a, b) => b.count - a.count).slice(0, 4);
   for (const p of places) out.push({ kind: 'place', label: p.label, sub: `${p.sub} · ${p.count} listing${p.count === 1 ? '' : 's'}`, query: p.label });
   if (t.length >= 3) for (const p of PROPERTIES.filter((x) => `${x.title} ${x.street}`.toLowerCase().includes(t)).slice(0, 2)) out.push({ kind: 'listing', label: p.street.replace(' (fictional)', ''), sub: `${p.town} · ${p.title}`, id: p.id });
-  if (looksLikeSentence(text) || out.length === 0) out.unshift({ kind: 'ai', label: text.trim(), sub: 'Search with Brixo AI — understands budgets, features, commute & returns', query: text.trim() });
-  else out.push({ kind: 'ai', label: `“${text.trim()}” — ask Brixo AI`, sub: 'Describe what you want in your own words', query: text.trim() });
+  if (looksLikeSentence(text) || out.length === 0) out.unshift({ kind: 'ai', label: text.trim(), sub: 'Search with Streetkey AI — understands budgets, features, commute & returns', query: text.trim() });
+  else out.push({ kind: 'ai', label: `“${text.trim()}” — ask Streetkey AI`, sub: 'Describe what you want in your own words', query: text.trim() });
   return out.slice(0, limit);
 }

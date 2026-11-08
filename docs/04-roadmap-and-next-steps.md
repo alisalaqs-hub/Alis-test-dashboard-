@@ -1,4 +1,4 @@
-# BRIXO — Development Roadmap, Go-to-Market & Next Steps
+# STREETKEY — Development Roadmap, Go-to-Market & Next Steps
 
 Costs assume a blended UK fully loaded rate of ~£110k per engineer-year (~£9.2k/month), designers/PM similar, part-time specialists by day rate. "Indicative development cost" = people + infrastructure/data/AI for the phase.
 
@@ -7,7 +7,7 @@ Costs assume a blended UK fully loaded rate of ~£110k per engineer-year (~£9.2
 
 | | |
 |---|---|
-| Priorities | Extract `@brixo/engines`; QS-calibrated rate library v1 (≥300 real quotes); intelligence report for any address (OGL data: Land Registry, EPC, flood, conservation, planning); design studio with a real structure-preserving image model; investment analyser; accounts, saved work, Stripe |
+| Priorities | Extract `@streetkey/engines`; QS-calibrated rate library v1 (≥300 real quotes); intelligence report for any address (OGL data: Land Registry, EPC, flood, conservation, planning); design studio with a real structure-preserving image model; investment analyser; accounts, saved work, Stripe |
 | Resources | 4 full-stack engineers, 1 ML/AI engineer, 1 product designer, founder-PM, QS 2 days/week, legal/privacy counsel ad hoc |
 | Dependencies | Image-model API terms (commercial use, no training on uploads); OS Data Hub; consented quote data from 10–20 contractors/investors |
 | Technical risks | Estimate accuracy credibility; image models altering room structure; LLM grounding failures |
@@ -27,7 +27,7 @@ Costs assume a blended UK fully loaded rate of ~£110k per engineer-year (~£9.2
 | Technical risks | Thin listing supply; event volume/cost; misleading statistics |
 | Mitigations | "Analyse any listing" mode (paste details/address); columnar store; statistical guardrails & minimum samples in code |
 | Commercial | Owner reports, early Agent Pro, Staging |
-| Metrics | 3,000 live listings in 3 launch regions; ≥60% analytics opt-in; owners opening weekly report ≥55%; listing → enquiry conversion lift on BRIXO-intelligence listings vs control |
+| Metrics | 3,000 live listings in 3 launch regions; ≥60% analytics opt-in; owners opening weekly report ≥55%; listing → enquiry conversion lift on STREETKEY-intelligence listings vs control |
 | Indicative cost | **£750k–£900k** |
 
 ## Phase 3 — Professional tools (months 12–20)
@@ -78,8 +78,8 @@ Costs assume a blended UK fully loaded rate of ~£110k per engineer-year (~£9.2
 2. **Agents first for supply and distribution:** free 90-day Agent Pro for 100 branches in launch regions in return for listing feeds and weekly-report usage; the owner dashboard becomes their pitch tool.
 3. **Investor community:** educators, podcasts, meetups — affiliate white-label calculators.
 4. **SEO with live engines:** "cost to refurbish a Victorian terrace in Leeds", "loft conversion cost E17", "SDLT on £450k second home" — each page runs the real engine with assumptions shown.
-5. **Contractor-led growth:** contractors invite their clients to receive scoped quotes via BRIXO.
-6. **Data PR:** quarterly BRIXO Refurbishment Cost Index from verified quotes.
+5. **Contractor-led growth:** contractors invite their clients to receive scoped quotes via STREETKEY.
+6. **Data PR:** quarterly STREETKEY Refurbishment Cost Index from verified quotes.
 
 ## Next implementation steps (next 6 weeks)
 
@@ -89,5 +89,5 @@ Costs assume a blended UK fully loaded rate of ~£110k per engineer-year (~£9.2
 4. **Event pipeline:** consent manager + first-party collector + daily aggregation; port `engagement.ts` statistics to SQL/dbt with the same tests.
 5. **Image model integration:** structure-preserving edit endpoint, watermarking, consent and retention controls for uploaded photos.
 6. **Postgres + RLS:** apply `db/schema.sql`, approvals and audit tables, seed with demo data; auth with passkeys.
-7. **QS calibration sprint:** collect ≥300 consented quote lines; publish `brixo-rates-2027.01` with sign-off.
+7. **QS calibration sprint:** collect ≥300 consented quote lines; publish `streetkey-rates-2027.01` with sign-off.
 8. **Design-partner programme:** 5 agents, 20 investors, 10 contractors using the prototype weekly; measure estimate accuracy and report usefulness.

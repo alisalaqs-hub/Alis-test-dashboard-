@@ -1,24 +1,24 @@
-# Brixo — Brand System & Accessibility (v0.4)
+# Streetkey — Brand System & Accessibility (v0.5)
 
-## Brand
+## Brand (v3 · Streetkey)
 | Element | Specification |
 |---|---|
-| Name | **Brixo** in prose; **BRIXO** in the wordmark (Montserrat 800) |
-| Tagline | *See Beyond the Property.* — full stop in brand orange |
-| Mark | Single-stroke navy house on orange foundation bricks, three rising purple bars (growth). Source SVG: `src/components/Brand.tsx` (also the favicon) |
-| Core palette | Navy `#0B0F1C` · Orange `#F07415` (foundations) · Purple `#5E3BF6` (growth & AI) · Paper `#F6F7F9` · Grid `#E6E9EF` · Muted `#5B6070` |
-| Blueprint palette (dark theme & X-ray) | Ground `#0A1633` · Grid `#15295A` · Line `#7FD4FF` · Guide `#3F6FBF` · Orange `#FF9A4D` · Purple `#A996FF` |
-| Type | Montserrat (display 800, UI 500–700) · JetBrains Mono (figures, labels: 11px, uppercase, 0.14em tracking) |
-| Surface | Paper with a 40px drafting grid; white cards with 1px grid-line borders; 10px button radius |
-| Interactive logo | **Brixo X-ray logo** — faithful port of the brand master (`src/components/BrixoLogoXRay.tsx`): 1200×800 stage scaled to its frame; lens auto-sweeps, follows pointer/finger, "See through" reveals the full blueprint (Section A–A, 01 Foundations / 02 The Property / 03 Beyond, title block). Homepage hero. Accessibility: text alternative, `aria-pressed`, purple focus ring, reduced-motion = static, pauses off-screen; below 600px wide the control is shown full-size under the artwork (44px target) |
-| Product X-ray | **Listing X-ray** (`src/components/XRay.tsx`): drag over a home to reveal its blueprint annotated with live engine figures (loft, kitchen, EPC, value, ground risk); "See through" toggle reveals all |
-| Section labels | Drawing-sheet numbering: `01 / FIND`, `02 / DO`, `03 / FOR YOU`… |
+| Name | **Streetkey** in prose; **streetkey** in the wordmark, Plus Jakarta Sans 800, with **key** in orange |
+| Tagline | *See Beyond the Property.* — full stop in orange. Hero line: “Find a home. Unlock the whole street.” |
+| Mark | A key whose blade is a street of six houses, with an orange locator dot in the bow (`src/components/Brand.tsx`). Compact bow-and-dot mark for favicon and tight spaces. |
+| Palette | Navy `#0E1424` · Orange `#F07415` (the key) · Window glow `#FFC24B` (insight) · Warm paper `#F7F5F0` · Night blue `#34437A` (insights/AI on light) |
+| Night theme (dark) | From the logo's night street: ground `#121A33`, surface `#1A2446`, text `#F7F5F0`, orange `#FF8A3D`, glow `#FFC24B` |
+| Type | Plus Jakarta Sans only (self-hosted, variable 200–800). Figures use tabular numerals. Labels: 11.5px, 700, uppercase, 0.16em tracking. |
+| Shapes | 12px buttons, 16px cards and search, fully rounded pills and tags |
+| Insight pill | Navy pill, amber icon (from the logo's house tags) — used for anything Streetkey's AI or engines tell you |
+| Interactive logo | **Faithful port of the brand master** (`src/components/StreetkeyLogo.tsx`): key-turn unlock with 3D rotation, tappable houses with insight tags (Value, Schools, Travel, Energy, Internet, Parks), day → sunset → night slider with “Run the day”, pointer-following locator dot, moving road and car, build-up intro. Homepage hero. |
+| Product visual | “Look inside” lens on a listing (`src/components/XRay.tsx`) revealing its plans with live figures |
 
-### Colour roles (enforced by tokens in `src/styles.css`)
-* **Navy** = primary actions and text. Primary buttons are navy with white text.
-* **Orange** = foundations/highlight. Orange *fills* always carry **navy** text (6.6:1). Orange *text* on light surfaces uses `--accent-ink #B24D00` (4.95:1). White on orange (2.9:1) is never used.
-* **Purple** = growth and anything the AI says (AI tags, Ask button, assistant panels, focus rings).
-* Status colours (teal/gold/blue/red) are only used with text or icons, never colour alone.
+### Colour roles
+* **Navy** = text, primary surfaces, insight pills.
+* **Orange** = the key and primary actions. Orange fills carry **navy** text (6.3:1); orange as text on light uses `--accent-ink #B24D00` (4.87:1). White on orange is never used.
+* **Glow amber** = insight highlights on navy (11.4:1).
+* Focus ring: navy 3px (light), glow amber (Night) — the brand file's orange outline fails 3:1 on paper.
 
 ## Accessibility — WCAG 2.2 AA
 **Automated audit:** axe-core run against **21 routes × light/dark × desktop (1280px)/mobile (390px) = 84 page views** with tags `wcag2a, wcag2aa, wcag21a, wcag21aa, wcag22aa` → **0 violations** (Nov 2026). Script: see "Re-running the audit" below.

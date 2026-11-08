@@ -31,7 +31,7 @@ function draftDescription(i: ListingInput): string {
   return [
     `A ${i.beds ? `${i.beds}-bedroom ` : ''}${typeWord} ${kind} in ${i.town}${i.floorArea ? `, offering around ${i.floorArea}m² (${Math.round(i.floorArea * 10.764)} sq ft)` : ''}.`,
     feats.length ? `Highlights include ${feats.join(', ')}.` : '',
-    i.condition === 'poor' || i.condition === 'derelict' ? 'The property would benefit from modernisation — Brixo shows buyers a costed renovation estimate on the listing.' : i.condition === 'good' ? 'Presented in good condition throughout.' : '',
+    i.condition === 'poor' || i.condition === 'derelict' ? 'The property would benefit from modernisation — Streetkey shows buyers a costed renovation estimate on the listing.' : i.condition === 'good' ? 'Presented in good condition throughout.' : '',
     i.listing === 'rent' ? `Rent ${gbp(i.price)} per month. EPC ${i.epc ?? '—'}, council tax band ${i.councilTax ?? '—'}.` : `${i.tenure.replace(/-/g, ' ')}${i.leaseYears ? ` with ${i.leaseYears} years remaining` : ''}. EPC ${i.epc ?? '—'}, council tax band ${i.councilTax ?? '—'}.`,
   ].filter(Boolean).join(' ');
 }
@@ -48,7 +48,7 @@ export default function ListProperty() {
   const [f, setF] = useState<ListingInput>({
     listing: 'sale', addressLine: '', town: '', postcode: '', type: 'terraced', tenure: 'freehold', beds: 3, baths: 1, floorArea: 90,
     era: '1919-1944', condition: 'fair', price: 0, epc: '', councilTax: '', features: [], photos: [], description: '',
-    source: { kind: 'owner', name: 'Private seller', licence: 'Posted by the owner on Brixo', verified: false },
+    source: { kind: 'owner', name: 'Private seller', licence: 'Posted by the owner on Streetkey', verified: false },
   });
   const set = <K extends keyof ListingInput>(k: K, v: ListingInput[K]) => setF((x) => ({ ...x, [k]: v }));
   const ev = useMemo(() => (POSTCODE_RE.test(f.postcode) ? areaEvidence(f.postcode) : null), [f.postcode]);
@@ -78,21 +78,21 @@ export default function ListProperty() {
 
   const publish = () => {
     const p = buildListing({ ...f, description: f.description || draftDescription(f), features: staged ? [...f.features, 'Contains virtually staged images'] : f.features,
-      source: { kind: who === 'landlord' ? 'landlord' : 'owner', name: who === 'landlord' ? 'Private landlord' : 'Private seller', licence: 'Posted by the owner on Brixo', verified: false } });
+      source: { kind: who === 'landlord' ? 'landlord' : 'owner', name: who === 'landlord' ? 'Private landlord' : 'Private seller', licence: 'Posted by the owner on Streetkey', verified: false } });
     publishListing(p); setDone(p);
   };
 
   if (who === 'agent') return (
     <div className="stack" style={{ gap: 16, maxWidth: 720 }}>
       <h2>Agents: connect your CRM instead</h2>
-      <p className="muted">You don’t need to retype listings. Add Brixo as a portal destination in your CRM (BLM or API feed) and every listing, price change and status update flows in automatically.</p>
+      <p className="muted">You don’t need to retype listings. Add Streetkey as a portal destination in your CRM (BLM or API feed) and every listing, price change and status update flows in automatically.</p>
       <div className="row"><Link to="/sources" className="btn">Connect a listing feed</Link><button className="btn ghost" onClick={() => setWho('owner')}>I’m a private seller or landlord</button></div>
     </div>
   );
 
   if (done) return (
     <div className="stack" style={{ gap: 16, maxWidth: 720 }}>
-      <div className="callout ok"><b>Your listing is live on Brixo.</b> It now appears in search with a full intelligence profile.</div>
+      <div className="callout ok"><b>Your listing is live on Streetkey.</b> It now appears in search with a full intelligence profile.</div>
       <div className="card stack">
         <b>{done.title}</b><span className="small muted">{done.street}, {done.town} · {done.postcode}</span>
         <span className="num" style={{ fontSize: 22 }}>{done.listing === 'rent' ? `${gbp(done.price)} pcm` : gbp(done.price)}</span>
@@ -109,7 +109,7 @@ export default function ListProperty() {
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
-        <div><div className="eyebrow">List your property</div><h2 style={{ marginTop: 6 }}>Sell or let it yourself — with Brixo intelligence built in</h2>
+        <div><div className="eyebrow">List your property</div><h2 style={{ marginTop: 6 }}>Sell or let it yourself — with Streetkey intelligence built in</h2>
           <p className="muted" style={{ marginTop: 6 }}>Seven short steps. Your listing gets a price check, a renovation estimate for buyers and an AI-written description you can edit.</p></div>
         {myListings.length > 0 && <Link to="/saved" className="btn ghost sm">My listings ({myListings.length})</Link>}
       </div>
@@ -165,13 +165,13 @@ export default function ListProperty() {
                 <div className="row photo-actions">{i > 0 && <button className="btn ghost sm" onClick={() => { const a = [...f.photos!]; [a[0], a[i]] = [a[i], a[0]]; set('photos', a); }}>Make lead</button>}<button className="btn ghost sm" onClick={() => set('photos', f.photos!.filter((_, k) => k !== i))}>Remove</button></div>
               </div>))}</div>}
             <label className="check"><input type="checkbox" checked={staged} onChange={(e) => setStaged(e.target.checked)} />Some photos are virtually staged or edited (they will be labelled — required by consumer protection law)</label>
-            <p className="xs muted">Tip: the Brixo Design Studio can create a labelled “what it could look like” concept for rooms that need work.</p>
+            <p className="xs muted">Tip: the Streetkey Design Studio can create a labelled “what it could look like” concept for rooms that need work.</p>
           </>}
           {step === 4 && <>
             <h3>{f.listing === 'rent' ? 'Monthly rent' : 'Asking price'}</h3>
             <div className="input-prefix"><span>£</span><input className="input num" style={{ fontSize: 22 }} type="number" value={f.price || ''} placeholder={f.listing === 'rent' ? 'e.g. 1650' : 'e.g. 450000'} onChange={(e) => set('price', Number(e.target.value) || 0)} /></div>
             <div className="callout info small">
-              <b><Icon name="spark" size={14} /> Brixo price check</b>{' '}
+              <b><Icon name="spark" size={14} /> Streetkey price check</b>{' '}
               {range ? <>Similar homes in {ev!.scope} suggest <b className="num">{f.listing === 'rent' ? `${gbp(range.low)}–${gbp(range.high)} pcm` : `${gbpK(range.low)}–${gbpK(range.high)}`}</b> for {f.floorArea}m² in {f.condition} condition ({ev!.n} demo comparable{ev!.n === 1 ? '' : 's'}).
                 {f.price > 0 && <> Your price is <b>{f.price > range.high ? 'above' : f.price < range.low ? 'below' : 'within'}</b> that range.{f.price > range.high * 1.05 ? ' Homes priced above the evidence tend to get views but few enquiries.' : ''}</>}</> : 'Add a valid postcode to see a price check.'}
               <div className="xs muted" style={{ marginTop: 6 }}>Indicative only — not a valuation. Production uses HM Land Registry sold prices.</div>
@@ -211,9 +211,9 @@ export default function ListProperty() {
           <div className="card flat small">
             <b>What happens next</b>
             <ul className="ticks muted" style={{ marginTop: 6 }}>
-              <li>Your listing appears in Brixo search with an intelligence profile.</li>
+              <li>Your listing appears in Streetkey search with an intelligence profile.</li>
               <li>You get the owner dashboard: views, saves, enquiries and what buyers ask.</li>
-              <li>Enquiries come to you through Brixo messaging; your contact details stay private.</li>
+              <li>Enquiries come to you through Streetkey messaging; your contact details stay private.</li>
               <li>Production: identity check and HM Land Registry title match earn a “Verified owner” badge.</li>
             </ul>
           </div>

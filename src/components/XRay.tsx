@@ -6,7 +6,7 @@ import { estimateRefurb } from '../engine/refurb';
 import { gbpK } from './ui';
 
 /**
- * The Brixo X-ray: drag the lens across a home to see its blueprint —
+ * The Streetkey X-ray: drag the lens across a home to see its blueprint —
  * annotated with live engine figures. Decorative graphics are aria-hidden;
  * the same information is provided as a list for assistive technology.
  */
@@ -38,12 +38,12 @@ function HouseFront() {
 }
 
 function Blueprint({ a }: { a: { loft: string; kitchen: string; epc: string; value: string; risk: string } }) {
-  const L = '#7FD4FF', G = '#3F6FBF', O = '#FF9A4D', P = '#A996FF';
-  const lab = { fontFamily: 'JetBrains Mono, monospace', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em' } as const;
+  const L = '#E4E7F2', G = '#6E78A6', O = '#FF8A3D', P = '#FFC24B';
+  const lab = { fontFamily: 'Plus Jakarta Sans Variable, Plus Jakarta Sans, system-ui, sans-serif', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em' } as const;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" aria-hidden className="xr-svg">
-      <defs><pattern id="bp-grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#15295A" strokeWidth="1" /></pattern></defs>
-      <rect width={W} height={H} fill="#0A1633" /><rect width={W} height={H} fill="url(#bp-grid)" />
+      <defs><pattern id="bp-grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#1D2747" strokeWidth="1" /></pattern></defs>
+      <rect width={W} height={H} fill="#0E1424" /><rect width={W} height={H} fill="url(#bp-grid)" />
       {/* dimension line */}
       <g stroke={G} strokeWidth="1.5"><line x1="150" y1="52" x2="450" y2="52" /><line x1="150" y1="44" x2="150" y2="60" /><line x1="450" y1="44" x2="450" y2="60" /></g>
       <text x="300" y="40" textAnchor="middle" fill={L} style={lab}>5.4 M · SECTION A–A</text>
@@ -52,7 +52,7 @@ function Blueprint({ a }: { a: { loft: string; kitchen: string; epc: string; val
       <rect x="150" y="170" width="300" height="202" fill="rgba(127,212,255,0.04)" stroke={L} strokeWidth="2" />
       <line x1="150" y1="272" x2="450" y2="272" stroke={G} strokeWidth="1.5" strokeDasharray="6 5" />
       {/* loft potential */}
-      <polygon points="215,150 300,92 385,150 385,170 215,170" fill="rgba(123,92,255,0.25)" stroke={P} strokeWidth="2" strokeDasharray="7 5" />
+      <polygon points="215,150 300,92 385,150 385,170 215,170" fill="rgba(255,194,75,0.18)" stroke={P} strokeWidth="2" strokeDasharray="7 5" />
       {/* kitchen */}
       <rect x="290" y="282" width="150" height="82" fill="rgba(240,116,21,0.15)" stroke={O} strokeWidth="2" strokeDasharray="7 5" />
       {/* foundations */}
@@ -128,11 +128,11 @@ export function XRayHero({ propertyId = 'wal-001' }: { propertyId?: string }) {
 
   return (
     <figure className="xr">
-      <div className="xr-head"><span className="label-mono">Brixo · X-ray</span><span className="label-mono muted">Drag across the house</span></div>
+      <div className="xr-head"><span className="label-mono">Streetkey · Look inside</span><span className="label-mono muted">Drag across the house</span></div>
       <div ref={box} className={`xr-stage${full ? ' full' : ''}`}>
         <HouseFront />
         <div ref={layer} className="xr-layer"><Blueprint a={a} /></div>
-        <div ref={ring} className="xr-ring" style={{ opacity: full ? 0 : 1 }} aria-hidden><span className="h" /><span className="v" /><span className="tag">X-RAY</span></div>
+        <div ref={ring} className="xr-ring" style={{ opacity: full ? 0 : 1 }} aria-hidden><span className="h" /><span className="v" /><span className="tag">PLANS</span></div>
       </div>
       <ul className="sr-only">
         <li>Demo property: {p.street.replace(' (fictional)', '')}, {p.town}, asking {gbpK(p.price)}.</li>
@@ -142,7 +142,7 @@ export function XRayHero({ propertyId = 'wal-001' }: { propertyId?: string }) {
       <figcaption className="xr-foot">
         <button type="button" className="btn xr-btn" aria-pressed={full} onClick={() => setFull((f) => !f)}>
           <svg aria-hidden width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
-          {full ? 'Close x-ray' : 'See through'}
+          {full ? 'Close the plans' : 'Show the plans'}
         </button>
         <Link to={`/property/${p.id}/intelligence`} className="xr-link"><b>{p.street.replace(' (fictional)', '')}</b> · works {a.works} · grade {a.grade} →</Link>
       </figcaption>

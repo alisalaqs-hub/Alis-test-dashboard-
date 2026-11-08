@@ -1,8 +1,8 @@
-# Brixo — The Intelligent Property Platform
+# Streetkey — The Intelligent Property Platform
 
 > **See Beyond the Property.**
 
-BRIXO connects property discovery, valuation, refurbishment costing, interior design, investment analysis, market-response analytics and management in one AI-first platform — and exposes the same intelligence to agents, landlords, developers and partners via API.
+STREETKEY connects property discovery, valuation, refurbishment costing, interior design, investment analysis, market-response analytics and management in one AI-first platform — and exposes the same intelligence to agents, landlords, developers and partners via API.
 
 **Status:** interactive prototype. Engines are real and unit-tested (49 tests). **Listings, people, engagement data and market inputs are simulated demonstration data**, labelled throughout the UI. No live data integrations, trained prediction models, LLM calls or backend services are running — see [what is real](docs/02-architecture.md#11-what-is-real-in-this-prototype).
 
@@ -82,7 +82,7 @@ docs/         strategy & brand · architecture · commercial model · roadmap & 
 
 ## Caveats
 
-* Refurbishment and design rates are BRIXO demonstration rates — not BCIS/Spon's and not yet calibrated with verified quotes.
+* Refurbishment and design rates are STREETKEY demonstration rates — not BCIS/Spon's and not yet calibrated with verified quotes.
 * Tax tables (SDLT/LTT/LBTT, residential and non-residential) are as configured Nov 2026 — verify before reliance.
 * Valuation scenarios are not RICS valuations; development screening is not planning advice.
 * Nothing here is financial, tax, legal, planning, valuation or surveying advice.

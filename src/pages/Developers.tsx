@@ -16,7 +16,7 @@ const ENDPOINTS = [
 ];
 const WIDGETS = ['AI property search', 'AI property chat', 'Refurbishment estimate', 'Interior design visualiser', 'Investment analysis', 'Listing engagement analytics', 'Owner performance report', 'Valuation scenarios', 'Development intelligence'];
 const PLANS = [
-  { name: 'Starter', price: '£0 + usage', who: 'Developers & small agents', items: ['Sandbox + 1k free calls/mo', '2 widgets, Brixo-branded', 'Community support'] },
+  { name: 'Starter', price: '£0 + usage', who: 'Developers & small agents', items: ['Sandbox + 1k free calls/mo', '2 widgets, Streetkey-branded', 'Community support'] },
   { name: 'Growth', price: '£499/mo + usage', who: 'Agencies, lenders, proptechs', items: ['All widgets, custom branding', 'Webhooks, 50 req/s', 'Engagement analytics API', 'Email support, 99.9% SLA'] },
   { name: 'Enterprise', price: 'From £50k/yr', who: 'Portals, banks, BTR operators', items: ['Full white-label & SSO (SAML)', 'Dedicated tenancy / UK data residency', 'Bulk data & custom models', '99.95% SLA, named CSM'] },
 ];
@@ -34,13 +34,13 @@ export default function Developers() {
   const est = useMemo(() => estimateRefurb({ ...DEFAULT_INPUT, postcode: pc, floorArea: area, spec }), [area, spec, pc]);
   const req = { postcode: pc, property_type: 'terraced', floor_area_m2: area, era: 'pre-1919', condition: 'poor', spec, scope: { preset: 'full_refurbishment' } };
   const res = { id: 'est_01JDEMO8Q', pricing_basis: est.basis, region: est.region, total_inc_vat: est.total, range: { low: est.low, high: est.high }, confidence: est.confidence, cost_per_m2_ex_vat: est.costPerM2, by_trade: est.byTrade.slice(0, 3).map((t) => ({ trade: t.trade, total: t.total })), '…': '', disclaimer: 'Indicative budget estimate; not a quotation.' };
-  const embed = `<script src="https://cdn.brixo.example/widget/v1.js"\n  data-key="pk_live_…"\n  data-widget="refurb-estimate"\n  data-theme='{"brand":"${brand}","radius":12}'\n  data-partner-name="${partner}"></script>`;
+  const embed = `<script src="https://cdn.streetkey.example/widget/v1.js"\n  data-key="pk_live_…"\n  data-widget="refurb-estimate"\n  data-theme='{"brand":"${brand}","radius":12}'\n  data-partner-name="${partner}"></script>`;
 
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
-        <div><div className="eyebrow">Brixo API & Enterprise</div><h2 style={{ marginTop: 6 }}>Put Brixo intelligence inside your product</h2>
-          <p className="muted" style={{ marginTop: 6 }}>Estate agents, lenders, portals and proptechs use the same engines as Brixo.com — via versioned REST APIs, webhooks and white-label widgets — in an isolated tenant under their own brand.</p></div>
+        <div><div className="eyebrow">Streetkey API & Enterprise</div><h2 style={{ marginTop: 6 }}>Put Streetkey intelligence inside your product</h2>
+          <p className="muted" style={{ marginTop: 6 }}>Estate agents, lenders, portals and proptechs use the same engines as Streetkey.com — via versioned REST APIs, webhooks and white-label widgets — in an isolated tenant under their own brand.</p></div>
         <div className="row"><Tag kind="demo">Sandbox tenant</Tag><Tag kind="neutral">OpenAPI 3.1 in /docs</Tag></div>
       </div>
 
@@ -58,7 +58,7 @@ export default function Developers() {
             <label className="field">Floor area m²<input className="input num" type="number" value={area} onChange={(e) => setArea(Math.max(20, Number(e.target.value) || 20))} /></label>
             <label className="field">Spec<Seg value={spec} onChange={setSpec} options={[{ value: 'budget', label: 'B' }, { value: 'standard', label: 'S' }, { value: 'premium', label: 'P' }]} /></label>
           </div>
-          <pre tabIndex={0} className="code" style={{ marginTop: 12 }}>{`curl https://api.brixo.example/v1/estimates/refurbishment \\\n  -H "Authorization: Bearer sk_test_…" \\\n  -H "Idempotency-Key: 8c1e…" \\\n  -d '${JSON.stringify(req)}'`}</pre>
+          <pre tabIndex={0} className="code" style={{ marginTop: 12 }}>{`curl https://api.streetkey.example/v1/estimates/refurbishment \\\n  -H "Authorization: Bearer sk_test_…" \\\n  -H "Idempotency-Key: 8c1e…" \\\n  -d '${JSON.stringify(req)}'`}</pre>
           <pre tabIndex={0} className="code" style={{ marginTop: 8, maxHeight: 260 }}>{JSON.stringify(res, null, 2)}</pre>
         </Section>
         <Section title="White-label widget" kicker="Embed on any partner site">
@@ -73,7 +73,7 @@ export default function Developers() {
               <div className="num" style={{ fontSize: 30, margin: '4px 0' }}>{gbpK(est.low)} – {gbpK(est.high)}</div>
               <div style={{ fontSize: 12, color: '#666' }}>Most likely {gbp(est.total)} incl. VAT</div>
               <button style={{ marginTop: 10, background: brand, color: '#fff', border: 0, borderRadius: 999, padding: '8px 14px', fontWeight: 600 }}>Get 3 verified quotes</button>
-              <div style={{ fontSize: 10.5, color: '#5B6070', marginTop: 10 }}>Powered by Brixo · indicative estimate</div>
+              <div style={{ fontSize: 10.5, color: '#5B6070', marginTop: 10 }}>Powered by Streetkey · indicative estimate</div>
             </div>
           </div>
           <pre tabIndex={0} className="code" style={{ marginTop: 12 }}>{embed}</pre>

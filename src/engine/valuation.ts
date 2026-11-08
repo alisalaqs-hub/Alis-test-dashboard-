@@ -1,6 +1,6 @@
 /**
  * Indicative valuation scenarios from comparable evidence. NOT a valuation:
- * Brixo is not RICS-regulated and this is a transparent comparison method so
+ * Streetkey is not RICS-regulated and this is a transparent comparison method so
  * users can see what is driving the number. Production replaces the demo
  * comparables with HM Land Registry Price Paid + EPC floor areas.
  */
@@ -57,5 +57,5 @@ export function rentalScenario(p: Property) {
   const lets = p.comparables.filter((c) => c.kind === 'let' && c.beds === p.beds);
   const mid = lets.length ? lets.reduce((a, c) => a + c.price, 0) / lets.length : p.estRentPcm;
   const spread = lets.length ? 0.05 : 0.1;
-  return { low: Math.round(mid * (1 - spread) / 25) * 25, mid: Math.round(mid / 25) * 25, high: Math.round(mid * (1 + spread) / 25) * 25, evidence: lets.length, basis: lets.length ? `${lets.length} let comparable(s) with ${p.beds} bedrooms` : 'Brixo rental model estimate (demo) — no direct let comparables' };
+  return { low: Math.round(mid * (1 - spread) / 25) * 25, mid: Math.round(mid / 25) * 25, high: Math.round(mid * (1 + spread) / 25) * 25, evidence: lets.length, basis: lets.length ? `${lets.length} let comparable(s) with ${p.beds} bedrooms` : 'Streetkey rental model estimate (demo) — no direct let comparables' };
 }

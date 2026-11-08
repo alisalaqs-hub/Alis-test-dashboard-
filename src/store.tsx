@@ -12,7 +12,7 @@ export interface RecentSearch { q: string; mode: string; at: string }
 
 interface State { saved: string[]; compare: string[]; designs: SavedDesign[]; queue: ProposedAction[]; audit: AuditEntry[]; viewings: Viewing[]; recent: RecentSearch[]; savedSearches: RecentSearch[]; myListings: Property[]; feedListings: Property[]; tracked: Property[] }
 const EMPTY: State = { saved: [], compare: [], designs: [], queue: [], audit: [], viewings: [], recent: [], savedSearches: [], myListings: [], feedListings: [], tracked: [] };
-const KEY = 'brixo-state-v1';
+const KEY = 'streetkey-state-v1';
 
 function load(): State { try { const raw = localStorage.getItem(KEY); return raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY; } catch { return EMPTY; } }
 

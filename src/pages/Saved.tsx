@@ -7,7 +7,7 @@ export default function Saved() {
   const { saved, designs, viewings, toggleSaved, savedSearches, toggleSavedSearch, myListings, setListingStatus, tracked, untrack } = useStore();
   return (
     <div className="stack" style={{ gap: 18 }}>
-      <div className="page-head"><div><div className="eyebrow">Your Brixo</div><h2 style={{ marginTop: 6 }}>Saved properties, designs & viewings</h2></div><Tag kind="neutral">Stored in this browser (prototype)</Tag></div>
+      <div className="page-head"><div><div className="eyebrow">Your Streetkey</div><h2 style={{ marginTop: 6 }}>Saved properties, designs & viewings</h2></div><Tag kind="neutral">Stored in this browser (prototype)</Tag></div>
       <Section title={`Saved properties (${saved.length})`}>
         {saved.length === 0 ? <p className="small muted">Tap ♡ Save on any listing. <Link to="/search">Start searching →</Link></p> :
           <div className="grid g3">{saved.map((id) => { const p = getProperty(id); if (!p) return null; return (

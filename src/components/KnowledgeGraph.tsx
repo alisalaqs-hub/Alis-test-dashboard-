@@ -7,7 +7,7 @@ import { engagementFor, totals } from '../engine/engagement';
 type Access = 'public' | 'verified' | 'owner/agent' | 'aggregated' | 'private';
 const ACCESS_COLOUR: Record<Access, string> = { public: 'var(--blue)', verified: 'var(--sage)', 'owner/agent': 'var(--gold)', aggregated: 'var(--ai)', private: 'var(--danger)' };
 
-/** Radial view of the property's node in the Brixo knowledge graph, with each edge's access level. */
+/** Radial view of the property's node in the Streetkey knowledge graph, with each edge's access level. */
 export function KnowledgeGraph({ p }: { p: Property }) {
   const [hover, setHover] = useState<string | null>(null);
   const est = estimateRefurb(refurbInputFor(p));

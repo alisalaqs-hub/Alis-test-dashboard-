@@ -110,7 +110,7 @@ export default function Landlord() {
                 </div>
               ))}
             </div>
-            <p className="xs muted" style={{ marginTop: 8 }}>Damp & mould reports are always escalated for prompt investigation and hazard assessment (HHSRS). Brixo suggests trade and urgency; the landlord or agent confirms.</p>
+            <p className="xs muted" style={{ marginTop: 8 }}>Damp & mould reports are always escalated for prompt investigation and hazard assessment (HHSRS). Streetkey suggests trade and urgency; the landlord or agent confirms.</p>
           </Section>
 
           <Section title="Applications for U4" kicker="Human decision required" right={<Tag kind="neutral">No automated refusals</Tag>}>
@@ -142,11 +142,11 @@ export default function Landlord() {
           </Section>
           <Section title="Rent review (section 13)" kicker="U1 · Arnside Terrace">
             <div className="row between"><Stat label="Current" value={gbp(1_050)} /><Stat label="Market evidence" value={gbp(1_095)} sub="4 demo let comps" /></div>
-            <p className="xs muted" style={{ marginTop: 8 }}>Increases limited to once per year via section 13 notice (2 months), challengeable at the First-tier Tribunal. Brixo drafts the notice with comparable evidence for you to review.</p>
+            <p className="xs muted" style={{ marginTop: 8 }}>Increases limited to once per year via section 13 notice (2 months), challengeable at the First-tier Tribunal. Streetkey drafts the notice with comparable evidence for you to review.</p>
           </Section>
           <Section title="Void cost" kicker="U4 · 18 days">
             <div className="num" style={{ fontSize: 24 }}>{gbpK(18 * (1_250 * 12) / 365 + 18 * 6)}</div>
-            <div className="xs muted">Lost rent + council tax & utilities so far. Listing syndicated to Brixo Discover; 6 enquiries, 3 viewings booked.</div>
+            <div className="xs muted">Lost rent + council tax & utilities so far. Listing syndicated to Streetkey Discover; 6 enquiries, 3 viewings booked.</div>
           </Section>
           <div className="callout info xs">Regulatory content reflects England as configured Nov 2026 (Renters’ Rights Act 2025 tenancy reforms from 1 May 2026; PRS Database & Ombudsman to follow). Wales (Renting Homes Act) and Scotland (PRT) rule-sets are separate modules. Not legal advice — verify current commencement status.</div>
         </div>

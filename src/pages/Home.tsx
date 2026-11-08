@@ -8,7 +8,7 @@ import { Icon } from '../components/Icons';
 import { gbp, gbpK, HouseArt, Tag } from '../components/ui';
 import { useStore } from '../store';
 import { XRayHero } from '../components/XRay';
-import { BrixoLogoXRay } from '../components/BrixoLogoXRay';
+import { StreetkeyLogo } from '../components/StreetkeyLogo';
 
 const TASKS: { to: string; icon: string; label: string; sub: string; tone: string }[] = [
   { to: destination('buy', 'homes for sale in London'), icon: 'search', label: 'Buy a home', sub: 'Search & AI matches', tone: 'ink' },
@@ -33,12 +33,12 @@ export default function Home() {
       <section className="home-hero" aria-labelledby="hero-h">
         <div className="home-hero-inner">
           <div className="hero-copy">
-            <div className="row" style={{ gap: 8 }}><span className="label-mono">01 / Find</span><Tag kind="demo">Demo data</Tag></div>
-            <h1 id="hero-h">Find a home.<br /><span>See beyond the property<b>.</b></span></h1>
-            <p className="hero-sub">Every listing comes with its true cost of works, a price check and what it could become.</p>
+            <div className="row" style={{ gap: 8 }}><span className="label-mono">Find</span><Tag kind="demo">Demo data</Tag></div>
+            <h1 id="hero-h">Find a home<i className="stop">.</i><br /><span>Unlock the whole street<b className="stop">.</b></span></h1>
+            <p className="hero-sub">Every home comes with its value, the true cost of works, schools, travel, energy and what it could become — before you book a viewing.</p>
             <SmartSearch />
           </div>
-          <div className="hero-xray"><BrixoLogoXRay /></div>
+          <div className="hero-xray"><StreetkeyLogo /></div>
         </div>
       </section>
 
@@ -59,7 +59,7 @@ export default function Home() {
         </section>
 
         <section>
-          <span className="label-mono">02 / Do</span>
+          <span className="label-mono">Get started</span>
           <h2 className="home-h">What would you like to do?</h2>
           <div className="task-grid">
             {TASKS.map((t) => (
@@ -73,9 +73,9 @@ export default function Home() {
         </section>
 
         <section>
-          <span className="label-mono">03 / For you</span>
+          <span className="label-mono">For you</span>
           <div className="row between"><h2 className="home-h">Picked for you</h2><Link to={destination('buy', 'homes for sale')} className="small" style={{ fontWeight: 600 }}>See all →</Link></div>
-          <p className="small muted" style={{ marginTop: -6, marginBottom: 12 }}>Ranked by Brixo deal score — every card shows the price check and renovation cost.</p>
+          <p className="small muted" style={{ marginTop: -6, marginBottom: 12 }}>Ranked by Streetkey deal score — every card shows the price check and renovation cost.</p>
           <div className="carousel">
             {forYou.map(({ p, ds }, i) => (
               <article key={p.id} className="pcard">
@@ -93,10 +93,10 @@ export default function Home() {
 
         <section className="xr-section" aria-labelledby="xr-h">
           <div>
-            <span className="label-mono">04 / See beyond</span>
-            <h2 id="xr-h" className="home-h">X-ray any listing</h2>
-            <p className="muted" style={{ maxWidth: 460 }}>Every Brixo listing has a blueprint underneath: what the works really cost, where the space is, how efficient it could be and what it could be worth. Drag the lens to look inside.</p>
-            <Link to="/import" className="btn" style={{ marginTop: 14 }}>X-ray a listing from any website →</Link>
+            <span className="label-mono">Look inside</span>
+            <h2 id="xr-h" className="home-h">Look inside any listing</h2>
+            <p className="muted" style={{ maxWidth: 460 }}>Every Streetkey listing has its plans underneath: what the works really cost, where the space is, how efficient it could be and what it could be worth. Drag the lens across the house.</p>
+            <Link to="/import" className="btn" style={{ marginTop: 14 }}>Check a listing from any website →</Link>
           </div>
           <XRayHero />
         </section>
@@ -120,7 +120,7 @@ export default function Home() {
         </section>
 
         <section>
-          <span className="label-mono">05 / Professionals</span>
+          <span className="label-mono">Professionals</span>
           <h2 className="home-h">For professionals</h2>
           <div className="chips">
             {[['/agents', 'Estate agents'], ['/landlord', 'Landlords'], ['/developer', 'Developers'], ['/marketplace', 'Contractors'], ['/automation', 'AI agents'], ['/enterprise', 'API & white-label']].map(([to, l]) => <Link key={to} to={to} className="chip">{l} →</Link>)}

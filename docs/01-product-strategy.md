@@ -1,12 +1,12 @@
-# BRIXO — Product Strategy, Brand & Information Architecture
+# STREETKEY — Product Strategy, Brand & Information Architecture
 
-> **BRIXO** · The Intelligent Property Platform · *See Beyond the Property.*
+> **STREETKEY** · The Intelligent Property Platform · *See Beyond the Property.*
 
 ## 1. The strongest unique selling proposition
 
-**Portals show you the property. BRIXO shows you what it could become — and proves it with numbers.**
+**Portals show you the property. STREETKEY shows you what it could become — and proves it with numbers.**
 
-Every property on BRIXO carries a living intelligence profile that connects five things no UK portal joins up:
+Every property on STREETKEY carries a living intelligence profile that connects five things no UK portal joins up:
 
 | Lens | Question it answers | Engine |
 |---|---|---|
@@ -16,16 +16,16 @@ Every property on BRIXO carries a living intelligence profile that connects five
 | Return | Is it a good investment under stress? | Investment underwriter (`engine/investment.ts`, `tax.ts`) |
 | Market response | How are buyers actually reacting to it? | Engagement engine (`engine/engagement.ts`) |
 
-The flywheel: consumers explore costs and designs → owners and agents see *aggregated* evidence of what buyers care about → they commission works and quotes through BRIXO → **verified quotes and outcomes recalibrate the cost engine** → estimates get better → more professionals embed BRIXO via API.
+The flywheel: consumers explore costs and designs → owners and agents see *aggregated* evidence of what buyers care about → they commission works and quotes through STREETKEY → **verified quotes and outcomes recalibrate the cost engine** → estimates get better → more professionals embed STREETKEY via API.
 
-**Why this beats "more data":** collecting clicks is not defensible — every portal has clicks. What is defensible is *verified cost and outcome data* tied to properties (quote → invoice → resale/rent), plus integrations that make BRIXO part of agents' and lenders' daily workflow.
+**Why this beats "more data":** collecting clicks is not defensible — every portal has clicks. What is defensible is *verified cost and outcome data* tied to properties (quote → invoice → resale/rent), plus integrations that make STREETKEY part of agents' and lenders' daily workflow.
 
 ### Challenges to the brief (and how we answer them)
 
-1. **"Compete with portals" is a year-3+ goal, not a launch tactic.** Rightmove's moat is agent listing supply. BRIXO wins first as the intelligence layer *on top of* any listing (paste a listing, enter an address, or embed in an agent's site), then attracts listings because BRIXO listings convert better.
+1. **"Compete with portals" is a year-3+ goal, not a launch tactic.** Rightmove's moat is agent listing supply. STREETKEY wins first as the intelligence layer *on top of* any listing (paste a listing, enter an address, or embed in an agent's site), then attracts listings because STREETKEY listings convert better.
 2. **Engagement analytics are only valuable if trusted.** We separate *observed* counts from *inferred* interpretation and *recommendations*, show confidence intervals, and suppress small groups (k ≥ 10). We never treat a photo view as purchase intent.
 3. **AI must not fabricate.** LLMs route, read and explain; deterministic engines produce every number. Answers carry evidence, assumptions and "verify before relying" items.
-4. **Valuation, planning, mortgage and tenant decisions are regulated or high-stakes.** BRIXO screens and explains; RICS valuers, planners, FCA-regulated brokers and humans decide.
+4. **Valuation, planning, mortgage and tenant decisions are regulated or high-stakes.** STREETKEY screens and explains; RICS valuers, planners, FCA-regulated brokers and humans decide.
 5. **Interior design images are marketing, not engineering.** Every concept is labelled; virtual staging is watermarked (consumer protection: misleading-images risk under the DMCC Act 2024 / CPRs).
 
 ## 2. Brand identity
@@ -34,7 +34,7 @@ The flywheel: consumers explore costs and designs → owners and agents see *agg
 
 | Element | Choice | Rationale |
 |---|---|---|
-| Name | **BRIXO** | Bricks + X (the unknown, the multiplier) + O (the lens). Short, global, pronounceable. *Check UKIPO/EUIPO classes 9, 35, 36, 37, 42 and domains before launch.* |
+| Name | **STREETKEY** | Bricks + X (the unknown, the multiplier) + O (the lens). Short, global, pronounceable. *Check UKIPO/EUIPO classes 9, 35, 36, 37, 42 and domains before launch.* |
 | Mark | Rounded obsidian block with brick courses and a **signal-orange lens** | "See beyond the property": the lens looks through the building. |
 | Wordmark | `BRIX` + an orange ring for the **O** | The lens again; works at favicon size. |
 | Colour | Obsidian `#0B0D12`, Paper `#F6F5F1`, **Signal orange** `#FF5A1F` (brand/action), **Insight violet** `#6B4EFF` (reserved for AI output), **Verified teal** `#0F7B6C` (verified/positive) | Colour carries meaning: violet always means "AI said this", teal means verified. |
@@ -47,7 +47,7 @@ Implementation: `src/components/Brand.tsx`, tokens in `src/styles.css` (light + 
 ## 3. Information architecture
 
 ```
-BRIXO
+STREETKEY
 ├── Consumer (simple)
 │   ├── Home ─ AI search, four lenses, connected journey
 │   ├── Search ─ conversational query + filters + map + save/compare
@@ -77,7 +77,7 @@ Design principle: **one property, one profile, many views.** The consumer sees t
 
 ## 4. Competitive positioning
 
-| Player | Strength | BRIXO's angle |
+| Player | Strength | STREETKEY's angle |
 |---|---|---|
 | Rightmove, Zoopla, OnTheMarket | Listing supply & reach | We don't fight for supply first; we make any listing smarter, then convert better |
 | PropertyData, Searchland, Nimbus | Investor/land data | We add cost, design and execution (quotes) |

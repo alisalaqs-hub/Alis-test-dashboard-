@@ -1,4 +1,4 @@
-# BRIXO — Commercial Model
+# STREETKEY — Commercial Model
 
 All figures are planning assumptions to be tested in customer discovery, not forecasts.
 
@@ -13,7 +13,7 @@ All figures are planning assumptions to be tested in customer discovery, not for
 | 5 | AI interior design | **Design** £9/mo consumer · **Staging** £5 per staged image or £99/branch/mo | Homeowners, agents, landlords |
 | 6 | Contractor quotation services | £39–£79/mo + 2–3% success fee on awarded work (capped) | Contractors |
 | 7 | Enterprise property intelligence | £50k–£250k+/yr (lenders, BTR operators, insurers, developers) | Enterprise |
-| 8 | White-label licensing | £499/mo Growth → enterprise licence; agent-branded BRIXO | Agencies, portals |
+| 8 | White-label licensing | £499/mo Growth → enterprise licence; agent-branded STREETKEY | Agencies, portals |
 | 9 | API usage | £0.02–£0.60 per call (see `/enterprise`), volume commits | Proptechs, lenders |
 | 10 | Compliant partnerships | Referral fees from FCA-authorised brokers, conveyancers, insurers, retrofit installers (disclosed) | Partners |
 

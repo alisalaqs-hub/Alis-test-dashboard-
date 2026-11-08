@@ -1,22 +1,24 @@
-/* BRIXO design tokens — brand v2 "See Beyond the Property"
-   Navy #0B0F1C · Orange #F07415 (foundations) · Purple #5E3BF6 (growth / AI) · Paper #F6F7F9 on a 40px drafting grid.
-   Dark theme = "Blueprint" (the X-ray palette). Every text pairing is WCAG 2.2 AA (see docs/06-brand-and-accessibility.md). */
+/* Streetkey design tokens — "See Beyond the Property."
+   Navy #0E1424 · Orange #F07415 (the key) · Window glow #FFC24B (insight) · Warm paper #F7F5F0.
+   Dark theme = "Night": the logo's night street. All text pairings WCAG 2.2 AA (docs/06-brand-and-accessibility.md). */
 :root {
-  --paper: #F6F7F9;
-  --grid: #E6E9EF;
+  --paper: #F7F5F0;
+  --grid: transparent;
   --surface: #FFFFFF;
-  --surface-2: #EEF0F4;
-  --ink: #0B0F1C;
-  --ink-2: #262B3A;
-  --muted: #5B6070;
-  --line: #DDE1E8;
-  --accent: #F07415;        /* fills only — text on it is navy */
-  --on-accent: #0B0F1C;
-  --accent-ink: #B24D00;    /* orange used as text on light surfaces (4.95:1) */
+  --surface-2: #EFEBE2;
+  --ink: #0E1424;
+  --ink-2: #252C40;
+  --muted: #555B6E;
+  --line: #E3DED3;
+  --accent: #F07415;        /* the key — fills only; text on it is navy */
+  --on-accent: #0E1424;
+  --accent-ink: #B24D00;    /* orange as text on light surfaces */
   --accent-soft: #FDEBDD;
-  --ai: #5E3BF6;            /* brand purple: growth & AI */
+  --glow: #FFC24B;          /* window glow — insight highlight */
+  --insight-bg: #0E1424;    /* surface for insight pills, AI tags, Ask button */
+  --ai: #34437A;            /* night blue — insights & AI */
   --on-ai: #FFFFFF;
-  --ai-soft: #ECE8FF;
+  --ai-soft: #E6E8F4;
   --sage: #0A705E;
   --sage-soft: #DCF2EC;
   --gold: #8A5A00;
@@ -24,28 +26,28 @@
   --blue: #2A55B8;
   --blue-soft: #E2EAFB;
   --danger: #C2341B;
-  --focus: #5E3BF6;
-  --shadow: 0 1px 0 rgba(11, 15, 28, 0.04), 0 12px 32px -16px rgba(11, 15, 28, 0.25);
-  --radius: 14px;
-  --display: 'Montserrat Variable', 'Montserrat', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --focus: #0E1424;
+  --shadow: 0 1px 0 rgba(14, 20, 36, 0.04), 0 14px 34px -18px rgba(14, 20, 36, 0.28);
+  --radius: 16px;
+  --display: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --serif: var(--display);
-  --sans: 'Montserrat Variable', 'Montserrat', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --sans: var(--display);
+  --mono: var(--display);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --paper: #0A1633; --grid: #15295A; --surface: #10204A; --surface-2: #15295A; --ink: #E8EEFF; --ink-2: #C9D5F2; --muted: #9FB0D6; --line: #22396E;
-    --accent: #FF9A4D; --on-accent: #0B0F1C; --accent-ink: #FF9A4D; --accent-soft: #2A2340; --ai: #A996FF; --on-ai: #0B0F1C; --ai-soft: #1E2A66;
-    --sage: #4FD6B8; --sage-soft: #0F3340; --gold: #F2C25B; --gold-soft: #2A2C3A; --blue: #7FD4FF; --blue-soft: #14306A; --danger: #FF7A66; --focus: #7FD4FF;
+    --paper: #121A33; --grid: transparent; --surface: #1A2446; --surface-2: #222E57; --ink: #F7F5F0; --ink-2: #DCE0EE; --muted: #B9C0D8; --line: #2D3A69;
+    --accent: #FF8A3D; --on-accent: #0E1424; --accent-ink: #FF8A3D; --accent-soft: #3A2A2A; --glow: #FFC24B; --insight-bg: #2B3870; --ai: #AEB8FF; --on-ai: #0E1424; --ai-soft: #26315E;
+    --sage: #4FD6B8; --sage-soft: #143a40; --gold: #F2C25B; --gold-soft: #2E2D3A; --blue: #8EC5FF; --blue-soft: #1C2F5E; --danger: #FF7A66; --focus: #FFC24B;
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 14px 34px -16px rgba(0, 0, 0, 0.8);
     color-scheme: dark;
   }
 }
 :root[data-theme='dark'] {
-  --paper: #0A1633; --grid: #15295A; --surface: #10204A; --surface-2: #15295A; --ink: #E8EEFF; --ink-2: #C9D5F2; --muted: #9FB0D6; --line: #22396E;
-  --accent: #FF9A4D; --on-accent: #0B0F1C; --accent-ink: #FF9A4D; --accent-soft: #2A2340; --ai: #A996FF; --on-ai: #0B0F1C; --ai-soft: #1E2A66;
-  --sage: #4FD6B8; --sage-soft: #0F3340; --gold: #F2C25B; --gold-soft: #2A2C3A; --blue: #7FD4FF; --blue-soft: #14306A; --danger: #FF7A66; --focus: #7FD4FF;
+  --paper: #121A33; --grid: transparent; --surface: #1A2446; --surface-2: #222E57; --ink: #F7F5F0; --ink-2: #DCE0EE; --muted: #B9C0D8; --line: #2D3A69;
+  --accent: #FF8A3D; --on-accent: #0E1424; --accent-ink: #FF8A3D; --accent-soft: #3A2A2A; --glow: #FFC24B; --insight-bg: #2B3870; --ai: #AEB8FF; --on-ai: #0E1424; --ai-soft: #26315E;
+  --sage: #4FD6B8; --sage-soft: #143a40; --gold: #F2C25B; --gold-soft: #2E2D3A; --blue: #8EC5FF; --blue-soft: #1C2F5E; --danger: #FF7A66; --focus: #FFC24B;
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 14px 34px -16px rgba(0, 0, 0, 0.8);
   color-scheme: dark;
 }
@@ -219,7 +221,7 @@ pre.code { font-family: var(--mono); font-size: 12.5px; background: #0d1014; col
 .feature-num { font-family: var(--mono); font-size: 0.8rem; color: var(--accent-ink); line-height: 1; letter-spacing: 0; }
 .marquee-logos { display: flex; gap: 28px; flex-wrap: wrap; opacity: .7; font-family: var(--serif); font-size: 1.1rem; }
 
-/* ---- BRIXO additions ---- */
+/* ---- STREETKEY additions ---- */
 .nav-wrap { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .menu { position: relative; flex: none; }
 .menu > summary { list-style: none; cursor: pointer; padding: 7px 11px; border-radius: 999px; font-size: 13.5px; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
@@ -409,8 +411,8 @@ html { scroll-padding-top: 80px; }
 .filters-wrap[open] .filters-sum { margin-bottom: 10px; }
 .filters-wrap { padding: 12px 14px; }
 
-/* ===================== v0.4 · Brixo brand v2 & accessibility ===================== */
-body { background-color: var(--paper); background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 40px 40px; background-attachment: fixed; font-family: var(--sans); font-weight: 500; }
+/* ===================== v0.4 · Streetkey brand v2 & accessibility ===================== */
+body { background-color: var(--paper);  font-family: var(--sans); font-weight: 500; }
 h1, h2, h3, h4 { font-family: var(--display); font-weight: 800; letter-spacing: -0.015em; }
 h1 { font-size: clamp(2.1rem, 5vw, 3.8rem); line-height: 1.02; }
 .eyebrow, .label-mono { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
@@ -485,7 +487,7 @@ main.home-main { padding-top: 0; }
 .xr-ring .h, .xr-ring .v { position: absolute; left: 50%; top: 50%; background: var(--accent); }
 .xr-ring .h { width: 20px; height: 2px; margin: -1px 0 0 -10px; }
 .xr-ring .v { width: 2px; height: 20px; margin: -10px 0 0 -1px; }
-.xr-ring .tag { position: absolute; left: 50%; top: -11px; transform: translateX(-50%); background: var(--accent); color: #0B0F1C; font-size: 10px; padding: 3px 7px; border-radius: 4px; font-weight: 700; }
+.xr-ring .tag { position: absolute; left: 50%; top: -11px; transform: translateX(-50%); background: var(--accent); color: #0E1424; font-size: 10px; padding: 3px 7px; border-radius: 4px; font-weight: 700; }
 .xr-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 4px 2px; flex-wrap: wrap; }
 .xr-btn[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .xr-link { font-size: 13px; text-decoration: none; color: var(--ink-2); }
@@ -512,47 +514,14 @@ main.home-main { padding-top: 0; }
 .grade { font-family: var(--display); font-weight: 800; }
 
 /* Ink panels stay navy in both themes (brand), with AA-contrast secondary text */
-.card.ink { background: #0B0F1C; border-color: #0B0F1C; color: #F6F7F9; }
+.card.ink { background: #0E1424; border-color: #0E1424; color: #F7F5F0; }
 .card.ink .muted, .card.ink .label, .card.ink .sub, .card.ink .eyebrow, .card.ink .label-mono { color: #A9B4D0; }
-.card.ink .btn.ghost { background: transparent; color: #F6F7F9; border-color: rgba(246, 247, 249, 0.4); }
-.card.ink .btn.ghost:hover { background: rgba(246, 247, 249, 0.1); }
-.card.ink .btn:not(.ghost):not(.accent) { background: #F6F7F9; color: #0B0F1C; border-color: #F6F7F9; }
+.card.ink .btn.ghost { background: transparent; color: #F7F5F0; border-color: rgba(247, 245, 240, 0.4); }
+.card.ink .btn.ghost:hover { background: rgba(247, 245, 240, 0.1); }
+.card.ink .btn:not(.ghost):not(.accent) { background: #F7F5F0; color: #0E1424; border-color: #F7F5F0; }
 .card.ink .pos { color: #4FD6B8; } .card.ink .neg { color: #FF8A73; }
 .table-wrap:focus-visible, pre.code:focus-visible { outline-offset: -3px; }
 
-/* ===== Brixo interactive X-ray logo (brand master, scaled 1200×800 stage) ===== */
-.bxl { container-type: inline-size; width: 100%; }
-.bxl-frame { position: relative; width: 100%; margin: 0 auto; aspect-ratio: 3 / 2; overflow: hidden; border-radius: 18px; border: 1px solid #DDE1E8; box-shadow: var(--shadow); }
-.bxl-stage { position: absolute; left: 0; top: 0; width: 1200px; height: 800px; transform-origin: 0 0; overflow: hidden; touch-action: pan-y; cursor: crosshair;
-  background-color: #F6F7F9; background-image: linear-gradient(#E6E9EF 1px, transparent 1px), linear-gradient(90deg, #E6E9EF 1px, transparent 1px); background-size: 40px 40px;
-  font-family: 'Montserrat Variable', 'Montserrat', system-ui, sans-serif; color: #0B0F1C; }
-.bxl-layer { position: absolute; inset: 0; }
-.bxl-lockup { position: absolute; left: 177px; top: 270px; display: flex; align-items: flex-end; gap: 27px; }
-.bxl-lockup svg { display: block; flex: none; }
-.bxl-words { display: flex; flex-direction: column; padding-bottom: 3px; white-space: nowrap; }
-.bxl-wordmark { display: block; margin: 0; font-size: 182px; line-height: 0.8; font-weight: 800; letter-spacing: 0; }
-.bxl-tagline { display: block; margin: 2px 0 0; font-size: 39px; line-height: 1.2; font-weight: 500; }
-.bxl-xray { pointer-events: none; color: #7FD4FF; background-color: #0A1633; background-image: linear-gradient(#15295A 1px, transparent 1px), linear-gradient(90deg, #15295A 1px, transparent 1px); background-size: 40px 40px; clip-path: circle(150px at 600px 434px); }
-.bxl-xray .bxl-wordmark { color: transparent; -webkit-text-stroke: 1.5px #7FD4FF; }
-.bxl-xray .bxl-tagline { color: #7FD4FF; }
-.bxl-label { position: absolute; font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; }
-.bxl-titleblock { position: absolute; right: 56px; bottom: 36px; width: 280px; border: 1.5px solid #3F6FBF; font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; }
-.bxl-titleblock div { display: flex; justify-content: space-between; padding: 8px 12px; }
-.bxl-titleblock div + div { border-top: 1px solid #3F6FBF; }
-.bxl-titleblock .k { color: #6E9BE0; }
-.bxl-ring { position: absolute; left: 450px; top: 284px; width: 300px; height: 300px; box-sizing: border-box; border: 2px solid #F07415; border-radius: 50%; pointer-events: none; transition: opacity 250ms ease; }
-.bxl-ring .h { position: absolute; left: 50%; top: 50%; width: 22px; height: 2px; margin: -1px 0 0 -11px; background: #F07415; }
-.bxl-ring .v { position: absolute; left: 50%; top: 50%; width: 2px; height: 22px; margin: -11px 0 0 -1px; background: #F07415; }
-.bxl-ring .tag { position: absolute; left: 50%; top: -13px; transform: translateX(-50%); padding: 4px 8px; border-radius: 4px; background: #F07415; color: #0B0F1C; font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.12em; white-space: nowrap; }
-.bxl-chrome { position: absolute; left: 56px; right: 56px; top: 32px; display: flex; justify-content: space-between; gap: 24px; pointer-events: none; font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.14em; transition: color 300ms ease; }
-.bxl-btn { position: absolute; left: 56px; bottom: 36px; display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 22px; border: 0; border-radius: 10px; font: 700 16px 'Montserrat Variable', 'Montserrat', system-ui, sans-serif; cursor: pointer; transition: background-color 300ms ease, color 300ms ease; }
-.bxl-btn:focus-visible { outline: 3px solid #5E3BF6; outline-offset: 4px; }
-.bxl-under { display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; }
-@container (max-width: 600px) {
-  .bxl-btn, .bxl-chrome { display: none; }
-  .bxl-under { display: flex; }
-}
-@media (prefers-reduced-motion: reduce) { .bxl-xray, .bxl-ring, .bxl-btn { transition: none !important; } }
 
 .xr-section { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 32px; align-items: center; }
 @media (max-width: 900px) { .xr-section { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
@@ -569,5 +538,105 @@ main.home-main { padding-top: 0; }
 .legal p, .legal li { line-height: 1.65; }
 footer.site nav { display: flex; gap: 14px; flex-wrap: wrap; }
 footer.site nav a { color: var(--ink-2); }
-.preview-bar { background: #0B0F1C; color: #F6F7F9; }
-.preview-bar b { color: #FF9A4D; }
+.preview-bar { background: #0E1424; color: #F7F5F0; }
+.preview-bar b { color: #FFC24B; }
+
+/* ===================== v0.5 · Streetkey brand ===================== */
+body { background: var(--paper); font-family: var(--sans); font-weight: 500; }
+h1, h2, h3, h4 { font-family: var(--display); font-weight: 800; letter-spacing: -0.02em; text-wrap: balance; }
+.eyebrow, .label-mono { font-family: var(--sans); font-size: 11.5px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+.num, .mono { font-family: var(--sans); font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: -0.01em; }
+.tag { font-family: var(--sans); letter-spacing: 0.06em; font-weight: 700; border-radius: 999px; padding: 3px 9px; }
+.tag-ai { background: var(--ink); color: var(--glow); }
+.btn { border-radius: 12px; }
+.btn.sm { border-radius: 10px; }
+.btn.accent { color: var(--on-accent); }
+.smart-go { background: var(--accent); color: var(--on-accent); border-radius: 12px; }
+.smart-go:hover { background: var(--ink); color: var(--paper); }
+.smart-box { border-radius: 16px; }
+.chip, .save-btn { border-radius: 999px; }
+.mode-tabs button.on { background: var(--ink); color: var(--paper) !important; }
+.home-hero { border-bottom: 0; }
+.home-hero h1 span { color: var(--ink); }
+.home-hero h1 span b { color: var(--accent); }
+.home-hero h1 .key { color: var(--accent-ink); }
+.msg.ai { background: var(--ai-soft); }
+.ai-card { border-color: color-mix(in srgb, var(--ai) 25%, var(--line)); background: linear-gradient(180deg, var(--ai-soft), var(--surface) 70%); }
+.pcard-ai { color: var(--ai); }
+.task:hover { border-color: var(--accent); }
+.task-ai .task-ic { background: var(--ink); color: var(--glow); }
+@media (max-width: 900px) {
+  .ask-bubble { background: var(--ink); color: var(--glow); box-shadow: 0 10px 22px -8px rgba(14, 20, 36, 0.6); }
+  .tabbar .on svg { stroke: var(--accent-ink); }
+}
+:root[data-theme='dark'] .ask-bubble, :root:not([data-theme='light']) .ask-bubble { border-color: var(--paper); }
+.wordmark-lockup { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); }
+.wordmark { font-family: var(--display); font-weight: 800; font-size: 1.5rem; letter-spacing: -0.03em; line-height: 1; }
+.wordmark .k { color: var(--accent); }
+.wordmark-tag .dot { color: var(--accent); }
+
+/* Insight pill (from the logo's house tags) */
+.insight-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 15px; background: var(--ink); color: var(--paper); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.insight-pill svg { width: 15px; height: 15px; fill: none; stroke: var(--glow); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Streetkey interactive logo (brand master, scaled 1200×800 stage) */
+.skl { container-type: inline-size; width: 100%; }
+.sk-frame { position: relative; width: 100%; margin: 0 auto; aspect-ratio: 3 / 2; overflow: hidden; border-radius: 22px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+.sk-stage { position: absolute; left: 0; top: 0; width: 1200px; height: 800px; transform-origin: 0 0; overflow: hidden; touch-action: pan-y; background: #F7F5F0; color: #0E1424; font-family: var(--display); }
+.sk-stage button, .sk-stage input { font: inherit; }
+.sk-stage button:focus-visible, .sk-stage input:focus-visible { outline: 3px solid #0E1424; outline-offset: 4px; }
+.sk-skylayer { position: absolute; left: 0; top: 0; pointer-events: none; }
+.sk-label { position: absolute; left: 56px; top: 32px; margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
+.sk-pin { position: absolute; transform: translateX(-50%) translateY(12px); opacity: 0; pointer-events: none; }
+.sk-pill { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 17px; background: #0E1424; color: #FFFFFF; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.sk-pill svg { width: 16px; height: 16px; fill: none; stroke: #FFC24B; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.sk-stem { position: absolute; left: 50%; top: 34px; width: 2px; margin-left: -1px; background: #0E1424; }
+.sk-key { position: absolute; left: 275px; top: 190px; width: 650px; height: 200px; padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer; perspective: 900px; }
+.sk-rig { display: block; width: 650px; height: 200px; }
+.sk-key svg { display: block; overflow: visible; }
+.sk-ring { fill: none; stroke: #0E1424; stroke-width: 26; stroke-dasharray: 1; }
+.sk-blade { fill: #0E1424; transform-box: fill-box; transform-origin: 0% 50%; }
+.sk-road { stroke-width: 3; stroke-dasharray: 12 10; }
+.sk-car { fill: #F07415; transition: opacity 300ms ease; }
+.sk-house { transform-box: fill-box; transform-origin: 50% 100%; }
+.sk-house polygon, .sk-house .sk-chimney { fill: #0E1424; }
+.sk-dot { fill: #F07415; transform-box: fill-box; transform-origin: 50% 50%; }
+.sk-hit { position: absolute; width: 52px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.sk-words { position: absolute; left: 0; top: 420px; width: 1200px; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.sk-wordmark { margin: 0; display: flex; font-size: 112px; line-height: 1; font-weight: 800; letter-spacing: -0.02em; }
+.sk-l { display: inline-block; }
+.sk-tagline { margin: 14px 0 0; font-size: 30px; line-height: 1.2; font-weight: 600; }
+.sk-status { margin: 22px 0 0; font-size: 15px; font-weight: 500; }
+.sk-controls { position: absolute; left: 56px; right: 56px; bottom: 32px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.sk-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sk-btn { display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 20px; border-radius: 12px; font-size: 16px; font-weight: 700; cursor: pointer; }
+.sk-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.sk-btn-primary { border: 0; background: #F07415; color: #0E1424; padding: 0 22px; }
+.sk-btn-outline { border: 2px solid #0E1424; background: transparent; color: #0E1424; }
+.sk-timelabel { font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.sk-icon { width: 20px; height: 20px; fill: none; stroke: #0E1424; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sk-time { width: 200px; height: 44px; margin: 0; accent-color: #F07415; cursor: pointer; }
+.sk-auto { height: 44px; padding: 0 16px; font-size: 15px; }
+/* Small frames: the scaled controls would be too small to use, so a full-size set sits under the logo */
+.sk-under { display: none; flex-direction: column; gap: 10px; padding: 12px 2px 0; }
+.sk-under .row { gap: 8px; }
+.sk-under .sk-range { width: 100%; accent-color: var(--accent); height: 36px; }
+.sk-under-status { font-size: 13px; color: var(--muted); }
+@container (max-width: 700px) {
+  .sk-controls, .sk-label, .sk-status { display: none !important; }
+  .sk-under { display: flex; }
+}
+.sk-u-turn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Plus Jakarta's heavy full stop has wide side-bearings; pull it in on large headings */
+.stop { font-style: normal; margin-left: -0.08em; }
+.pv-short { display: none; }
+@media (max-width: 640px) { .pv-long { display: none; } .pv-short { display: inline; } .preview-bar > div { flex-wrap: nowrap; padding-block: 6px; } }
+
+.tag-ai, .task-ai .task-ic, .insight-pill { background: var(--insight-bg); color: var(--glow); }
+.insight-pill { color: #F7F5F0; }
+@media (max-width: 900px) { .ask-bubble { background: var(--insight-bg); color: var(--glow); } }
+
+.sk-u-houses { display: flex; flex-wrap: wrap; gap: 6px; }
+.sk-u-house { min-height: 36px; }
+@container (max-width: 700px) { .sk-hit { display: none; } }

@@ -184,7 +184,7 @@ export default function Estimator() {
 
           <Section title="Breakdown" right={<>
             <Seg value={view} onChange={setView} options={[{ value: 'trade', label: 'By trade' }, { value: 'room', label: 'By room' }, { value: 'boq', label: 'Bill of quantities' }]} />
-            <button className="btn ghost sm" onClick={() => download(`brixo-boq-${input.postcode.replace(/\s/g, '')}.csv`, boqCsv(est))}>Export BoQ (CSV)</button>
+            <button className="btn ghost sm" onClick={() => download(`streetkey-boq-${input.postcode.replace(/\s/g, '')}.csv`, boqCsv(est))}>Export BoQ (CSV)</button>
           </>}>
             {view === 'trade' && est.byTrade.map((t) => <Meter key={t.trade} label={t.trade} value={t.total} max={maxTrade} display={gbpK(t.total)} />)}
             {view === 'room' && <>

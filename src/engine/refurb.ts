@@ -1,11 +1,11 @@
 /**
- * Brixo Refurbishment Cost Engine — v0.1 (deterministic).
+ * Streetkey Refurbishment Cost Engine — v0.1 (deterministic).
  *
  * Structure mirrors how a UK quantity surveyor builds an elemental estimate:
  *   measured works (quantity × unit rate × spec × regional × condition/age/access)
  *   + preliminaries + overheads & profit + contingency + professional fees + VAT.
  *
- * IMPORTANT: unit rates in RATE_LIBRARY are Brixo demonstration rates
+ * IMPORTANT: unit rates in RATE_LIBRARY are Streetkey demonstration rates
  * compiled for prototyping (UK national average, Q4 2026 basis). They are
  * NOT BCIS, Spon's or any licensed price book. Production replaces this
  * table with a versioned rate library calibrated from verified contractor
@@ -13,7 +13,7 @@
  */
 
 export const PRICING_BASIS = {
-  version: 'brixo-demo-rates-0.1',
+  version: 'streetkey-demo-rates-0.1',
   basisDate: '2026-11-01',
   source: 'Demonstration rates (national average). Not calibrated against verified quotations.',
 };
@@ -382,7 +382,7 @@ export function boqCsv(e: Estimate): string {
 
 export interface ContractorQuote { contractor: string; lines: Partial<Record<Trade, number>>; programmeWeeks: number; verified: boolean }
 
-/** Compare quotes against the Brixo benchmark trade-by-trade; flag outliers > ±25%. */
+/** Compare quotes against the Streetkey benchmark trade-by-trade; flag outliers > ±25%. */
 export function compareQuotes(e: Estimate, quotes: ContractorQuote[]) {
   return quotes.map((q) => {
     const rows = e.byTrade.map(({ trade, total }) => {

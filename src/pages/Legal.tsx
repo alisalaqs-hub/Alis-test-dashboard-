@@ -7,7 +7,7 @@ import { Tag } from '../components/ui';
  */
 const UPDATED = '8 November 2026';
 function Draft() {
-  return <div className="callout small" role="note"><b>Draft for the public preview.</b> Items in [brackets] must be completed and this page reviewed by a solicitor before Brixo launches with real listings or user accounts.</div>;
+  return <div className="callout small" role="note"><b>Draft for the public preview.</b> Items in [brackets] must be completed and this page reviewed by a solicitor before Streetkey launches with real listings or user accounts.</div>;
 }
 
 export function Privacy() {
@@ -18,7 +18,7 @@ export function Privacy() {
       <p className="muted small">Last updated {UPDATED}</p>
       <Draft />
       <h2>Who we are</h2>
-      <p>Brixo is operated by [Company name], [registered address], company number [number]. We are registered with the Information Commissioner’s Office under number [ICO registration number]. Contact: [privacy contact email].</p>
+      <p>Streetkey is operated by [Company name], [registered address], company number [number]. We are registered with the Information Commissioner’s Office under number [ICO registration number]. Contact: [privacy contact email].</p>
       <h2>What this preview collects</h2>
       <ul>
         <li><b>No accounts.</b> You don’t sign up, and we don’t ask for your name or email.</li>
@@ -46,7 +46,7 @@ export function Terms() {
       <p className="muted small">Last updated {UPDATED}</p>
       <Draft />
       <h2>This is a public preview</h2>
-      <p>Brixo is in preview. <b>All listings, agents, owners, engagement figures and market data shown are fictional demonstration data.</b> No property shown is for sale or to let.</p>
+      <p>Streetkey is in preview. <b>All listings, agents, owners, engagement figures and market data shown are fictional demonstration data.</b> No property shown is for sale or to let.</p>
       <h2>Estimates are not advice</h2>
       <p>Refurbishment costs, valuations, rents, tax figures, investment returns and development screening are indicative estimates from automated tools. They are not financial, tax, legal, mortgage, planning, surveying or RICS valuation advice. Always get advice from a qualified professional before making decisions.</p>
       <h2>Your content</h2>
@@ -67,7 +67,7 @@ export function Accessibility() {
       <div className="row"><span className="label-mono">Legal</span><Tag kind="demo">Draft</Tag></div>
       <h1 style={{ fontSize: '2.2rem' }}>Accessibility statement</h1>
       <p className="muted small">Last updated {UPDATED}</p>
-      <p>We want everyone to be able to use Brixo. We design to the Web Content Accessibility Guidelines (WCAG) 2.2 level AA.</p>
+      <p>We want everyone to be able to use Streetkey. We design to the Web Content Accessibility Guidelines (WCAG) 2.2 level AA.</p>
       <h2>What we’ve tested</h2>
       <ul>
         <li>An automated audit (axe-core) of every screen in light and dark themes, on desktop and mobile, reports no WCAG 2.2 A or AA failures.</li>
@@ -82,7 +82,7 @@ export function Accessibility() {
       </ul>
       <h2>Tell us about a problem</h2>
       <p>If something doesn’t work for you, email [accessibility contact email] and we’ll respond within 5 working days.</p>
-      <p><Link to="/">Back to Brixo</Link></p>
+      <p><Link to="/">Back to Streetkey</Link></p>
     </article>
   );
 }

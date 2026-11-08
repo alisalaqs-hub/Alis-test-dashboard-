@@ -9,8 +9,8 @@
 export type EventName = 'listing_view' | 'photo_enlarge' | 'floorplan_open' | 'save' | 'compare_add' | 'viewing_request' | 'enquiry' | 'ai_question' | 'refurb_sim' | 'design_style' | 'document_open';
 export interface TrackedEvent { name: EventName; listingId: string; at: string; session: string; props?: Record<string, string | number> }
 
-const CONSENT_KEY = 'brixo-analytics-consent';
-const EVENTS_KEY = 'brixo-events';
+const CONSENT_KEY = 'streetkey-analytics-consent';
+const EVENTS_KEY = 'streetkey-events';
 
 export function getConsent(): 'granted' | 'denied' | 'unset' {
   try { return (localStorage.getItem(CONSENT_KEY) as 'granted' | 'denied') ?? 'unset'; } catch { return 'unset'; }
@@ -19,7 +19,7 @@ export function setConsent(v: 'granted' | 'denied') {
   try { localStorage.setItem(CONSENT_KEY, v); if (v === 'denied') sessionStorage.removeItem(EVENTS_KEY); } catch { /* ignore */ }
 }
 function session() {
-  try { let s = sessionStorage.getItem('brixo-sid'); if (!s) { s = Math.random().toString(36).slice(2, 10); sessionStorage.setItem('brixo-sid', s); } return s; } catch { return 'anon'; }
+  try { let s = sessionStorage.getItem('streetkey-sid'); if (!s) { s = Math.random().toString(36).slice(2, 10); sessionStorage.setItem('streetkey-sid', s); } return s; } catch { return 'anon'; }
 }
 export function track(name: EventName, listingId: string, props?: TrackedEvent['props']) {
   if (getConsent() !== 'granted') return false;
@@ -27,7 +27,7 @@ export function track(name: EventName, listingId: string, props?: TrackedEvent['
     const list: TrackedEvent[] = JSON.parse(sessionStorage.getItem(EVENTS_KEY) ?? '[]');
     list.unshift({ name, listingId, at: new Date().toISOString(), session: session(), props });
     sessionStorage.setItem(EVENTS_KEY, JSON.stringify(list.slice(0, 100)));
-    window.dispatchEvent(new Event('brixo-track'));
+    window.dispatchEvent(new Event('streetkey-track'));
     return true;
   } catch { return false; }
 }

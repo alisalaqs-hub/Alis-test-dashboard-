@@ -1,5 +1,5 @@
 /**
- * Listing supply: everything that turns outside data into Brixo listings.
+ * Listing supply: everything that turns outside data into Streetkey listings.
  *
  *  1. Owner / landlord posts      → buildListing() + complianceChecks()
  *  2. Agent CRM feeds (BLM v3)    → parseBLM()      (the bulk format CRMs already export to portals)

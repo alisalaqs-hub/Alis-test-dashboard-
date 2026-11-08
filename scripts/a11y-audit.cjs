@@ -13,7 +13,9 @@ const routes = ['', 'search?q=Croydon', 'property/wal-001', 'property/wal-001/in
     for (const r of routes) {
       await p.goto('http://localhost:4173/#/' + r); await p.waitForTimeout(450);
       await p.addScriptTag({ path: AXE });
-      const res = await p.evaluate(async () => await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } }));
+      const res = await p.evaluate(async () => // WCAG 1.4.3 exempts logotypes ("text that is part of a logo or brand name has no contrast requirement"),
+      // so the orange "key" in the streetkey wordmark is excluded. All other text is checked.
+      await window.axe.run({ include: [document], exclude: [['.wordmark .k']] }, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } }));
       for (const v of res.violations) {
         const k = `${v.id} [${v.impact}]`;
         summary[k] = summary[k] || { help: v.help, where: new Set(), samples: [] };

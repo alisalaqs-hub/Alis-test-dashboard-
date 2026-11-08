@@ -1,4 +1,4 @@
-# Brixo — Going Live
+# Streetkey — Going Live
 
 ## Stage 1 · Public preview (now)
 The site publishes automatically to **GitHub Pages** whenever this repository's default branch changes
@@ -11,7 +11,7 @@ Preview address: `https://alisalaqs-hub.github.io/Alis-test-dashboard-/`
 
 What the preview includes: “Public preview” banner, `noindex` (search engines won't list the demo data), self-hosted fonts (no third-party requests), draft Privacy / Terms / Accessibility pages.
 
-## Stage 2 · Your own domain (e.g. brixo.co.uk)
+## Stage 2 · Your own domain (e.g. streetkey.co.uk)
 1. Check the name: UKIPO trade mark search (classes 9, 35, 36, 37, 42) and Companies House.
 2. Buy the domain from any registrar (≈ £10–15/yr for .co.uk).
 3. GitHub → Settings → Pages → **Custom domain** → enter `www.yourdomain.co.uk` → Save.

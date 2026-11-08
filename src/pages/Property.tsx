@@ -68,7 +68,7 @@ export default function PropertyPage() {
           <div className="muted">{p.street}, {p.town} · {p.postcode}</div>
           <div className="row" style={{ alignItems: 'flex-end', gap: 18 }}>
             <Stat big label={rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price'} value={rental ? `${gbp(p.price)}` : gbp(p.price)} sub={rental ? 'per calendar month' : `${gbp(p.price / p.floorArea)}/m² · ${p.daysOnMarket} days on market`} />
-            {!rental && <div className="row" style={{ gap: 10 }}><div className={`grade grade-${ds.grade}`} style={{ width: 64, height: 64, fontSize: '2rem' }}>{ds.grade}</div><div><div className="num" style={{ fontSize: 22 }}>{ds.total}/100</div><div className="xs muted">Brixo deal score</div></div></div>}
+            {!rental && <div className="row" style={{ gap: 10 }}><div className={`grade grade-${ds.grade}`} style={{ width: 64, height: 64, fontSize: '2rem' }}>{ds.grade}</div><div><div className="num" style={{ fontSize: 22 }}>{ds.total}/100</div><div className="xs muted">Streetkey deal score</div></div></div>}
           </div>
           <div className="grid g3" style={{ gap: 10 }}>
             <div className="card flat" style={{ padding: 12 }}><div className="xs muted">Beds / baths</div><div className="num">{p.beds} / {p.baths}</div></div>
@@ -140,7 +140,7 @@ export default function PropertyPage() {
             <ul className="clean small" style={{ marginTop: 12 }}>{eng.ins.slice(0, 4).map((i) => <li key={i.id}><Tag kind={i.kind === 'observed' ? 'obs' : i.kind === 'inferred' ? 'inf' : 'rec'} /> {i.title}</li>)}</ul>
           </Section>}
 
-          <Section title="Property knowledge graph" kicker="What Brixo connects for this property" right={<Tag kind="neutral">Access-controlled</Tag>}>
+          <Section title="Property knowledge graph" kicker="What Streetkey connects for this property" right={<Tag kind="neutral">Access-controlled</Tag>}>
             <KnowledgeGraph p={p} />
           </Section>
 

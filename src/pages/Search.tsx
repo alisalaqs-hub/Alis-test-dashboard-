@@ -7,7 +7,7 @@ import { externalSearchLinks } from '../engine/listings';
 import { publicListings, type Property } from '../data/properties';
 
 function sourceLabel(p: Property) {
-  if (!p.source) return { text: 'Brixo demo', tone: 'demo' as const };
+  if (!p.source) return { text: 'Streetkey demo', tone: 'demo' as const };
   if (p.source.kind === 'agent-feed') return { text: p.source.name.replace(' (agent feed)', ''), tone: 'ok' as const };
   return { text: p.source.name, tone: 'neutral' as const };
 }
@@ -16,7 +16,7 @@ function narrate(q: SearchQuery, hits: SearchHit[]): string[] {
   const out: string[] = [];
   if (!hits.length) return ['Nothing in the current dataset meets the hard constraints (type, budget, beds, location/commute). Try widening the budget, commute or area.'];
   const best = hits[0];
-  out.push(`I found ${hits.length} propert${hits.length === 1 ? 'y' : 'ies'} meeting your hard constraints, ranked by fit and underwritten potential (refurb cost from the Brixo engine, value from comparables, risk and demand).`);
+  out.push(`I found ${hits.length} propert${hits.length === 1 ? 'y' : 'ies'} meeting your hard constraints, ranked by fit and underwritten potential (refurb cost from the Streetkey engine, value from comparables, risk and demand).`);
   if (q.minRefurbProfit) {
     const meeting = hits.filter((h) => h.estProfit >= q.minRefurbProfit!);
     if (meeting.length) out.push(`${meeting.length} clear your £${Math.round(q.minRefurbProfit / 1000)}k profit target on base-case assumptions.`);
@@ -78,7 +78,7 @@ export default function Search() {
         <div className="stack" style={{ gap: 16 }}>
           <div className="card ai-card search-head">
             <form className="smart-box" style={{ boxShadow: 'none' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
-              <input value={text} onChange={(e) => setText(e.target.value)} aria-label="Search Brixo" enterKeyHint="search" placeholder="Place or describe it" />
+              <input value={text} onChange={(e) => setText(e.target.value)} aria-label="Search Streetkey" enterKeyHint="search" placeholder="Place or describe it" />
               <button className="smart-go" type="submit">Search</button>
             </form>
             <div className="row between" style={{ marginTop: 10, flexWrap: 'nowrap', gap: 8 }}>
@@ -115,7 +115,7 @@ export default function Search() {
                     <div style={{ fontWeight: 600 }}>{h.property.title}</div>
                     <div className="small muted">{h.property.street}, {h.property.town} · {h.property.beds ? `${h.property.beds} bed · ` : ''}{h.property.floorArea}m² · EPC {h.property.epc.current}</div>
                   </Link>
-                  {h.property.listing !== 'rent' && <div className={`grade grade-${h.dealGrade}`} title="Brixo deal grade">{h.dealGrade}</div>}
+                  {h.property.listing !== 'rent' && <div className={`grade grade-${h.dealGrade}`} title="Streetkey deal grade">{h.dealGrade}</div>}
                 </div>
                 <ul className="ticks">{h.reasons.slice(0, 3).map((r) => <li key={r}>{r}</li>)}</ul>
                 {h.cautions.length > 0 && <div className="xs" style={{ color: 'var(--danger)' }}>⚠ {h.cautions.slice(0, 2).join(' · ')}</div>}
@@ -139,7 +139,7 @@ export default function Search() {
               <div className="row" style={{ marginTop: 8 }}>{external.map((l) => <a key={l.site} className="btn ghost sm" href={l.url} target="_blank" rel="noopener noreferrer">{l.site} ↗</a>)}</div>
             </> : <p className="small">Add a place to your search to open it on other property sites too.</p>}
             <div className="hr" />
-            <p className="small"><b>Found one you like elsewhere?</b> Paste it into Brixo for a price check, renovation cost and investment view.</p>
+            <p className="small"><b>Found one you like elsewhere?</b> Paste it into Streetkey for a price check, renovation cost and investment view.</p>
             <Link to="/import" className="btn sm" style={{ marginTop: 8 }}>Check any listing →</Link>
           </section>
           <UKMap pins={shown.map((h) => ({ id: h.property.id, lat: h.property.lat, lng: h.property.lng, label: h.property.town.split(',')[0], active: active === h.property.id }))} onPin={setActive} />

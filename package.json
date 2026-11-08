@@ -1,9 +1,9 @@
 {
-  "name": "brixo-platform",
+  "name": "streetkey-platform",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Brixo — See Beyond the Property. AI property intelligence platform (prototype)",
+  "description": "Streetkey — See Beyond the Property. AI property intelligence platform (prototype)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -14,8 +14,7 @@
     "a11y": "node scripts/a11y-audit.cjs"
   },
   "dependencies": {
-    "@fontsource-variable/montserrat": "^5.3.0",
-    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5"

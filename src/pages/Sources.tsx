@@ -6,7 +6,7 @@ import { SAMPLE_AGENT, SAMPLE_BLM } from '../data/sampleFeed';
 import { gbp, Section, Stat, Tag } from '../components/ui';
 import { useStore } from '../store';
 
-const JSON_SCHEMA = `POST /v1/listings            (Brixo Listing Feed v1 — for CRMs with an API)
+const JSON_SCHEMA = `POST /v1/listings            (Streetkey Listing Feed v1 — for CRMs with an API)
 Authorization: Bearer sk_live_…   Idempotency-Key: <agent_ref>
 {
   "agent_ref": "LVH002",
@@ -38,14 +38,14 @@ export default function Sources() {
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
-        <div><div className="eyebrow">Listing sources & feeds</div><h2 style={{ marginTop: 6 }}>Where Brixo listings come from</h2>
-          <p className="muted" style={{ marginTop: 6 }}>Agents own their listings and already send them to every portal from their CRM. Brixo is simply another destination — plus homes posted directly by owners and landlords.</p></div>
+        <div><div className="eyebrow">Listing sources & feeds</div><h2 style={{ marginTop: 6 }}>Where Streetkey listings come from</h2>
+          <p className="muted" style={{ marginTop: 6 }}>Agents own their listings and already send them to every portal from their CRM. Streetkey is simply another destination — plus homes posted directly by owners and landlords.</p></div>
         <Link to="/list" className="btn">List a property yourself</Link>
       </div>
 
       <div className="grid g4 keep2">
         <div className="card"><Stat label="Agent feed listings" value={counts.feed} sub={`${agents.length} connected agenc${agents.length === 1 ? 'y' : 'ies'}`} /></div>
-        <div className="card"><Stat label="Owner & landlord posts" value={counts.owner} sub="Posted on Brixo" /></div>
+        <div className="card"><Stat label="Owner & landlord posts" value={counts.owner} sub="Posted on Streetkey" /></div>
         <div className="card"><Stat label="Demo listings" value={counts.demo} sub="Fictional seed data" /></div>
         <div className="card"><Stat label="Tracked from other sites" value={counts.tracked} sub="Private to each user" /></div>
       </div>
@@ -63,7 +63,7 @@ export default function Sources() {
               <div className="table-wrap" tabIndex={0}><table className="t"><thead><tr><th>Listing</th><th className="r">Price</th><th>Status</th></tr></thead>
                 <tbody>{report.accepted.map((p) => <tr key={p.id}><td className="small"><b>{p.title}</b><div className="xs muted">{p.street}, {p.town} · {p.postcode} · {p.beds} bed · EPC {p.epc.current}</div></td><td className="r num">{p.listing === 'rent' ? `${gbp(p.price)} pcm` : gbp(p.price)}</td><td><Tag kind="ok">{p.status}</Tag></td></tr>)}
                   {report.rejected.map((r) => <tr key={r.ref}><td className="small mono">{r.ref}</td><td /><td className="xs" style={{ color: 'var(--danger)' }}>{r.reason}</td></tr>)}</tbody></table></div>
-              <div className="row"><button className="btn accent" onClick={() => ingestFeed(agent, report.accepted)}>Publish {report.accepted.length} listings to Brixo</button><Link to="/search?q=Walthamstow" className="btn ghost sm">Then search Walthamstow →</Link></div>
+              <div className="row"><button className="btn accent" onClick={() => ingestFeed(agent, report.accepted)}>Publish {report.accepted.length} listings to Streetkey</button><Link to="/search?q=Walthamstow" className="btn ghost sm">Then search Walthamstow →</Link></div>
             </div>}
           </Section>
           <Section title="Or integrate by API" kicker="For CRMs and developers"><pre tabIndex={0} className="code">{JSON_SCHEMA}</pre></Section>
@@ -75,12 +75,12 @@ export default function Sources() {
           <Section title="How each source can be used">
             <div className="table-wrap" tabIndex={0}><table className="t"><thead><tr><th>Source</th><th>Shown publicly?</th></tr></thead><tbody>
               <tr><td className="small"><b>Agent CRM feed</b><div className="xs muted">Agent consent & feed agreement</div></td><td className="small">Yes, as supplied; updates every feed run</td></tr>
-              <tr><td className="small"><b>Owner / landlord post</b><div className="xs muted">Brixo terms; owner declares authority</div></td><td className="small">Yes, after checks</td></tr>
+              <tr><td className="small"><b>Owner / landlord post</b><div className="xs muted">Streetkey terms; owner declares authority</div></td><td className="small">Yes, after checks</td></tr>
               <tr><td className="small"><b>Listing found elsewhere</b><div className="xs muted">User-pasted details</div></td><td className="small">No — private analysis, links back</td></tr>
               <tr><td className="small"><b>Other portals’ sites</b><div className="xs muted">Their terms & database rights</div></td><td className="small">Never copied; we link out</td></tr>
             </tbody></table></div>
           </Section>
-          <div className="callout small"><b>Why Brixo doesn’t scrape other portals.</b> Portal terms prohibit automated copying, their listing databases are protected by UK database right, and agents control where their listings appear. Getting listings from agents directly is legal, more complete and updates in real time.</div>
+          <div className="callout small"><b>Why Streetkey doesn’t scrape other portals.</b> Portal terms prohibit automated copying, their listing databases are protected by UK database right, and agents control where their listings appear. Getting listings from agents directly is legal, more complete and updates in real time.</div>
           <div className="xs muted">{PROPERTIES.length} listings in the registry right now.</div>
         </div>
       </div>

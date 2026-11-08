@@ -94,7 +94,7 @@ describe('assistants & agents', () => {
 });
 
 import { parseQuery, runSearch } from './search';
-describe('search — Brixo examples', () => {
+describe('search — Streetkey examples', () => {
   it('Croydon conversion', () => {
     const h = runSearch(parseQuery('Find me properties in Croydon that could potentially be converted into multiple flats.'));
     expect(h.map((x) => x.property.id)).toContain('cro-013');

@@ -117,7 +117,7 @@ export default function Studio() {
           <button className="btn accent sm" onClick={runBrief}>Design it</button>
         </div>
         <div className="chips" style={{ marginTop: 8 }}>{['Redesign this living room for £5,000', 'Modernise this rental flat bathroom for £4,000', 'Give this kitchen a luxury appearance for £8,000', 'Scandinavian bedroom for £3,500'].map((x) => <button key={x} className="chip xs" onClick={() => setBrief(x)}>{x}</button>)}</div>
-        {briefMsg && <div className="msg ai" style={{ maxWidth: '100%', marginTop: 10 }}><Tag kind="ai">Brixo AI</Tag> {briefMsg}</div>}
+        {briefMsg && <div className="msg ai" style={{ maxWidth: '100%', marginTop: 10 }}><Tag kind="ai">Streetkey AI</Tag> {briefMsg}</div>}
       </div>
 
       <div className="split-r">
@@ -204,7 +204,7 @@ export default function Studio() {
             {designs.length === 0 ? <p className="small muted">Save concepts to compare them side by side or share with contractors, agents or family.</p> :
               <ul className="clean small">{designs.slice(0, 6).map((d) => <li key={d.id} className="row between"><span>{d.style} {d.room} <span className="xs muted">· {getProperty(d.propertyId)?.town.split(',')[0]}</span></span><span className="num">{gbpK(d.total)}</span></li>)}</ul>}
           </Section>
-          <Section title="Design engagement intelligence" kicker="Styles explored across Brixo" right={<Tag kind="obs">Aggregated</Tag>}>
+          <Section title="Design engagement intelligence" kicker="Styles explored across Streetkey" right={<Tag kind="obs">Aggregated</Tag>}>
             {portfolioStyles.slice(0, 6).map(([s, n]) => <Meter key={s} label={s} value={n} max={portfolioStyles[0][1]} display={n.toLocaleString('en-GB')} color="var(--accent)" />)}
             <p className="xs muted" style={{ marginTop: 8 }}>Simulated aggregate across demo listings. Owners and agents see this per listing to shape marketing and refurbishment decisions.</p>
           </Section>

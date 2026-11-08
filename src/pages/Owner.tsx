@@ -131,7 +131,7 @@ export default function Owner() {
           <AssistantPanel title="Ask about your listing" kicker="Owner AI assistant" skills={ownerSkills} ctx={p} />
           <Section title="Weekly performance report" kicker="Automated">
             <p className="small muted">A plain-English report with evidence, caveats and recommended actions.</p>
-            <button className="btn" style={{ marginTop: 10 }} onClick={() => download(`brixo-report-${p.id}.md`, weeklyOwnerReport(p), 'text/markdown')}>Download this week’s report</button>
+            <button className="btn" style={{ marginTop: 10 }} onClick={() => download(`streetkey-report-${p.id}.md`, weeklyOwnerReport(p), 'text/markdown')}>Download this week’s report</button>
           </Section>
           <Section title="Valuation scenarios" kicker="Indicative · not RICS" right={<Tag kind="est" />}>
             <dl className="kv">

@@ -34,8 +34,8 @@ export default function ImportListing() {
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
-        <div><div className="eyebrow">Check any listing</div><h2 style={{ marginTop: 6 }}>Found a home on another website? Get Brixo intelligence on it.</h2>
-          <p className="muted" style={{ marginTop: 6 }}>Paste the listing link and its key details. Brixo prices the works, checks the price and runs the numbers — privately, just for you.</p></div>
+        <div><div className="eyebrow">Check any listing</div><h2 style={{ marginTop: 6 }}>Found a home on another website? Get Streetkey intelligence on it.</h2>
+          <p className="muted" style={{ marginTop: 6 }}>Paste the listing link and its key details. Streetkey prices the works, checks the price and runs the numbers — privately, just for you.</p></div>
         <Tag kind="neutral">Private to you · not republished</Tag>
       </div>
       <div className="split">
@@ -43,7 +43,7 @@ export default function ImportListing() {
           <label className="field">Listing link (optional — we link back to it)<input className="input" value={url} placeholder="https://…" onChange={(e) => setUrl(e.target.value)} /></label>
           <label className="field" style={{ marginTop: 10 }}>Listing details — select all on the listing page, copy and paste here<textarea className="input" rows={9} value={text} onChange={(e) => setText(e.target.value)} placeholder="Price, address with postcode, bedrooms, tenure, EPC…" /></label>
           <div className="row" style={{ marginTop: 10 }}><button className="btn accent" onClick={run} disabled={!text.trim()}><Icon name="spark" size={16} /> Read it</button><button className="btn ghost sm" onClick={() => { setText(SAMPLE_PASTE); setUrl('https://www.example-portal.co.uk/listing/123456'); }}>Use a sample</button></div>
-          <p className="xs muted" style={{ marginTop: 10 }}>Brixo never visits or copies other websites. It only reads what you paste, keeps the result private to your account, and links back to the original listing.</p>
+          <p className="xs muted" style={{ marginTop: 10 }}>Streetkey never visits or copies other websites. It only reads what you paste, keeps the result private to your account, and links back to the original listing.</p>
         </Section>
         <div className="stack" style={{ gap: 16 }}>
           {ex ? <Section title="2. Check what we found" kicker={`${ex.found.length} details found`} right={<Tag kind="ai">Extracted — please confirm</Tag>}>

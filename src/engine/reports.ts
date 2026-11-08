@@ -12,7 +12,7 @@ export function weeklyOwnerReport(p: Property, audience: 'owner' | 'agent-draft'
   const photos = [...e.photos].sort((a, b) => b.enlargements / b.impressions - a.enlargements / a.impressions);
   const lines = [
     `# Weekly listing report — ${p.street.replace(' (fictional)', '')}, ${p.town}`,
-    `Week ending ${PERIOD_END} · ${audience === 'agent-draft' ? 'DRAFT for agent approval' : 'Prepared by Brixo'}`,
+    `Week ending ${PERIOD_END} · ${audience === 'agent-draft' ? 'DRAFT for agent approval' : 'Prepared by Streetkey'}`,
     '',
     '> Engagement figures in this prototype are simulated demonstration data. Estimates are indicative and are not a RICS valuation.',
     '',

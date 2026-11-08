@@ -1,11 +1,11 @@
-# BRIXO — Technical Architecture
+# STREETKEY — Technical Architecture
 
 ## 1. Stack
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Web | **Next.js (App Router) + React + TypeScript**; Tailwind CSS with BRIXO tokens | This prototype is Vite + React + plain CSS tokens; screens port directly. SSR for SEO on listing/intelligence pages. |
-| Engines | `@brixo/engines` — pure TypeScript, versioned, unit-tested | Same code in browser, API, widgets, agents (see `src/engine/*`). |
+| Web | **Next.js (App Router) + React + TypeScript**; Tailwind CSS with STREETKEY tokens | This prototype is Vite + React + plain CSS tokens; screens port directly. SSR for SEO on listing/intelligence pages. |
+| Engines | `@streetkey/engines` — pure TypeScript, versioned, unit-tested | Same code in browser, API, widgets, agents (see `src/engine/*`). |
 | API | Node (Fastify) gateway + domain services; **Python (FastAPI)** for ingestion, ML (hedonic valuation, cost calibration, demand models) | |
 | Data | **PostgreSQL 16 + PostGIS + pgvector**; ClickHouse (or BigQuery) for event analytics | Postgres for truth; columnar store for engagement aggregates. |
 | Events | First-party collector → Kafka/Kinesis → stream aggregation (Flink or dbt incremental) → aggregates in Postgres | Raw events retained ≤ 13 months; dashboards read aggregates only. |
