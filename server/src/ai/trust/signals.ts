@@ -113,7 +113,9 @@ export function priceSignal(l: { channel: 'sale' | 'rent'; postcode: string; pro
   return {
     checked: true, channel: l.channel, typicalLow: round(low), typicalHigh: round(high), ratio: Math.round(ratio * 100) / 100,
     belowPct: ratio < 1 ? Math.round((1 - ratio) * 100) : 0, abovePct: price > high ? Math.round((price / high - 1) * 100) : 0,
-    farBelow: ratio < FAR_BELOW_RATIO, wellAbove: price / high > WELL_ABOVE_RATIO, scope: ev.scope, comparables: ev.n,
+    farBelow: ratio < FAR_BELOW_RATIO, wellAbove: price / high > WELL_ABOVE_RATIO,
+    // Rents come from regional evidence; sale prices from the postcode district where Streetkey has it.
+    scope: l.channel === 'rent' ? 'rentals in the wider region' : ev.scope, comparables: l.channel === 'rent' ? undefined : ev.n,
   };
 }
 
@@ -175,7 +177,7 @@ export function ruleFlags(s: Signals): Flag[] {
   if (price.checked && price.farBelow) {
     add('scam', s.payments.length ? 'high' : 'medium',
       `The ${price.channel === 'rent' ? 'rent' : 'asking price'} is about ${price.belowPct}% below the typical level for ${price.scope}${s.payments.length ? ', and the listing asks for payment outside Streetkey' : ''}.`,
-      `Typical ${price.channel === 'rent' ? 'rent' : 'price'} for this size: from ${gbp(price.typicalLow!)}${price.channel === 'rent' ? ' pcm' : ''} (Streetkey area evidence, ${price.comparables} reference ${price.comparables === 1 ? 'listing' : 'listings'})`);
+      `Typical ${price.channel === 'rent' ? 'rent' : 'price'} for this size: from ${gbp(price.typicalLow!)}${price.channel === 'rent' ? ' pcm' : ''} (Streetkey area evidence${price.comparables ? `, ${price.comparables} reference ${price.comparables === 1 ? 'listing' : 'listings'}` : ''})`);
   }
   if (price.checked && price.wellAbove) add('misleading', 'low', `The ${price.channel === 'rent' ? 'rent' : 'price'} is far above the typical level for ${price.scope}; it may have been entered incorrectly.`, `Typical up to ${gbp(price.typicalHigh!)}${price.channel === 'rent' ? ' pcm' : ''}`);
   if (s.payments.length) add('scam', price.checked && price.farBelow ? 'high' : 'medium', 'The listing asks for payment outside Streetkey or before a viewing.', s.payments.map((p) => `“${p.text}”`).join(' · '));

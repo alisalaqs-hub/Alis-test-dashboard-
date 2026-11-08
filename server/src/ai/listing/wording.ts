@@ -11,7 +11,7 @@ import { numbersIn, sqft, statedMoney, statedNumbers, type Facts } from './facts
 
 export type Reason =
   | 'price' | 'figure' | 'schools' | 'transport' | 'area' | 'amenities' | 'planning' | 'investment'
-  | 'superlative' | 'discrimination' | 'bidding' | 'fees' | 'pets' | 'mismatch';
+  | 'superlative' | 'discrimination' | 'bidding' | 'fees' | 'pets' | 'mismatch' | 'unstated';
 
 /** Friendly explanations shown to the seller (one per reason). */
 export const REASON_TEXT: Record<Reason, string> = {
@@ -29,6 +29,7 @@ export const REASON_TEXT: Record<Reason, string> = {
   fees: 'Removed a mention of tenant fees: most letting fees are banned under the Tenant Fees Act 2019.',
   pets: 'Removed a blanket “no pets” line: tenants can ask to keep a pet and landlords must not unreasonably refuse.',
   mismatch: 'Removed a detail that didn’t match your listing (for example the EPC rating, council tax band, tenure or bedrooms).',
+  unstated: 'Removed a detail that isn’t in your listing details (such as which way the garden faces). Add it to your notes if it’s accurate.',
 };
 
 /** Topics the model may only mention when the seller's own facts or notes do. */
@@ -39,28 +40,30 @@ const TOPICS = {
   amenities: /\b(shops|shopping|high street|caf[eé]s?|restaurants?|pubs?|supermarkets?|parks?|parkland|green spaces?|amenities|gyms?|leisure (centre|facilities)|hospitals?|GP surgery|doctors'? surgery|town centre|city centre|village centre|seafront|beach|riverside|marina|countryside walks|walking distance|minutes'? walk|stone'?s throw|moments from|on the doorstep|within easy reach)\b/i,
   planning: /\b(planning permission|permitted development|STPP|subject to planning|planning consent|scope to extend|potential to extend|could be extended|extension potential|loft conversion potential|potential for (a |an )?(loft|extension|conversion)|development potential|building plot)\b/i,
   investment: /\b(yields?|rental (income|demand|returns?)|returns? on investment|ROI|cash ?flow|capital growth|capital appreciation|strong demand|high demand|investment opportunity|buy[- ]to[- ]let investors?)\b/i,
+  unstated: /\b((north|south|east|west|north[- ]east|north[- ]west|south[- ]east|south[- ]west)[- ]facing|(sea|river|park|city|countryside|panoramic) views?)\b/i,
 } as const;
 const ROAD = /\b[AM]\d{1,4}\b/; // road numbers are case-sensitive (A406, M25)
 type Topic = keyof typeof TOPICS;
 
 const SUPERLATIVE = [
   /\b(best|cheapest|finest|biggest|largest|nicest|most (sought[- ]after|desirable|popular|exclusive)) (home |house |flat |property )?(in|on|of) (the )?(area|street|road|market|town|city|village|postcode|region|country|uk|london)\b/i,
-  /\b(unbeatable|unrivall?ed|unparall?eled|second to none|like no other|nothing else like it|one of a kind|guaranteed?|risk[- ]free|once[- ]in[- ]a[- ]lifetime|won'?t last( long)?|will not last|act (fast|now|quickly)|hurry|don'?t miss (out|this)|priced to sell|bargain|below market value|under[- ]?valued|best value|value for money|rare opportunity|rarely available|must be sold|offers? (are )?invited quickly)\b/i,
+  /\b(unbeatable|unrivall?ed|unparall?eled|second to none|like no other|nothing else like it|one of a kind|guaranteed (rent|rental|income|returns?|sale|yield|growth)|risk[- ]free|once[- ]in[- ]a[- ]lifetime|won'?t last( long)?|will not last|act (fast|now|quickly)|hurry|don'?t miss (out|this)|priced to sell|bargain|below market value|under[- ]?valued|best value|value for money|rare opportunity|rarely available|must be sold|offers? (are )?invited quickly)\b/i,
 ];
 const DISCRIMINATION = [
   /\b(no|not suitable for|unsuitable for|sorry,? no|not accepting|we do not accept|cannot accept) (dss|benefits?|housing benefits?|universal credit|children|kids|famil(y|ies)|students|foreigners|immigrants|refugees|asylum seekers|disabled( people)?|pensioners|sharers|couples|smokers or children)\b/i,
   /\bDSS\b/,
   /\b(professionals?|working (people|professionals?|tenants?|persons?)|white|black|asian|british|english|christians?|muslims?|jewish|hindus?|sikhs?|single (people|persons?|females?|males?)|females?|males?|ladies|gentlemen|men|women|young (people|professionals?)|mature (people|persons?|professionals?)|non[- ]students?|employed (people|persons?|tenants?)) (only|preferred|wanted|required|sought)\b/i,
-  /\b(would (ideally )?suit|ideal for|perfect for|suitable for|suited to|great for|tailor[- ]made for|aimed at) (a |an |the )?(young |single |retired |professional |working |growing |small |large |mature |elderly )*(professionals?|couples?|famil(y|ies)|retirees|pensioners|students|singles?|single (person|people)|bachelors?|newlyweds|men|women|ladies|gentlemen|christians?|muslims?|first[- ]time buyers?|downsizers|investors?|landlords?|commuters)\b/i,
+  /\b(would (ideally )?suit|ideal for|perfect for|suitable for|suited to|great for|tailor[- ]made for|aimed at) (a |an |the )?(young |single |retired |professional |working |growing |small |large |mature |elderly )*(professionals?|couples?|famil(y|ies)|retirees|pensioners|students|singles?|single (person|people)|bachelors?|newlyweds|men|women|ladies|gentlemen|christians?|muslims?|elderly (people|persons?)|young (people|persons?))\b/i,
   /\b(english|british) (speakers?|nationals?|citizens?) only\b/i,
 ];
 const BIDDING = /\b(offers? (over|in excess of|above|in the region of)|o\.?i\.?r\.?o\.?|o\.?i\.?e\.?o\.?|best offers?|bids?|bidding|highest (offer|bidder)|sealed bids?|guide price|rent (is )?negotiable|or nearest offer|o\.?n\.?o\.?|open to offers|offers invited)\b/i;
 const FEES = /\b(admin(istration)? fees?|referencing fees?|check[- ](in|out) fees?|inventory fees?|(tenancy )?set[- ]up fees?|renewal fees?|agency fees?|application fees?|credit check fees?)\b/i;
 const PETS = /\b(no pets|pets not (allowed|permitted|accepted)|strictly no (pets|animals))\b/i;
 
-const WORDS: Record<string, number> = { zero: 0, studio: 0, one: 1, single: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
-const BEDS_RE = /\b(\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten)[- ](double[- ]|single[- ]|good[- ]sized[- ])?bed(room)?s?\b/gi;
-const BATHS_RE = /\b(\d+|one|two|three|four|five|six)[- ]bath(room)?s?\b/gi;
+const WORDS: Record<string, number> = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+// The property-size forms only ("three-bedroom house", "3-bed"): "two double bedrooms and a single" describes a subset.
+const BEDS_RE = /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)[- ]bed(room)?\b(?![- ]?s\b|rooms)/gi;
+const BATHS_RE = /\b(\d+|one|two|three|four|five|six)[- ]bath(room)?\b(?![- ]?s\b|rooms)/gi;
 
 export interface RuleContext {
   facts: Facts;
@@ -77,6 +80,16 @@ function allowedTopics(ctx: RuleContext): Set<Topic> {
   if (/\bloft potential\b|\bextension\b/i.test(text)) allowed.add('planning');
   if (/\bclose to station\b/i.test(text)) allowed.add('transport');
   return allowed;
+}
+
+const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function placeless(s: string, f: Facts) {
+  let out = s;
+  for (const name of [f.town, ...(f.town ?? '').split(/,\s*/), f.district, f.postcode?.split(/\s+/)[0]]) {
+    const n = name?.trim();
+    if (n && n.length >= 2) out = out.replace(new RegExp(`\\b${escapeRe(n)}\\b`, 'gi'), ' ');
+  }
+  return out;
 }
 
 const near = (a: number, b: number, tol = 0.005) => Math.abs(a - b) <= Math.max(0.5, Math.abs(b) * tol);
@@ -127,13 +140,15 @@ export function sentenceProblem(sentence: string, ctx: RuleContext, allowed = al
   if (epc && f.epc && epc[1] !== f.epc) return 'mismatch';
   const ct = s.match(/\bcouncil tax\b[^.]{0,12}?\bband\s+([A-I])\b(?![a-z])/i);
   if (ct && f.councilTax && ct[1].toUpperCase() !== f.councilTax) return 'mismatch';
+  // (Share-of-freehold homes also have a lease, so only plain freehold/leasehold are compared.)
   if (f.tenure === 'freehold' && /\bleasehold\b/i.test(s) && !/\bnot leasehold\b/i.test(s)) return 'mismatch';
-  if (f.tenure === 'leasehold' && /\b(?<!share of )freehold\b/i.test(s) && !/\bshare of (the )?freehold\b/i.test(s)) return 'mismatch';
+  if (f.tenure === 'leasehold' && /\b(?<!share of (the )?)freehold\b/i.test(s)) return 'mismatch';
   for (const m of s.matchAll(BEDS_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n !== f.beds) return 'mismatch'; }
   for (const m of s.matchAll(BATHS_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n !== f.baths) return 'mismatch'; }
-  // Claims the seller hasn't made.
-  for (const t of Object.keys(TOPICS) as Topic[]) if (!allowed.has(t) && TOPICS[t].test(s)) return t;
-  if (!allowed.has('transport') && ROAD.test(s)) return 'transport';
+  // Claims the seller hasn't made (place names are taken out first: "Finsbury Park" is a town, not a park).
+  const claims = placeless(s, f);
+  for (const t of Object.keys(TOPICS) as Topic[]) if (!allowed.has(t) && TOPICS[t].test(claims)) return t;
+  if (!allowed.has('transport') && ROAD.test(claims)) return 'transport';
   return null;
 }
 
@@ -178,7 +193,7 @@ export function reviewText(text: string, ctx: RuleContext): { sentence: string; 
   for (const p of text.replace(/\r/g, '').split(/\n+/)) for (const s of sentences(p)) {
     const r = sentenceProblem(s, ctx, allowed);
     // The seller's own claims about schools, transport and amenities are theirs to make; flag only legal and accuracy risks.
-    if (r && !['schools', 'transport', 'amenities', 'area', 'figure'].includes(r)) out.push({ sentence: s, reason: r });
+    if (r && !['schools', 'transport', 'amenities', 'area', 'figure', 'unstated'].includes(r)) out.push({ sentence: s, reason: r });
   }
   return out;
 }
@@ -186,14 +201,14 @@ export function reviewText(text: string, ctx: RuleContext): { sentence: string; 
 /** Wording in the seller's notes that we deliberately left out. */
 export function notesProblems(notes: string, facts: Facts): Reason[] {
   const out = new Set<Reason>();
-  const ctx: RuleContext = { facts, sources: [notes] };
+  const money = statedMoney(facts);
   for (const p of notes.split(/\n+/)) for (const s of sentences(p)) {
     for (const re of DISCRIMINATION) if (re.test(s)) out.add('discrimination');
     if (facts.channel === 'rent' && BIDDING.test(s)) out.add('bidding');
     if (facts.channel === 'rent' && FEES.test(s)) out.add('fees');
     if (facts.channel === 'rent' && PETS.test(s)) out.add('pets');
     for (const re of SUPERLATIVE) if (re.test(s)) out.add('superlative');
-    if (moneyIn(s).some((a) => !statedMoney(ctx.facts).some((m) => near(a, m)))) out.add('price');
+    if (moneyIn(s).some((a) => !money.some((m) => near(a, m)))) out.add('price');
   }
   return [...out];
 }
