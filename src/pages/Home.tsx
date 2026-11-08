@@ -8,7 +8,7 @@ import { Icon } from '../components/Icons';
 import { gbp, gbpK, HouseArt, Tag } from '../components/ui';
 import { useStore } from '../store';
 import { XRayHero } from '../components/XRay';
-import { StreetBackdrop } from '../components/StreetBackdrop';
+import { JourneyScene } from '../components/JourneyScene';
 
 const TASKS: { to: string; icon: string; label: string; sub: string; tone: string }[] = [
   { to: destination('buy', 'homes for sale in London'), icon: 'search', label: 'Buy a home', sub: 'Search & AI matches', tone: 'ink' },
@@ -31,7 +31,6 @@ export default function Home() {
   return (
     <div className="home">
       <section className="home-hero" aria-labelledby="hero-h">
-        <StreetBackdrop variant="full" />
         <div className="home-hero-inner">
           <div className="hero-copy">
             <div className="row" style={{ gap: 8 }}><span className="label-mono">Find</span><Tag kind="demo">Demo data</Tag></div>
@@ -40,7 +39,7 @@ export default function Home() {
             <SmartSearch />
           </div>
         </div>
-        <StreetBackdrop variant="band" />
+        <JourneyScene />
       </section>
 
       <div className="home-body">
