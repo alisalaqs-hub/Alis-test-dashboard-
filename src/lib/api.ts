@@ -43,7 +43,8 @@ const qs = (o: Record<string, string | number | undefined | null>) => { const s 
 /** Absolute URL for media the server returns as /media/... */
 export const mediaUrl = (u: string) => (u.startsWith('/') ? `${API_BASE}${u}` : u);
 
-export type MyListing = ListingDTO & { stats: { enquiries: number; newEnquiries: number; views30d: number; saves: number }; checks: CheckDTO[] };
+/** stats.filtered: enquiries held back as likely spam or scams (not counted in enquiries/newEnquiries), when the server reports it. */
+export type MyListing = ListingDTO & { stats: { enquiries: number; newEnquiries: number; views30d: number; saves: number; filtered?: number }; checks: CheckDTO[] };
 export type ListingWrite = Partial<{
   channel: 'sale' | 'rent'; title: string | null; addressLine: string; town: string; postcode: string; type: string; tenure: string; leaseYears: number | null;
   beds: number; baths: number; floorArea: number; era: string | null; condition: string | null; price: number; priceQualifier: string | null; epc: string | null;
@@ -78,7 +79,9 @@ export const api = {
     unsave: (key: string) => del<{ ok: true }>(`/api/me/saved/${encodeURIComponent(key)}`),
     mergeSaved: (keys: string[]) => post<{ keys: string[] }>('/api/me/saved/merge', { keys }),
     searches: () => get<{ items: SavedSearchDTO[] }>('/api/me/searches'),
-    addSearch: (query: string, mode: string, alertFrequency: SavedSearchDTO['alertFrequency'] = 'daily') => post<{ search: SavedSearchDTO }>('/api/me/searches', { query, mode, alertFrequency }),
+    /** filters (optional): the reading shown on the search page, so alerts run that exact search. */
+    addSearch: (query: string, mode: string, alertFrequency: SavedSearchDTO['alertFrequency'] = 'daily', filters?: SavedSearchDTO['filters']) =>
+      post<{ search: SavedSearchDTO }>('/api/me/searches', { query, mode, alertFrequency, ...(filters ? { filters } : {}) }),
     setSearchAlert: (id: string, alertFrequency: SavedSearchDTO['alertFrequency']) => patch<{ search: SavedSearchDTO }>(`/api/me/searches/${id}`, { alertFrequency }),
     removeSearch: (id: string) => del<{ ok: true }>(`/api/me/searches/${id}`),
     listings: () => get<{ items: MyListing[] }>('/api/me/listings'),
@@ -91,16 +94,28 @@ export const api = {
     search: (p: { q?: string; channel?: string; page?: number; pageSize?: number } = {}) => get<{ items: ListingDTO[]; total: number }>(`/api/listings${qs(p)}`),
     get: (ref: string) => get<{ listing: ListingDTO; checks?: CheckDTO[] }>(`/api/listings/${encodeURIComponent(ref)}`),
     create: (b: ListingWrite) => post<{ listing: ListingDTO; checks: CheckDTO[] }>('/api/listings', b),
-    update: (ref: string, b: ListingWrite) => patch<{ listing: ListingDTO; checks: CheckDTO[] }>(`/api/listings/${ref}`, b),
+    /** held: the edit took a live listing back to the review queue (note explains it to the lister). */
+    update: (ref: string, b: ListingWrite) => patch<{ listing: ListingDTO; checks: CheckDTO[]; held?: true; note?: string }>(`/api/listings/${ref}`, b),
     submit: (ref: string) => post<{ status: 'live' | 'pending' }>(`/api/listings/${ref}/submit`),
     setStatus: (ref: string, status: string) => post<{ status: string }>(`/api/listings/${ref}/status`, { status }),
     remove: (ref: string) => del<{ deleted?: true; withdrawn?: true }>(`/api/listings/${ref}`),
-    uploadPhotos: (ref: string, files: (File | Blob)[]) => { const f = new FormData(); files.forEach((x, i) => f.append('photos', x, (x as File).name ?? `photo-${i + 1}.jpg`)); return request<{ added: { id: string; url: string }[]; rejected: string[] }>('POST', `/api/listings/${ref}/photos`, f, { timeout: 120_000 }); },
+    /**
+     * Up to 12 files per call (keep each call under ~4 MB on the live site). meta: one entry per file, in order,
+     * with alt text and/or the signed token from the AI photo preview. A 201 can still carry `error` when a limit
+     * stopped the upload part-way: `added[].index` says which files were stored.
+     */
+    uploadPhotos: (ref: string, files: (File | Blob)[], meta?: ({ token?: string | null; alt?: string | null } | null)[]) => {
+      const f = new FormData();
+      if (meta?.length) f.append('meta', JSON.stringify(meta));
+      files.forEach((x, i) => f.append('photos', x, (x as File).name ?? `photo-${i + 1}.jpg`));
+      return request<{ added: { id: string; url: string; alt?: string | null; index?: number }[]; rejected: string[]; notes?: string[]; error?: { code: string; message: string } }>('POST', `/api/listings/${ref}/photos`, f, { timeout: 120_000 });
+    },
     deletePhoto: (ref: string, id: string) => del<{ ok: true }>(`/api/listings/${ref}/photos/${id}`),
     enquire: (ref: string, b: { name: string; email: string; phone?: string; kind: 'viewing' | 'question' | 'offer'; message: string; preferredSlot?: string; website?: string }) => post<{ ok: true }>(`/api/listings/${ref}/enquiries`, b),
   },
   enquiries: {
-    get: (id: string) => get<{ role: 'lister' | 'enquirer'; status: string; kind: string; preferredSlot: string | null; listing: { ref: string; title: string; price: number; channel: string }; contact: { name: string; email?: string; phone?: string | null }; messages: MessageDTO[] }>(`/api/enquiries/${id}`),
+    /** role 'admin': a site admin who isn't part of the conversation (read-only). filtered/filterReason: lister and admins only. */
+    get: (id: string) => get<{ role: 'lister' | 'enquirer' | 'admin'; status: string; kind: string; preferredSlot: string | null; filtered?: boolean; filterReason?: string | null; listing: { ref: string; title: string; price: number; channel: string }; contact: { name: string; email?: string; phone?: string | null }; messages: MessageDTO[] }>(`/api/enquiries/${id}`),
     reply: (id: string, body: string) => post<{ ok: true }>(`/api/enquiries/${id}/messages`, { body }),
     setStatus: (id: string, status: 'new' | 'replied' | 'closed') => patch<{ status: string }>(`/api/enquiries/${id}`, { status }),
   },

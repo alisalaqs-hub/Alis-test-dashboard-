@@ -2,6 +2,7 @@
  * Shapes exchanged between the Streetkey server and the website.
  * Shared by server/src (Node) and src (browser), so keep it free of runtime imports.
  */
+import type { SavedSearchFilters } from './ai/search';
 export type ListingStatus = 'draft' | 'pending' | 'live' | 'under_offer' | 'sold' | 'let' | 'withdrawn' | 'rejected';
 export type SourceKindDTO = 'owner' | 'landlord' | 'agent-feed' | 'agent';
 
@@ -69,9 +70,14 @@ export interface EnquirySummaryDTO {
   lastMessage: { body: string; author: 'enquirer' | 'lister'; at: string } | null;
   messages: number; createdAt: string;
 }
-export interface MessageDTO { id: string; author: 'enquirer' | 'lister'; body: string; at: string }
+export interface MessageDTO {
+  id: string; author: 'enquirer' | 'lister'; body: string; at: string;
+  /** Held back by the spam/scam screen and not emailed (shown to the lister and admins only). */
+  held?: boolean;
+}
 
-export interface SavedSearchDTO { id: string; query: string; mode: string; alertFrequency: 'instant' | 'daily' | 'weekly' | 'off'; createdAt: string }
+/** filters: the reading the person saw when saving (alerts run exactly that search); null for older saves. */
+export interface SavedSearchDTO { id: string; query: string; mode: string; alertFrequency: 'instant' | 'daily' | 'weekly' | 'off'; createdAt: string; filters?: SavedSearchFilters | null }
 
 export interface AiImageDTO { id: string; room: string; style: string; brief: string | null; status: 'running' | 'done' | 'failed'; url: string | null; sourceUrl: string | null; model: string; error: string | null; createdAt: string }
 

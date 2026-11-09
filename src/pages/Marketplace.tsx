@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { compareQuotes, DEFAULT_INPUT, estimateRefurb, type ContractorQuote, type Trade } from '../engine/refurb';
 import { gbpK, Section, Seg, Stat, Tag } from '../components/ui';
 
@@ -17,6 +18,8 @@ const MILESTONES = [
 
 export default function Marketplace() {
   const [view, setView] = useState<'owner' | 'contractor'>('owner');
+  /** Set by the design studio's "Request contractor quotes" when the request was added to the approval queue. */
+  const queued = (useLocation().state as { queued?: unknown } | null)?.queued;
   const est = useMemo(() => estimateRefurb(DEFAULT_INPUT), []);
   const quotes: ContractorQuote[] = useMemo(() => {
     const mk = (f: (t: Trade, v: number) => number | undefined): Partial<Record<Trade, number>> => Object.fromEntries(est.byTrade.map(({ trade, total }) => [trade, f(trade, total)]).filter(([, v]) => v != null));
@@ -37,8 +40,9 @@ export default function Marketplace() {
       <div className="page-head">
         <div><div className="eyebrow">MVP feature 05 · contractor marketplace</div><h2 style={{ marginTop: 6 }}>Like-for-like quotes against a standard scope</h2>
           <p className="muted" style={{ marginTop: 6 }}>Project: full refurbishment, 92m² pre-1919 terrace, E17. Scope issued from the Streetkey BoQ so every contractor prices the same thing.</p></div>
-        <Seg value={view} onChange={setView} options={[{ value: 'owner', label: 'Property owner view' }, { value: 'contractor', label: 'Contractor view' }]} />
+        <Seg aria-label="View" value={view} onChange={setView} options={[{ value: 'owner', label: 'Property owner view' }, { value: 'contractor', label: 'Contractor view' }]} />
       </div>
+      {typeof queued === 'string' && queued && <p className="callout ok small" role="status" style={{ margin: 0 }}>{queued} Nothing is sent to contractors until you approve it on the <Link to="/automation">AI agents</Link> page.</p>}
 
       {view === 'owner' ? <>
         <div className="grid g4 keep2">

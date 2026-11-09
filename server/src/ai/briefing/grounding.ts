@@ -16,7 +16,15 @@
  * ("£525,000", "£525k" and "£0.53m" all match 525000, within 5%); percentages tolerate
  * formatting only ("1.2%" matches 1.2 or 0.012, "1%" does not). Totals, differences and new
  * percentages the model works out itself do not match and are removed.
+ *
+ * Statements are also withheld (counted separately from figure drops) when they make a claim
+ * Streetkey never makes (guarantees, "this is a valuation") or talk about people by a protected
+ * characteristic (race, ethnicity, nationality, religion, sexual orientation, gender reassignment,
+ * age, disability), using the same detection as search. That is a code-level backstop to the prompt.
+ * Names taken from Streetkey's own data (item labels such as "Gay Street, Bath" or "Mosque Road")
+ * are read as neutral places for that check, so a listing on such a street keeps its priorities.
  */
+import { mentionsProtected } from '../../../../src/lib/ai/search';
 
 export interface Figure { kind: 'money' | 'percent'; value: number; tol: number; text: string }
 
@@ -167,33 +175,124 @@ export function figurePools(data: unknown): Pools {
   return { money: [...new Set(pools.money)], percent: [...new Set(pools.percent)] };
 }
 
+/** Why a statement can't be shown: a £/% figure that isn't in the data, or a content rule. */
+export type Verdict = 'ok' | 'figure' | 'policy';
+
+/* ───────────── names from Streetkey's own data ───────────── */
+
+/**
+ * A name that is about people or an audience ("Muslim Families", "Ideal for Christians", "LGBT-friendly
+ * flat") is never treated as a neutral place, so a label can't be used to switch the check off.
+ */
+const AUDIENCE_IN_NAME = /\b(?:people|persons|folks?|famil(?:y|ies)|households?|residents?|neighbou?rs?|communit(?:y|ies)|populations?|enclaves?|buyers?|purchasers?|tenants?|renters?|lodgers?|occupiers?|sharers?|applicants?|couples?|singles|children|kids|students?|professionals?|retirees?|pensioners?|worshippers?|congregations?|parishioners?|believers?|members?|speakers?|speaking|friendly|for|only|suits?|suited|suitable|ideal|perfect|welcom\w*|mostly|mainly|predominantly|majority|minority|avoid|without|no)\b/i;
+const NAME_TOKEN = 'local';
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The names a snapshot gives its items, for reading as neutral places: each item label in full
+ * ("Charming cottage, Gay Street, Bath") and its parts ("Gay Street"), split on commas, middle dots
+ * and spaced dashes. Only names of two or more words qualify, so a one-word label such as "Muslim"
+ * can't make the word itself pass, and never one that is about people or an audience (AUDIENCE_IN_NAME).
+ */
+export function namesIn(labels: string[]): string[] {
+  const out = new Set<string>();
+  const consider = (raw: string) => {
+    const n = raw.replace(/…$/, '').replace(/\s+/g, ' ').trim();
+    if (n.length < 4 || n.length > 120 || n.split(' ').length < 2 || AUDIENCE_IN_NAME.test(n)) return;
+    out.add(n);
+  };
+  for (const label of labels) {
+    consider(label);
+    for (const part of label.split(/\s*(?:,|·|\||\s[–—-]\s)\s*/)) consider(part);
+  }
+  // Longest first, so a whole label is replaced before its parts.
+  return [...out].sort((a, b) => b.length - a.length).slice(0, 400);
+}
+
+export interface GroundingOptions {
+  /** Names from Streetkey's own data (see namesIn) that are read as neutral places by the protected-characteristics check. */
+  names?: string[];
+}
+
 export class Grounding {
   private readonly pools: Pools;
+  private readonly nameRe: RegExp | null;
   checked = 0;
+  /** Statements removed because a £ or % figure wasn't in the data. */
   dropped = 0;
-  constructor(data: unknown) { this.pools = figurePools(data); }
+  /** Statements removed under the content rules (prohibited claims, protected characteristics). */
+  withheld = 0;
+  constructor(data: unknown, opts: GroundingOptions = {}) {
+    this.pools = figurePools(data);
+    const names = opts.names ?? [];
+    // Whole names only (not inside a longer word), whatever their case or spacing.
+    this.nameRe = names.length
+      ? new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${names.map((n) => escRe(n).replace(/ /g, String.raw`\s+`)).join('|')})(?![\p{L}\p{N}])`, 'giu')
+      : null;
+  }
 
   /** Is this figure in the data, as the same kind of figure (allowing for formatting and rounding)? */
   matches(f: Figure): boolean {
     return this.pools[f.kind].some((n) => Math.abs(n - f.value) <= f.tol);
   }
-  /** True when every £/% figure in the text is grounded and it makes no prohibited claim. */
-  ok(text: string): boolean {
+  /** The text with names from the data replaced by a neutral word, for the protected-characteristics check only. */
+  neutral(text: string): string {
+    return this.nameRe ? text.replace(this.nameRe, NAME_TOKEN) : text;
+  }
+  /** Checks one statement (and counts the figures checked). */
+  verdict(text: string): Verdict {
     const figs = figuresIn(text);
     this.checked += figs.length;
-    return figs.every((f) => this.matches(f)) && !PROHIBITED.test(text);
+    // Prohibited claims are checked on the text as written; only the protected check reads names as places.
+    if (PROHIBITED.test(text) || aboutProtectedGroups(this.neutral(text))) return 'policy';
+    return figs.every((f) => this.matches(f)) ? 'ok' : 'figure';
   }
+  /** True when every £/% figure in the text is grounded and it breaks no content rule. */
+  ok(text: string): boolean { return this.verdict(text) === 'ok'; }
+  private count(v: Verdict) { if (v === 'figure') this.dropped++; else if (v === 'policy') this.withheld++; }
   /** Prose: keep only the sentences that pass. */
   prose(text: string): string {
-    const kept = sentences(text).filter((s) => { const good = this.ok(s); if (!good) this.dropped++; return good; });
+    const kept = sentences(text).filter((s) => { const v = this.verdict(s); this.count(v); return v === 'ok'; });
     return kept.join(' ').trim();
   }
   /** Lists: keep only the items whose every text passes. */
   list<T>(items: T[], texts: (t: T) => string[]): T[] {
-    return items.filter((it) => { const good = texts(it).every((t) => this.ok(t)); if (!good) this.dropped++; return good; });
+    return items.filter((it) => {
+      const vs = texts(it).map((t) => this.verdict(t));
+      const bad = vs.find((v) => v === 'policy') ?? vs.find((v) => v === 'figure');
+      if (bad) this.count(bad);
+      return !bad;
+    });
   }
-  get report() { return { checked: this.checked, dropped: this.dropped }; }
+  /** Count an item removed for a content rule outside list()/prose(). */
+  withhold(n = 1) { this.withheld += n; }
+  get report() { return { checked: this.checked, dropped: this.dropped, withheld: this.withheld }; }
 }
+
+/**
+ * "Foreign/overseas/non-UK resident buyers" only when the words that follow are the surcharge itself:
+ * "… pay a 2% stamp duty surcharge", "… face an extra SDLT surcharge", "the foreign buyers’ surcharge".
+ * "Market it to foreign buyers" (or "… to foreign buyers, who pay the surcharge") is still caught.
+ */
+const SURCHARGE_RE = new RegExp(String.raw`\b(?:foreign|overseas|non[- ]?(?:uk[- ])?residents?)\s+(?:buyers?|purchasers?)(?:['’]s?)?(?=\s+(?:(?:pays?|faces?|incurs?|(?:are|is)\s+charged|(?:must|will|would|may)\s+pay|have\s+to\s+pay)\s+(?:an?\s+|the\s+)?(?:extra\s+|additional\s+|higher\s+|further\s+)?(?:\d+(?:\.\d+)?\s?(?:%|per\s?cent)\s+)?)?(?:(?:stamp\s+duty|sdlt)(?:\s+land\s+tax)?\s+)?surcharges?\b)`, 'gi');
+/**
+ * Does the text talk about people by a protected characteristic? Uses search's detection, after
+ * neutralising everyday professional uses that aren't about people: "polish the description" (the
+ * verb), the immigration-status part of a landlord's legal right to rent check, planning language
+ * about the community around a site ("the wider community", "a mixed community of tenures"),
+ * "Chinese whispers", and the stamp duty surcharge for buyers who aren't UK resident (a tax rule
+ * about residence: "foreign buyers pay a 2% stamp duty surcharge", "the overseas buyers' surcharge").
+ */
+export function aboutProtectedGroups(text: string): boolean {
+  let t = text.replace(/\bpolish(?=\s+(?:up|off|the|a|an|it|its|this|that|these|those|your|their|our|and|or)\b)/gi, 'refine');
+  if (/\bright[- ]to[- ]rent\b/i.test(t)) t = t.replace(/\bimmigration(?:\s+status)?\b/gi, 'eligibility');
+  t = t.replace(/\b(?:mixed|wider|broader|surrounding|existing|neighbouring|nearby|immediate|host|whole)\s+(communit(?:y|ies))\b/gi, 'local $1')
+    .replace(/\bchinese\s+whispers\b/gi, 'rumours')
+    .replace(SURCHARGE_RE, 'non-resident buyers');
+  return mentionsProtected(t);
+}
+/** A prohibited claim, or a statement about people's protected characteristics. */
+export const breaksContentRules = (text: string) => PROHIBITED.test(text) || aboutProtectedGroups(text);
 
 /**
  * Claims Streetkey never makes (Consumer Protection from Unfair Trading Regulations / DMCC Act

@@ -24,6 +24,112 @@ export type Confidence = 'low' | 'medium' | 'high';
 export const CONDITIONS = ['good', 'fair', 'poor', 'derelict'] as const satisfies readonly Condition[];
 export const ERAS = ['pre-1919', '1919-1944', '1945-1979', '1980-1999', '2000+'] as const satisfies readonly Era[];
 
+/* ───────────────────────── what people can enter ───────────────────────── */
+/**
+ * Bounds on the numbers people enter. The server's validation (server/src/ai/property/inputs.ts) is
+ * built from these tables and the website checks the same ones as people type, so the two can't drift.
+ * `percent` limits are fractions (0.3 = 30%); `unit: '£'` limits are amounts of money.
+ */
+export interface Limit { min: number; max: number; whole?: boolean; unit?: string; percent?: boolean }
+const lim = (min: number, max: number, o: Omit<Limit, 'min' | 'max'> = {}): Limit => ({ min, max, ...o });
+const gbpLim = (min: number, max: number) => lim(min, max, { unit: '£' });
+const pctLim = (max = 1) => lim(0, max, { percent: true });
+
+export const REFURB_LIMITS = {
+  floorArea: lim(15, 20_000, { unit: 'm²' }),
+  bedrooms: lim(0, 30, { whole: true }),
+  bathrooms: lim(0, 20, { whole: true }),
+  storeys: lim(1, 10, { whole: true }),
+  structuralOpenings: lim(0, 20, { whole: true }),
+  extensionArea: lim(0, 500, { unit: 'm²' }),
+  loftArea: lim(0, 200, { unit: 'm²' }),
+  ensuites: lim(0, 10, { whole: true }),
+  groundworksArea: lim(0, 5_000, { unit: 'm²' }),
+  officeToResiArea: lim(0, 20_000, { unit: 'm²' }),
+} satisfies Record<string, Limit>;
+
+export const HOME_LIMITS = {
+  beds: lim(0, 12, { whole: true }),
+  area: lim(20, 2_000, { unit: 'm²' }),
+  budget: gbpLim(500, 10_000_000),
+} satisfies Record<string, Limit>;
+
+export const INVEST_LIMITS = {
+  price: gbpLim(1_000, 100_000_000), legalFees: gbpLim(0, 1_000_000), surveyFees: gbpLim(0, 1_000_000), refurbCost: gbpLim(0, 50_000_000),
+  refurbMonths: lim(0, 60, { unit: 'months' }), depositPct: pctLim(), mortgageRate: pctLim(0.3), termYears: lim(1, 40, { unit: 'years' }),
+  lenderFeePct: pctLim(0.2), bridgingRateMonthly: pctLim(0.1), monthlyRent: gbpLim(0, 2_000_000), voidPct: pctLim(), managementPct: pctLim(),
+  maintenancePct: pctLim(), insuranceAnnual: gbpLim(0, 1_000_000), serviceChargeAnnual: gbpLim(0, 1_000_000), hmoBillsMonthly: gbpLim(0, 200_000),
+  licensingAnnual: gbpLim(0, 200_000), gdv: gbpLim(0, 200_000_000), refinanceLtv: pctLim(), sellingCostsPct: pctLim(0.5), holdingMonthly: gbpLim(0, 500_000),
+} satisfies Record<string, Limit>;
+
+const n0 = (n: number) => n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+const pctText = (fraction: number) => `${n0(+(fraction * 100).toFixed(2))}%`;
+/** "Enter a whole number between 0 and 30.", "Enter an amount between £1,000 and £100,000,000." … */
+export function limitMessage(l: Limit): string {
+  if (l.percent) return `Enter a percentage between ${pctText(l.min)} and ${pctText(l.max)}.`;
+  if (l.unit === '£') return `Enter an amount between £${n0(l.min)} and £${n0(l.max)}.`;
+  return `Enter ${l.whole ? 'a whole number' : 'a number'} between ${n0(l.min)} and ${n0(l.max)}${l.unit ? ` ${l.unit}` : ''}.`;
+}
+export const withinLimit = (l: Limit, n: number) => Number.isFinite(n) && n >= l.min && n <= l.max && (!l.whole || Number.isInteger(n));
+/** The nearest value inside the limit (whole numbers rounded). */
+export const clampToLimit = (l: Limit, n: number) => { const v = Math.min(l.max, Math.max(l.min, n)); return l.whole ? Math.round(v) : v; };
+
+/** Postcodes as the server accepts them: letters, digits and spaces, 2 to 10 characters. */
+export const POSTCODE_CHARS = /^[A-Za-z0-9 ]+$/;
+export const POSTCODE_HINT = 'Enter a UK postcode, e.g. E17 4QH.';
+export function postcodeProblem(s: string): string | null {
+  const t = String(s ?? '').trim();
+  if (t.length < 2) return 'Enter a postcode.';
+  return t.length > 10 || !POSTCODE_CHARS.test(t) ? POSTCODE_HINT : null;
+}
+
+/**
+ * What someone has typed into a number field so far: the number (null when empty or not a number)
+ * and, when it can't be used, why. Pages keep the typed text while people type and only use the
+ * number once it is valid, so a half-typed "8" on the way to "85" never reaches the engines.
+ */
+export function readNumber(raw: string, l: Limit, o: { allowEmpty?: boolean } = {}): { value: number | null; problem: string | null } {
+  const t = String(raw ?? '').trim();
+  if (!t) return { value: null, problem: o.allowEmpty ? null : limitMessage(l) };
+  const n = Number(t);
+  if (!Number.isFinite(n)) return { value: null, problem: limitMessage(l) };
+  return { value: n, problem: withinLimit(l, n) ? null : limitMessage(l) };
+}
+
+type Problems = Record<string, string>;
+const checkLimits = (out: Problems, limits: Record<string, Limit>, values: Record<string, number | null | undefined>) => {
+  for (const [k, l] of Object.entries(limits)) {
+    const v = values[k];
+    if (v != null && !withinLimit(l, v)) out[k] = limitMessage(l);
+  }
+  return out;
+};
+
+/** Anything in the estimator's input the server would refuse (field → message); empty when it can be sent. */
+export function refurbInputProblems(i: RefurbInput): Problems {
+  const out: Problems = {};
+  const pcode = postcodeProblem(i.postcode);
+  if (pcode) out.postcode = pcode;
+  const s = i.scope;
+  return checkLimits(out, REFURB_LIMITS, {
+    floorArea: i.floorArea, bedrooms: i.bedrooms, bathrooms: i.bathrooms, storeys: i.storeys, structuralOpenings: s.structuralOpenings, extensionArea: s.extensionArea,
+    loftArea: s.loftArea, ensuites: s.ensuites, groundworksArea: s.groundworksArea, officeToResiArea: s.officeToResiArea,
+  });
+}
+
+/** Anything about the home (and the optional budget) the server would refuse. */
+export function homeFactsProblems(f: HomeFacts, budget: number | null = null): Problems {
+  const out: Problems = {};
+  const pcode = postcodeProblem(f.postcode);
+  if (pcode) out.postcode = pcode;
+  return checkLimits(out, HOME_LIMITS, { beds: f.beds, area: f.area, budget });
+}
+
+/** Anything in the investment assumptions the server would refuse (amounts, rates and terms out of range). */
+export function investInputsProblems(i: InvestmentInput): Problems {
+  return checkLimits({}, INVEST_LIMITS, i as unknown as Record<string, number>);
+}
+
 /* ───────────────────────── 1. renovation from photos ───────────────────────── */
 export const PHOTO_ACTIONS = ['keep', 'refresh', 'replace', 'investigate'] as const;
 export type PhotoAction = (typeof PHOTO_ACTIONS)[number];
@@ -50,10 +156,15 @@ export interface PhotoObservation {
   items: PhotoItem[];
 }
 
-/** What the person tells us about the property (everything in RefurbInput except the scope and condition, which come from the photos). */
+/** What the person tells us about the property (everything in RefurbInput except the scope, which comes from the photos). */
 export interface RefurbPhotoFacts {
   postcode: string; propertyType: PropertyType; floorArea: number; bedrooms: number; bathrooms: number; storeys: number;
   era: Era; access: RefurbInput['access']; spec: RefurbInput['spec']; vat: RefurbInput['vat']; includeProfessionalFees: boolean;
+  /**
+   * The condition the person gave. Parts of the home nobody photographed are never assumed to be in
+   * better condition than this, and when the photos are few or unclear it caps the overall condition too.
+   */
+  condition?: Condition;
   /** Design choices photos can't show (kept exactly as the person set them). */
   planned: Pick<RefurbInput['scope'], 'structuralOpenings' | 'extensionArea' | 'loftArea' | 'ensuites' | 'solidWallInsulation'> & Pick<RefurbInput['scope'], 'groundworksArea' | 'fitOut' | 'officeToResiArea'>;
 }
@@ -63,7 +174,11 @@ export interface ScopeBasis { item: string; value: string; source: 'photos' | 'a
 
 export interface RefurbPhotosResult {
   observations: PhotoObservation[];
-  overall: { condition: Condition; confidence: Confidence; photosUsed: number; photosSent: number };
+  overall: {
+    condition: Condition; confidence: Confidence; photosUsed: number; photosSent: number;
+    /** 'yours' when the photos were too few or unclear and the condition the person gave was worse, so it was kept. */
+    conditionFrom?: 'photos' | 'yours';
+  };
   /** Ready to load into the estimator (the cost engine's input). */
   scope: RefurbInput;
   /** estimateRefurb(scope), computed by Streetkey's engine. */
@@ -80,7 +195,7 @@ export function photoFactsFrom(i: RefurbInput): RefurbPhotoFacts {
   const s = i.scope;
   return {
     postcode: i.postcode, propertyType: i.propertyType, floorArea: i.floorArea, bedrooms: i.bedrooms, bathrooms: i.bathrooms, storeys: i.storeys,
-    era: i.era, access: i.access, spec: i.spec, vat: i.vat, includeProfessionalFees: i.includeProfessionalFees,
+    era: i.era, access: i.access, spec: i.spec, vat: i.vat, includeProfessionalFees: i.includeProfessionalFees, condition: i.condition,
     planned: { structuralOpenings: s.structuralOpenings, extensionArea: s.extensionArea, loftArea: s.loftArea, ensuites: s.ensuites, solidWallInsulation: s.solidWallInsulation, groundworksArea: s.groundworksArea ?? 0, fitOut: s.fitOut ?? 'none', officeToResiArea: s.officeToResiArea ?? 0 },
   };
 }
@@ -155,6 +270,16 @@ export function ruleVerdict(strategy: Strategy, r: InvestmentResult, down: Inves
   return { verdict, reasons };
 }
 
+/**
+ * Why a scenario can't be rated yet (null when it can). Without a purchase price, or without rent for a
+ * letting strategy (or a sale price for a flip), the ratios divide by zero and any rating would be noise.
+ */
+export function investInputProblem(i: Pick<InvestmentInput, 'strategy' | 'price' | 'monthlyRent' | 'gdv'>): string | null {
+  if (!(i.price >= INVEST_LIMITS.price.min)) return `Enter a purchase price (at least £${n0(INVEST_LIMITS.price.min)}) to see a rating.`;
+  if (i.strategy === 'flip') return i.gdv > 0 ? null : 'Enter the post-works value (GDV) to see a rating.';
+  return i.monthlyRent > 0 ? null : 'Enter the rent to see a rating.';
+}
+
 /** Everything the investment verdict is grounded in, computed by the investment engine. */
 export function investFacts(inputs: InvestmentInput, s: ScenarioName) {
   const active = scenario(inputs, s);
@@ -178,6 +303,8 @@ export interface InvestVerdictResult {
   ruleVerdict: Verdict; ruleReasons: string[];
   /** true when the AI's verdict was more optimistic than the numbers support and was lowered. */
   verdictCapped: boolean;
+  /** When the AI is more cautious than the rule-based rating: why, in its words (figure-checked). Null otherwise. */
+  cautionReason?: string | null;
   strategy: Strategy; scenario: ScenarioName; numbers: InvestNumbers;
   removedClaims: number; disclaimer: string;
 }
@@ -214,12 +341,21 @@ export function factsProperty(f: { postcode: string; type: PropertyType; beds: n
   };
 }
 
-export interface HomeEvidence { refurbishedPerM2: number; rentPerM2: number; n: number; scope: string }
-/** Indicative £/m² from listings in the same postcode district, else the same region. Honest about coverage. */
+export interface HomeEvidence {
+  refurbishedPerM2: number; rentPerM2: number; n: number; scope: string;
+  /** true when every listing used is from Streetkey's demonstration set (say "demo listings" only then). */
+  allDemo: boolean;
+}
+const isDemoListing = (p: Property) => !p.source || p.source.kind === 'demo';
+/**
+ * Indicative £/m² from listings in the same postcode district, else the same region. Honest about coverage.
+ * Private listings (only visible to the person who added them) are left out, so the website and the
+ * server work from the same evidence.
+ */
 export function homeEvidence(postcode: string, pool: Property[] = PROPERTIES): HomeEvidence | null {
   const district = postcode.trim().toUpperCase().split(' ')[0];
   const region = regionFromPostcode(postcode);
-  const resi = pool.filter((p) => p.listing !== 'rent' && p.type !== 'commercial' && p.floorArea > 0 && p.estGdv > 0);
+  const resi = pool.filter((p) => p.visibility !== 'private' && p.listing !== 'rent' && p.type !== 'commercial' && p.floorArea > 0 && p.estGdv > 0);
   const near = resi.filter((p) => p.district === district);
   const used = near.length ? near : region ? resi.filter((p) => regionFromPostcode(p.postcode) === region) : [];
   if (!used.length) return null;
@@ -229,6 +365,7 @@ export function homeEvidence(postcode: string, pool: Property[] = PROPERTIES): H
     rentPerM2: rents.length ? avg(rents.map((p) => p.estRentPcm / p.floorArea)) : 0,
     n: used.length,
     scope: near.length ? `postcode district ${district}` : region ? REGIONS[region].label : 'region',
+    allDemo: used.every(isDemoListing),
   };
 }
 
@@ -307,6 +444,8 @@ export interface PlanStep {
   /** Engine-derived figures for the option this step uses, or null (the AI never writes these). */
   cost: number | null; valueImpact: number | null; billsSaving: number | null;
   effort: 'low' | 'medium' | 'high'; optionId: string | null; withinBudget: boolean | null;
+  /** The title of the costed option the figures belong to (the AI's step title is its own wording). */
+  optionTitle?: string | null;
 }
 export interface HomePlanResult {
   summary: string; steps: PlanStep[]; quickWins: string[]; avoid: string[];

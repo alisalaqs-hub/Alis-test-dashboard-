@@ -3,7 +3,7 @@
  * numbers must be written in it. Anything that fails is downgraded or dropped, so people only see
  * figures that came from the listing itself.
  */
-import { normText } from '../../../../src/lib/ai/importer';
+import { conditionClues, mention, normText, topicsIn } from '../../../../src/lib/ai/importer';
 
 const WORDS: Record<string, number> = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, single: 1, double: 2 };
 
@@ -118,6 +118,120 @@ export function groundedPhrase(phrase: string, text: string): boolean {
   const has = (w: string) => words.has(w) || words.has(w.replace(/e?s$/, '')) || words.has(`${w}s`) || words.has(`${w}es`);
   const content = squash(phrase).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w));
   return content.length > 0 && content.every(has);
+}
+
+/** Content words, roughly stemmed ("needs updating" → need, updat), for comparing two short texts. */
+function terms(s: string): Set<string> {
+  return new Set(squash(s).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w)).map((w) => w.replace(/(?:ings?|ed|es|e|s)$/, '')).filter((w) => w.length >= 3));
+}
+/** Do two short texts (a red flag's title and its quote) share at least one content word? */
+export function sharesTerms(a: string, b: string): boolean {
+  const tb = terms(b);
+  return [...terms(a)].some((w) => tb.has(w));
+}
+
+/* ───────────── is a red flag's title a concern, or a feature? ───────────── */
+/**
+ * Positive wording that contains a concern word: "No onward chain", "Long lease", "999-year lease",
+ * "Peppercorn ground rent", "Low risk of flooding", "Flooded with natural light", "Works completed in 2023".
+ * Taken out of a title before it is checked, so it can't make a feature look like a concern.
+ */
+const POSITIVE = new RegExp([
+  String.raw`\b(?:no|without|free of|free from)\s+(?:an?\s+)?(?:onward\s+|upward\s+|forward\s+)?chain\b|\bchain[- ]free\b`,
+  String.raw`\b(?:long|extended|newly extended|new|generous)\s+(?:lease(?:hold)?|lease term)\b|\blease (?:has been |was |recently )?(?:extended|renewed)\b`,
+  String.raw`\b(?:(?:lease(?:hold)?|lease (?:length|term))\b[^.;,]{0,12}?)?(?:12[5-9]|1[3-9]\d|[2-9]\d\d|[1-9]\d{3})[- ]?years?\b(?:[^.;,]{0,14}?\blease(?:hold)?\b)?`,
+  String.raw`\bpeppercorn(?:\s+ground)?(?:\s+rents?)?\b`,
+  String.raw`\b(?:low|very low|minimal|negligible|no known|little)\s+(?:\w+\s+)?(?:risks?|chance)\b(?:\s+of\s+\w+)?`,
+  String.raw`\b(?:light|sun)[- ]?flooded\b|\bflooded with (?:natural |lots of |plenty of )?(?:light|sunlight|sunshine|daylight)\b`,
+  String.raw`\b(?:works?|repairs?|refurbishment|renovation|modernisation|modernization|updating|rewiring|remediation)\s+(?:(?:were|was|have been|has been|recently|now|all|already|fully|successfully)\s+)*(?:completed?|done|carried out|finished|undertaken)\b`,
+].join('|'), 'gi');
+
+/** Risks, defects, costs, restrictions and surroundings worth checking. Each counts unless it's negated ("No damp"). */
+const STRONG = new RegExp([
+  String.raw`\b(?:risks?|concerns?|issues?|problems?|warnings?|caution|query|queries|disputes?|disputed|check)\b`,
+  String.raw`\b(?:damp|mou?ld|mildew|condensation|cracks?|cracked|cracking|subsiden\w*|heave|structural|defects?|defective|leaks?|leaking|leaky|rot|rotten|rotting|woodworm|infestation|vermin|asbestos|knotweed|underpinn\w*|damaged?|broken|faulty|obsolete|outdated|ageing|aging)\b`,
+  String.raw`\bflood(?:s|ed|ing|plain|zone)?\b(?!\s+with\b)|\b(?:structural|historic|ground|signs? of|evidence of) movement\b|\bmovement cracks?\b|\bend of (?:its |their )?(?:useful )?(?:life|lifespan)\b`,
+  String.raw`\b(?:dated|tired|poor|worn|shabby|derelict|dilapidated|uninhabitable|unmodernised|unmodernized|neglected|unfinished|incomplete)\b`,
+  // tenure, charges and money
+  String.raw`\b(?:short (?:lease|leasehold)|lease(?:hold)?|lease (?:length|term|extension)|unexpired|marriage value)\b`,
+  String.raw`\b(?:charges?(?![- ]?points?)|ground rents?|fees?|costs?(?![- ]effective)|expensive|costly|surcharges?|arrears|debts?|deposit|penalt(?:y|ies)|buyer'?s'? premium|(?:lease|extension) premium|escalat\w*|sinking fund|reserve fund)\b`,
+  String.raw`\b(?:rent|charges?|fees?|costs?|premium|bills?|payments?)\b[^.;,]{0,25}\b(?:doubl|increas|escalat|ris(?:e|es|en|ing)\b)\w*|\b(?:doubl(?:es|ing|ed)|increas\w*|rising)\b[^.;,]{0,25}\b(?:rent|charges?|fees?|costs?|premium|bills?|payments?)\b|\b(?:rent|charge) reviews?\b|\breview (?:clause|period)\b`,
+  // restrictions, rights and occupation
+  String.raw`\b(?:restrict\w*|covenants?|easements?|rights? of way|wayleaves?|unadopted|unregistered)\b`,
+  String.raw`\bshared (?:driveway|drive|access|accessway|path|pathway|lane|road|ownership|equity|drainage|drains|septic tank|well|water supply|supply|services|roof|loft|boiler)\b|\b\d{1,3}% share\b|\bpart[- ](?:buy|rent)\b|\bstaircasing\b`,
+  String.raw`\b(?:restricted|difficult|poor|steep|narrow|pedestrian|no vehicular|third[- ]party) access\b|\baccess (?:is )?(?:via|over|across|through) (?:a |an |the )?(?:shared|neighbour\w*|private|unadopted|third[- ]party|adjoining)\b`,
+  String.raw`\b(?:tenanted|sitting tenants?|tenants? in situ|regulated tenancy|protected tenancy|assured tenancy|(?:currently|still) (?:let|occupied|tenanted))\b`,
+  // how it's sold, mortgages and insurance
+  String.raw`\b(?:probate|auction\w*|legal pack|reservation (?:fee|agreement)|modern method)\b|\bcash[- ](?:buyers?|purchasers?|purchase)\b(?!\s+welcome)|\bcash only\b`,
+  String.raw`\b(?:un|non[- ])mortgageable\b|\buninsurable\b|\b(?:mortgage|lender)s? (?:restrictions?|issues?|problems?|unlikely|difficult\w*|criteria|may|might|concerns?|limitations?)\b|\b(?:difficult|hard|harder|unable|impossible) to (?:mortgage|insure|sell|resell|get a mortgage|obtain a mortgage|get insurance|let)\b|\b(?:insurance|insurer)s? (?:may|might|issues?|problems?|claims?|difficult\w*|excess)\b|\b(?:high|higher|expensive|costly) (?:insurance|premiums?)\b`,
+  // building safety and construction
+  String.raw`\b(?:cladding|ews ?1|external wall|remediation|building safety|fire (?:safety|risks?|damage|damaged|regulations?)|fire[- ]damaged|non[- ]standard|(?:timber|steel|concrete)[- ]framed?|concrete (?:construction|panels?|built|house|structure)|raac|prefab\w*|pre-?fabricated|prc|mundic|no[- ]fines|airey|system[- ]built|thatch\w*|flat roofs?|asbestos roof|corrugated)\b`,
+  // planning and listing
+  String.raw`\bplanning (?:enforcement|refus\w*|breach\w*|issues?|disputes?|objections?|conditions?|restrictions?|pending|applications?|appeal)\b|\b(?:subject to|retrospective|lapsed|refused|expired|awaiting|pending) planning\b|\b(?:enforcement|unauthori[sz]ed|retrospective|unapproved)\b`,
+  String.raw`\b(?:grade (?:i{1,3}|[123])\*?|ii\*?) listed\b|\blisted (?:building|property|status|home|cottage|house)\b|\bconservation area\b|\barticle 4\b|\btree preservation\b|\btpos?\b`,
+  // surroundings, services and energy
+  String.raw`\b(?:noise|noisy|busy (?:main )?roads?|main road (?:position|location|frontage)|railway(?! station)|train line|flight ?paths?|pylons?|substation|overlooked|ex[- ](?:local authority|council|la)|above (?:a |the )?(?:shop|shops|commercial|restaurant|pub|takeaway|retail)|septic|cesspit|cesspool|private drainage|treatment plant|oil[- ]fired|oil (?:tank|heating|boiler)|lpg|off[- ](?:mains|grid|gas)|storage heaters?)\b`,
+  String.raw`\b(?:fronts?|fronting|faces|facing|on|onto|overlooks?|overlooking|backs? onto|next to|beside|adjacent to) (?:a |the )?(?:busy |main )+road\b`,
+  String.raw`\b(?:low|poor) epc\b|\b(?:epc|energy) (?:rating |band )?(?:of |is |: )?[e-g]\b`,
+].join('|'), 'gi');
+
+/** Work that's needed: "Needs updating", "Boiler may need replacing", "Repairs required", "Could benefit from…". Negated ("No work needed") doesn't count. */
+const NEED = new RegExp([
+  String.raw`\b(?:needs?|needing|needed|requires?|required|requiring|in need of|ripe for|calls? for)\s+(?:(?:a|an|the|some|full|complete|extensive|major|minor|general|new|total|significant|cosmetic|urgent|further|substantial|immediate|considerable|careful|specialist|professional|its|their)\s+)*(?:work|repair|attention|updat|modernis|moderniz|renovat|refurb|replac|improv|decorat|redecorat|rewir|re-?roof|re-?plaster|plaster|investigat|survey|treatment|underpin|upgrad|restor|tlc|planning|consent|approval|permission|lease extension|extend|extension|sign[- ]off|certificate|cash|structural|damp|boiler|roof|windows?|kitchen|bathroom|heating|electric|clear|completion|fixing|maintenance|servicing|checking|inspection)\w*`,
+  String.raw`\b(?:work|works|repairs?|updating|modernisation|modernization|refurbishment|renovation|attention|improvements?|replacement|treatment|rewiring|investigation|tlc|maintenance)\s+(?:is |are |will be |may be |would be |might be |likely |probably )?(?:needed|required|necessary|recommended|outstanding|due|advised|planned|proposed|scheduled)\b`,
+  String.raw`\b(?:could|would|will|might) benefit from\b|\bscope for improvement\b`,
+  String.raw`\b(?:major|building|structural|remedial|planned|upcoming|future|section 20|external|roof|cladding) (?:works?|repairs?)\b`,
+].join('|'), 'gi');
+
+/**
+ * Information or something basic that is missing: "No off-street parking", "Lease length not stated",
+ * "Lift not working", "Not mortgageable", "Service charge unknown". "No onward chain", "No admin fees"
+ * and "No service charge" aren't (nothing a buyer needs is missing).
+ */
+const NEEDED = String.raw`(?:parking|garage|driveway|heating|central heating|boiler|gas|mains|water|drainage|sewer\w*|electric\w*|broadband|internet|fibre|wi-?fi|signal|lift|kitchen|bathroom|shower|toilets?|wc|garden|outside space|outdoor space|storage|double[- ]glazing|glazing|windows?|access|rights? of way|planning|permission|consent|building (?:regulations?|regs|control)|regs|sign[- ]off|completion certificate|certificates?|guarantees?|warrant(?:y|ies)|survey|title|deeds|mortgage\w*|lenders?|insurance|insurable|licen[cs]es?|hmo|gas safety|eicr|smoke alarms?|epc|energy (?:performance|certificate|rating)|floor ?plans?|photos?|pictures?|images?|viewings?|deposit protection|details?|information|info|figures?|breakdown|mention|ventilation|extractor|fire (?:doors?|alarms?|escape|exits?)|alarms?|security)`;
+const MISSING = new RegExp([
+  String.raw`\b(?:no|not|without|lacks?|lacking|lack of|limited|missing|absence of|absent|unknown|unclear|unconfirmed|unverified|insufficient|inadequate|unspecified)\s+(?:(?!need\b|needs\b|needed\b|requirement)[a-z'-]+\s+){0,2}${NEEDED}\b(?!(?:\s+[a-z'-]+){0,2}\s+(?:issues?|problems?|concerns?|restrictions?|risks?|charges?|fees?|worries|needed|required|necessary)\b)`,
+  String.raw`\b(?:not|isn't|aren't|wasn't|weren't|never)\s+(?:(?:yet|been|being)\s+)*(?:stated|given|provided|confirmed|known|shown|specified|disclosed|mentioned|listed|quoted|available|clear|included|supplied|verified|registered|signed off|approved|working|functioning|operational|connected|in use|accessible|allowed|permitted|suitable for (?:a )?(?:mortgage|lending|lenders))\b`,
+  String.raw`\b(?:unknown|unclear|unconfirmed|unverified|unspecified|undisclosed|unstated|tbc|to be confirmed|missing|absent|awaiting|pending)\b|\boutstanding (?:works?|repairs?|charges?|balance|arrears|bills?|fees?|issues?|planning|matters?|enquiries)\b`,
+  String.raw`\b(?:no|without)\s+(?:[a-z'-]+\s+){0,3}(?:given|stated|provided|shown|listed|mentioned|specified|disclosed|quoted|confirmed|supplied)\b`,
+].join('|'), 'i');
+
+const SENTENCE = /[.;:!?()]|\s-\s|\b(?:but|however|although|though)\b/;
+const NOT_WORDS = /\b(?:no|not|never|without|zero|nil|none|nothing|free of|free from|isn't|aren't|wasn't|weren't|doesn't|don't|didn't|won't|hasn't|haven't|cannot|can't)\b/;
+const LOW_WORDS = /\b(?:low|lower|minimal|negligible|reduced|little)\b/;
+const NOT_AFTER = /^(?:[- ]free\b|\s*(?:[:-]\s*)?(?:none|nil|n\/a|not applicable|not present|not found)\b|\s*[:-]\s*(?:no|£0)\b)/;
+const lastWords = (s: string, n: number) => s.trim().split(/\s+/).filter(Boolean).slice(-n).join(' ');
+
+/**
+ * Is the concern word at [from, to) negated? "No damp", "Low service charge", "Fee-free", "Damp: none", and the
+ * later items of a list after "no" ("No damp, cracks or leaks"); not "No onward chain, cash buyers only".
+ */
+function negatedAt(u: string, from: number, to: number): boolean {
+  if (NOT_AFTER.test(u.slice(to, to + 24))) return true;
+  const sentence = u.slice(Math.max(0, from - 160), from).split(SENTENCE).pop() ?? '';
+  const parts = sentence.split(',');
+  const scope = parts.pop() ?? '';
+  if (NOT_WORDS.test(lastWords(scope, 3)) || LOW_WORDS.test(lastWords(scope, 2))) return true;
+  if (!parts.length || !NOT_WORDS.test(parts[0].trim().split(/\s+/).slice(0, 3).join(' '))) return false;
+  // A list: "No damp, cracks or leaks" (this item is followed by "or …", or is the "or …" item itself).
+  const rest = u.slice(to, to + 80).split(SENTENCE)[0];
+  return /\b(?:or|nor|and)\b/.test(scope) || /^[^,]*\b(?:or|nor)\b/.test(rest);
+}
+const anyLive = (re: RegExp, u: string) => [...u.matchAll(re)].some((m) => !negatedAt(u, m.index ?? 0, (m.index ?? 0) + m[0].length));
+const FLAT = { type: 'flat' } as const; // a title is checked on its own: let cladding count as it would for a flat
+
+/**
+ * Does a red flag's title name a concern rather than a feature: a risk, a defect, a cost, a restriction, missing
+ * information or work needed? "Needs updating", "Shared driveway" and "Lift not working" do; "Recently refurbished
+ * kitchen", "Modernised throughout", "No onward chain", "Spacious shared garden" and "No admin fees" don't.
+ */
+export function concernIn(s: string): boolean {
+  const u = squash(s).replace(POSITIVE, ' ').replace(/\s+/g, ' ').trim();
+  if (!u) return false;
+  if (MISSING.test(u)) return true;
+  if (anyLive(NEED, u) || anyLive(STRONG, u)) return true;
+  if (conditionClues(u).some((c) => c.value !== 'good')) return true; // "requires modernisation", "renovation project", "dated"
+  return topicsIn(u).some((t) => !!mention(u, t, FLAT));
 }
 
 /**

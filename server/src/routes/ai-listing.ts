@@ -1,14 +1,19 @@
 /**
  * AI for people listing a property (sellers and landlords):
  *   POST /api/ai/listing/describe         "Write it for me" from the form's facts (rules enforced in code)
- *   POST /api/ai/listing/photos/preview   check up to 6 photos still in the browser (one vision call; consent required)
+ *   POST /api/ai/listing/photos/preview   check up to 6 photos still in the browser (one vision call; consent required).
+ *                                         Each result comes with a signed token: uploading the same file with it stores
+ *                                         the result, so the photo isn't checked again (ai/listing/previewToken.ts).
  *   GET|PUT /api/ai/listing/photos/consent  the person's consent to photos being sent to our AI provider (give or withdraw)
- *   GET  /api/ai/listing/:ref/photos      stored photo analysis, suggested order and tips (lister, their agency, admin)
+ *   GET  /api/ai/listing/:ref/photos      stored photo analysis, suggested order and tips (lister, their agency, admin;
+ *                                         no AI call, so it works while AI is off and doesn't use the AI allowance)
  *   POST /api/ai/listing/:ref/photos/check  (re)run the photo check for an existing listing (same; consent required)
  *   POST /api/ai/listing/price-guide      range from Streetkey's area evidence + AI explanation (no new figures)
  *   POST /api/ai/listing/precheck         compliance checks + wording rules + AI review, merged
  * Uploaded photos are checked in the background ('listing.photos' job, triggered by the photosUploaded hook), but only
  * for people who have consented ('ai_image_processing' in consents) and within a per-person daily allowance.
+ * The AI allowance (per minute, per hour and daily) is charged only once a request is valid, the listing is the
+ * person's own and the answer isn't already cached: rejected forms, refused uploads and cached answers cost nothing.
  */
 import type { FastifyInstance } from 'fastify';
 import type { MultipartFile } from '@fastify/multipart';
@@ -16,13 +21,15 @@ import { z } from 'zod';
 import { config } from '../config';
 import { one, q } from '../db';
 import { AiError, aiAvailable, cached } from '../ai/core';
-import { aiGuard } from '../ai/guard';
+import { aiAccess, aiCharge } from '../ai/guard';
 import { on } from '../ai/hooks';
 import { enqueue, jobDTO, registerJob, type JobRow } from '../ai/jobs';
 import { describeListing, DescribeBody } from '../ai/listing/describe';
 import { analyseBatch, imagesHash, isPlaceholderAlt, photoTips, PriorSchema, suggestOrder, type ImageIn, type PhotoAnalysis, type Summarisable } from '../ai/listing/photos';
 import { precheck, PrecheckBody } from '../ai/listing/precheck';
 import { PRICE_TIMING, PriceGuideBody, priceNarrative, priceRange } from '../ai/listing/price';
+import { bytesHash, signPreview } from '../ai/listing/previewToken';
+import { altTextProblem } from '../../../src/engine/listings';
 import { audit, HttpError, parse, requireUser } from '../services/http';
 import { enforce, hit } from '../services/ratelimit';
 import { sniffImage } from '../services/images';
@@ -35,6 +42,11 @@ const PREVIEW_MAX_BYTES = 1.5 * 1024 * 1024;
 const JOB_MAX_PHOTOS = 40;
 const JOB_BATCH = 4;
 const CheckBody = z.object({ recheck: z.boolean().optional(), consent: z.boolean().optional() });
+const DESCRIBE_LIMITS = { perMinute: 6, perHour: 40 };
+const PREVIEW_LIMITS = { perMinute: 6, perHour: 40 };
+const CHECK_LIMITS = { perMinute: 3, perHour: 20 };
+const PRICE_LIMITS = { perMinute: 10, perHour: 60 };
+const PRECHECK_LIMITS = { perMinute: 6, perHour: 40 };
 const ConsentBody = z.object({ consent: z.boolean() });
 
 /*
@@ -151,6 +163,8 @@ async function checkListingPhotos(job: JobRow, progress: (t: string) => Promise<
       const a = outcomes[i];
       if (a === undefined) continue;
       if (a === 'failed') { await fail([u.r.id]); continue; }
+      // Alt text is public: never with contact details or links (e.g. read off a sign in the photo); the room name instead.
+      if (altTextProblem(a.alt)) a.alt = a.room.charAt(0).toUpperCase() + a.room.slice(1);
       // Only fill alt text that is empty or a filename ("photo 3"); never overwrite what the lister wrote, even if they changed it meanwhile.
       await q(`UPDATE listing_photos SET ai_room = $2, ai_alt = $3, ai_quality = $4, ai_features = $5, ai_flags = $6, ai_checked_at = now(),
                  alt = CASE WHEN coalesce(btrim(alt), '') = '' OR ($7::boolean AND alt IS NOT DISTINCT FROM $8) THEN $3 ELSE alt END
@@ -167,8 +181,10 @@ export async function aiListingRoutes(app: FastifyInstance) {
 
   // New photos are checked in the background (one queued job per listing at a time), only with the uploader's
   // consent and within their daily allowance. Each queued check also counts as one request towards their daily AI limit.
-  on('photosUploaded', async ({ listingId, ref, userId }) => {
+  on('photosUploaded', async ({ listingId, ref, photoIds, userId }) => {
     if (!aiAvailable() || !userId) return;
+    // Photos checked in the browser before upload arrive with their stored result: nothing left to check.
+    if (photoIds.length && !(await one('SELECT 1 FROM listing_photos WHERE id = ANY($1) AND ai_checked_at IS NULL LIMIT 1', [photoIds]))) return;
     if (!(await hasPhotoConsent(userId))) return;
     if ((await photoCallsLeft(userId)) <= 0) return;
     if (!(await hit(`ai.daily:u:${userId}`, config.ai.dailyRequestsPerUser, 86_400)).ok) return; // same counter as aiGuard's daily limit
@@ -193,15 +209,18 @@ export async function aiListingRoutes(app: FastifyInstance) {
 
   /* ---------- 1. description ---------- */
   app.post('/api/ai/listing/describe', async (req) => {
-    const { userId } = await aiGuard(req, 'listing.describe', { auth: true, perMinute: 6, perHour: 40 });
+    const { userId } = await aiAccess(req, { auth: true });
     const body = parse(DescribeBody, req.body);
+    await aiCharge(req, 'listing.describe', DESCRIBE_LIMITS);
     const result = await describeListing(body, { userId });
     return { ...result, label: 'AI draft written only from the details you entered. Check it carefully before publishing.' };
   });
 
   /* ---------- 2. photos: preview before upload ---------- */
   app.post('/api/ai/listing/photos/preview', async (req) => {
-    const { userId } = await aiGuard(req, 'listing.photos_preview', { auth: true, perMinute: 6, perHour: 40 });
+    const { userId } = await aiAccess(req, { auth: true });
+    // Uploads are throttled on their own key, so a burst of refused uploads never uses up the AI allowance.
+    await enforce(req, 'listing.photo_previews.m', 10, 60, 'user', 'You’re checking photos a bit fast. Please wait a moment and try again.');
     if (!req.isMultipart()) throw new HttpError(400, 'Send the photos as a form upload.', 'not_multipart');
     const images: (ImageIn & { name: string })[] = [];
     let priorRaw = '', consentRaw = '';
@@ -232,10 +251,17 @@ export async function aiListingRoutes(app: FastifyInstance) {
     }
     await recordPhotoConsent(userId!);
     // Same photos, same answer: cache by content hash for a day (no images or prompts are stored).
-    const analyses = await cached(`listing.preview:${imagesHash(images)}`, 86_400, () => analyseBatch(images, { purpose: 'listing.photos_preview', userId }));
+    const raw = await cached(`listing.preview:${imagesHash(images)}`, 86_400, async () => {
+      await aiCharge(req, 'listing.photos_preview', PREVIEW_LIMITS);
+      return analyseBatch(images, { purpose: 'listing.photos_preview', userId });
+    });
+    // Alt text is public: never with contact details or links (e.g. read off a sign in the photo); the room name instead.
+    const analyses = raw.map((a) => (a && altTextProblem(a.alt) ? { ...a, alt: a.room.charAt(0).toUpperCase() + a.room.slice(1) } : a));
     const all = [...prior, ...analyses.map(summarisable)];
+    // A signed token per result: uploading exactly this file with it stores the result instead of checking it again.
+    const tokens = await Promise.all(analyses.map((a, i) => (a ? signPreview(userId!, bytesHash(images[i].bytes), a) : null)));
     return {
-      photos: analyses.map((a, i) => ({ index: i, name: images[i].name || null, analysis: a })),
+      photos: analyses.map((a, i) => ({ index: i, name: images[i].name || null, analysis: a, token: tokens[i] })),
       suggestedOrder: suggestOrder(all),
       tips: photoTips(all),
       label: 'AI photo check. Room labels and alt text are suggestions: edit them as you like.',
@@ -245,7 +271,9 @@ export async function aiListingRoutes(app: FastifyInstance) {
   /* ---------- 2b. photos: stored analysis for a listing ---------- */
   app.get('/api/ai/listing/:ref/photos', async (req) => {
     const { ref } = req.params as { ref: string };
-    await aiGuard(req, 'listing.photos_read', { auth: true, perMinute: 30 });
+    // Reads what is already stored: no AI call, so no AI guard (works while AI is off and uses none of the AI allowance).
+    requireUser(req);
+    await enforce(req, 'listing.photos_read', 30, 60, 'user');
     const row = await editable(req, ref);
     const rows = await q<PhotoRow>('SELECT * FROM listing_photos WHERE listing_id = $1 ORDER BY position, created_at', [row.id]);
     const analyses = rows.map(analysisOf);
@@ -258,27 +286,28 @@ export async function aiListingRoutes(app: FastifyInstance) {
       pending: rows.some((r) => !r.ai_checked_at),
       job: job && (job.user_id === req.user!.id || req.user!.role === 'admin') ? jobDTO(job) : null,
       consented: await hasPhotoConsent(req.user!.id),
+      aiEnabled: aiAvailable(),
       label: 'AI photo check. Room labels and alt text are suggestions.',
     };
   });
 
   app.post('/api/ai/listing/:ref/photos/check', async (req, reply) => {
     const { ref } = req.params as { ref: string };
-    const { userId } = await aiGuard(req, 'listing.photos_check', { auth: true, perMinute: 3, perHour: 20 });
+    const { userId } = await aiAccess(req, { auth: true });
     const row = await editable(req, ref);
     const { recheck, consent } = parse(CheckBody, req.body ?? {});
     if (consent === true) await recordPhotoConsent(userId!);
     else if (!(await hasPhotoConsent(userId))) throw new HttpError(400, CONSENT_MESSAGE, 'consent_required', { consent: 'Please tick to confirm.' });
     const left = await photoCallsLeft(userId);
-    if (recheck) {
-      // A re-check resets every photo, so it must fit in what is left of today's allowance (nothing is reset otherwise).
-      const all = (await one<{ n: number }>('SELECT count(*)::int n FROM listing_photos WHERE listing_id = $1', [row.id]))!.n;
-      if (all && left < Math.ceil(all / JOB_BATCH)) throw new HttpError(429, LIMIT_MESSAGE, 'rate_limited');
-      await q('UPDATE listing_photos SET ai_checked_at = NULL WHERE listing_id = $1', [row.id]);
-    }
-    const pending = (await one<{ n: number }>('SELECT count(*)::int n FROM listing_photos WHERE listing_id = $1 AND ai_checked_at IS NULL', [row.id]))!.n;
-    if (!pending) return reply.send({ job: null, note: 'All photos have already been checked.' });
+    const counts = (await one<{ total: number; unchecked: number }>(
+      'SELECT count(*)::int AS total, count(*) FILTER (WHERE ai_checked_at IS NULL)::int AS unchecked FROM listing_photos WHERE listing_id = $1', [row.id]))!;
+    // A re-check resets every photo, so it must fit in what is left of today's allowance (nothing is reset otherwise).
+    if (recheck && counts.total && left < Math.ceil(counts.total / JOB_BATCH)) throw new HttpError(429, LIMIT_MESSAGE, 'rate_limited');
+    if (!(recheck ? counts.total : counts.unchecked)) return reply.send({ job: null, note: 'All photos have already been checked.' });
     if (left <= 0) throw new HttpError(429, LIMIT_MESSAGE, 'rate_limited');
+    // There is something to check: now it counts towards the AI allowance (before anything is reset).
+    await aiCharge(req, 'listing.photos_check', CHECK_LIMITS);
+    if (recheck) await q('UPDATE listing_photos SET ai_checked_at = NULL WHERE listing_id = $1', [row.id]);
     const job = await enqueue('listing.photos', { listingId: row.id, ref: row.ref }, { userId, subject: `listing:${row.ref}`, dedupe: true });
     return reply.code(202).send({ job: jobDTO(job) });
   });
@@ -286,11 +315,12 @@ export async function aiListingRoutes(app: FastifyInstance) {
   /* ---------- 4. price guide ---------- */
   app.post('/api/ai/listing/price-guide', async (req) => {
     const deadline = Date.now() + PRICE_TIMING.budgetMs; // one budget for the whole request (Netlify answers within 30 s)
-    const { userId } = await aiGuard(req, 'listing.price_guide', { auth: true, perMinute: 10, perHour: 60 });
+    const { userId } = await aiAccess(req, { auth: true });
     const body = parse(PriceGuideBody, req.body);
     const range = priceRange(body);
+    // No evidence, no AI call: nothing is charged.
     if (!range) return { low: null, high: null, basis: null, position: null, narrative: null, note: 'There isn’t enough comparable evidence for this postcode yet.' };
-    const { narrative } = await priceNarrative(body, range, { userId, deadline });
+    const { narrative } = await priceNarrative(body, range, { userId, deadline, charge: () => aiCharge(req, 'listing.price_guide', PRICE_LIMITS) });
     return {
       low: range.low, high: range.high, basis: range.basis, position: range.position, askingVsMidPct: range.askingVsMidPct, narrative,
       label: 'AI explanation of Streetkey’s indicative range. Not a valuation: the figures come from demonstration comparables, not the AI.',
@@ -299,8 +329,8 @@ export async function aiListingRoutes(app: FastifyInstance) {
 
   /* ---------- 5. pre-submission check ---------- */
   app.post('/api/ai/listing/precheck', async (req) => {
-    const { userId } = await aiGuard(req, 'listing.precheck', { auth: true, perMinute: 6, perHour: 40 });
+    const { userId } = await aiAccess(req, { auth: true });
     const body = parse(PrecheckBody, req.body);
-    return precheck(body, { userId });
+    return precheck(body, { userId, charge: () => aiCharge(req, 'listing.precheck', PRECHECK_LIMITS) });
   });
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PROPERTIES } from '../data/properties';
+import { baseListings } from '../data/properties';
 import { developmentOptions, NDSS, residualAppraisal, suggestMix, type DemandSignal, type UnitType } from '../engine/development';
 import { engagementFor } from '../engine/engagement';
 import { gbp, gbpK, Meter, Section, Stat, Tag } from '../components/ui';
@@ -51,8 +51,10 @@ export default function Developer() {
   const sensitivity = useMemo(() => SENS_BUILD.map((b) => SENS_GDV.map((g) => ({ b, g, residual: appraise(g, b).residual }))), [m, mix, build, profit, months, scheme]);
   const absorption = useMemo(() => m.types.map((t) => { const d = m.demand.find((x) => x.key === t.key)!; const n = mix[t.key] ?? 0; return { t, d, n, monthsLow: n / d.monthlyAbsorption[1], monthsHigh: n / d.monthlyAbsorption[0] }; }), [m, mix]);
   const sellOut = useMemo(() => [Math.max(...absorption.map((a) => a.monthsLow)), Math.max(...absorption.map((a) => a.monthsHigh))], [absorption]);
-  const opps = useMemo(() => PROPERTIES.flatMap((p) => developmentOptions(p).filter((o) => (o.id === 'subdivide' || o.id === 'classma') && o.units && o.units >= 2).map((o) => ({ p, o }))), []);
-  const styles = useMemo(() => { const s = new Map<string, number>(); PROPERTIES.forEach((p) => engagementFor(p).designStyles.forEach((d) => s.set(d.style, (s.get(d.style) ?? 0) + d.count))); return [...s].sort((a, b) => b[1] - a[1]).slice(0, 5); }, []);
+  // Demonstration listings only (baseListings): real live listings, private sellers' homes included, never get
+  // development options or simulated engagement here, or a place in the developer briefing.
+  const opps = useMemo(() => baseListings().flatMap((p) => developmentOptions(p).filter((o) => (o.id === 'subdivide' || o.id === 'classma') && o.units && o.units >= 2).map((o) => ({ p, o }))), []);
+  const styles = useMemo(() => { const s = new Map<string, number>(); baseListings().forEach((p) => engagementFor(p).designStyles.forEach((d) => s.set(d.style, (s.get(d.style) ?? 0) + d.count))); return [...s].sort((a, b) => b[1] - a[1]).slice(0, 5); }, []);
   const suggest = () => setMix(suggestMix(total, m.types, m.demand));
   const switchMarket = (k: keyof typeof MARKETS) => { setMk(k); setBuild(scheme === 'conversion' ? Math.round(MARKETS[k].buildCost * 0.66 / 50) * 50 : MARKETS[k].buildCost); };
   const switchScheme = (s: 'newbuild' | 'conversion') => { setScheme(s); setBuild(s === 'conversion' ? Math.round(m.buildCost * 0.66 / 50) * 50 : m.buildCost); };
@@ -187,7 +189,7 @@ export default function Developer() {
             <p className="xs muted" style={{ marginTop: 8 }}>Excludes SDLT on land, affordable housing (assumed nil — usually not true above policy thresholds), and VAT. A viability consultant should run a full appraisal (e.g. Argus) before bidding.</p>
           </Section>
 
-          <Section title="Conversion & development opportunities" kicker="From Streetkey listings" right={<Tag kind="warn">Screening only</Tag>}>
+          <Section title="Conversion & development opportunities" kicker="From the demonstration listings" right={<Tag kind="warn">Screening only</Tag>}>
             <ul className="clean">{opps.map(({ p, o }) => (
               <li key={p.id + o.id} className="card flat" style={{ padding: 12 }}>
                 <div className="row between"><Link to={`/property/${p.id}/intelligence#development`}><b className="small">{p.street.replace(' (fictional)', '')}, {p.town.split(',')[0]}</b></Link><Tag kind={o.status === 'constrained' ? 'warn' : 'demo'}>{o.status}</Tag></div>

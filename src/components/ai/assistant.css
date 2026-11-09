@@ -5,6 +5,12 @@
 
 .ask-chat { display: flex; flex-direction: column; gap: 8px; height: min(64vh, 600px); min-height: 300px; }
 @media (min-width: 901px) { .ask-chat { height: min(calc(100vh - 250px), 620px); } }
+/* Short screens (landscape phones): the sheet is a column and only the messages scroll, so the
+   title, Close button and tabs stay in view. The chat keeps its usual size and shrinks to fit. */
+.sheet:has(> .ask-panel) { display: flex; flex-direction: column; overflow: hidden; }
+.sheet:has(> .ask-panel) > * { flex: none; }
+.sheet > .ask-panel { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.sheet > .ask-panel > .ask-chat { flex: 0 1 auto; min-height: min(300px, 50vh); }
 .ask-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 12px; padding: 2px 2px 8px; }
 .ask-log { display: flex; flex-direction: column; gap: 14px; }
 .ask-welcome { display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.5; }
@@ -12,6 +18,9 @@
 .ask-msg { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .ask-who { font-size: 12px; font-weight: 700; color: var(--muted); }
 .ask-msg.user { align-self: flex-end; align-items: flex-end; max-width: 88%; gap: 4px; }
+.ask-unanswered { margin: 0; font-size: 13px; color: var(--muted); }
+.ask-unanswered .linkish { font-size: 13px; min-height: 24px; }
+.ask-unanswered .linkish:disabled { opacity: 0.55; cursor: not-allowed; }
 .ask-bubble-u { margin: 0; background: var(--ink); color: var(--paper); padding: 9px 12px; border-radius: 14px 14px 4px 14px; font-size: 15px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ask-msg.ai { align-self: stretch; background: var(--ai-soft); border-radius: 14px 14px 14px 4px; padding: 10px 12px 12px; }
 .ask-msg.ai .ai-text a, .ask-answer .ai-text a { color: var(--ink); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
@@ -33,8 +42,10 @@
 .ask-fail { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 
 .ask-composer { display: flex; gap: 8px; align-items: flex-end; padding-top: 10px; border-top: 1px solid var(--line); }
-.ask-input { flex: 1; resize: none; font-size: 16px; line-height: 1.4; min-height: 46px; max-height: 140px; padding: 11px 12px; border-radius: 12px; }
+.ask-input { flex: 1; resize: none; font-size: 16px; line-height: 1.4; min-height: 46px; max-height: 140px; padding: 11px 12px; border-radius: 12px; overflow-y: auto; }
 .ask-send { min-width: 46px; min-height: 46px; padding: 0 14px; justify-content: center; flex: none; }
+/* Clearly not available until there's something to send (or while an answer is on its way). */
+.btn.ask-send:disabled { background: var(--surface-2); color: var(--muted); border-color: var(--line); box-shadow: none; }
 .ask-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; }
 .ask-foot .ai-disclaimer { margin: 0; flex: 1 1 220px; }
 .ask-new { font-size: 13px; min-height: 24px; }

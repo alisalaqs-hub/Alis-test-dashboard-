@@ -1,11 +1,16 @@
+import pg from 'pg';
 import { describe, expect, it } from 'vitest';
-import { assess, heuristics, repetition, screen } from '../src/ai/inbox/screen';
-import { validateTriage, type TriageOut } from '../src/ai/inbox/triage';
+import { on, setEnquiryScreener, type HookPayloads } from '../src/ai/hooks';
+import { assess, enquiryScreener, heuristics, repetition, screen } from '../src/ai/inbox/screen';
+import { chipsFor, cleanSummary, validateTriage, type TriageOut } from '../src/ai/inbox/triage';
 import { checkReply } from '../src/ai/inbox/reply';
 import { numbersOk, speculative, summarisePhotoQuality } from '../src/ai/inbox/insights';
-import { q, one } from '../src/db';
-import { outbox } from '../src/services/email';
-import { limits } from '../src/services/ratelimit';
+import { SENDER_AI_PER_DAY } from '../src/ai/inbox/shared';
+import { config } from '../src/config';
+import { q, one, pool } from '../src/db';
+import { loadMigrations, migrate } from '../src/migrate';
+import { mails, outbox } from '../src/services/email';
+import { anonId, limits } from '../src/services/ratelimit';
 import { client, getApp, jpegWithExif, lastMail, LISTING, makeAdmin, multipart, signUp } from './helpers';
 import { mockOpenAI, reply, type ChatMessage } from './openai-mock';
 
@@ -128,9 +133,11 @@ describe('enquiry screening', () => {
       expect((await filteredOf(r.json.id)).filtered).toBe(false); // AI failure: allowed
     } finally { ai.restore(); }
 
-    // AI switched off: the screen never holds anything back.
+    // AI switched off: clear-cut scams are still held back by the rules; anything less is let through.
     const off = await enquire(ref, { message: SCAM, kind: 'question' });
-    expect((await filteredOf(off.json.id)).filtered).toBe(false);
+    expect(await filteredOf(off.json.id)).toMatchObject({ filtered: true, filter_reason: expect.stringMatching(/^Held back as a likely scam/) });
+    const offUnsure = await enquire(ref, { message: unsure, kind: 'question' });
+    expect((await filteredOf(offUnsure.json.id)).filtered).toBe(false);
   });
 
   it('answers within the time budget even if the model hangs', async () => {
@@ -196,6 +203,19 @@ describe('enquiry screening', () => {
     expect(assess(heuristics('Great SEO services, rank on Google: bit.ly/abc')).rulesDecide).toBe(true);
   });
 
+  it('treats paying in cryptocurrency as unambiguous however it is worded, and decides clear-cut cases even with AI off', async () => {
+    for (const m of ['send deposit via crypto', 'I will pay deposit in bitcoin', 'I can pay the full deposit in bitcoin', 'Pay the holding fee using USDT', 'Click the crypto link to pay.']) {
+      expect({ m, strong: heuristics(m).some((s) => s.id === 'crypto' && s.strong) }).toEqual({ m, strong: true });
+    }
+    // where their money came from is not a payment method
+    for (const m of ['I paid off my mortgage with crypto gains.', 'I made my money in crypto years ago.']) expect({ m, ids: heuristics(m).map((s) => s.id) }).toEqual({ m, ids: ['crypto-mention'] });
+    expect(assess(heuristics('I am abroad, send deposit via crypto link http://x.y'))).toMatchObject({ strong: true, rulesDecide: true, kind: 'scam' });
+    // AI is off in this test: the rules alone still hold back the clear-cut phishing message (no moderation, no model)
+    const phish = 'I am abroad on an oil rig. Please send the deposit via bitcoin, verify here http://pay-verify.xyz/claim';
+    expect(await screen({ enquiryId: '00000000-0000-0000-0000-000000000000', listingId: '00000000-0000-0000-0000-000000000000', name: 'X', email: 'x@example.com', message: phish, kind: 'question' }))
+      .toMatchObject({ filter: true, decidedBy: 'rules', reason: expect.stringMatching(/^Held back as a likely scam: it /) });
+  });
+
   it('sends relocating buyers to the model rather than holding them back by rules, and emails them to the lister', async () => {
     const { seller, ref } = await liveListing();
     const ai = aiWith({ enquiry_screen: () => reply.json({ verdict: 'genuine', confidence: 'high' }) });
@@ -226,7 +246,7 @@ describe('enquiry screening', () => {
     const sig = await repetition('repeat@example.com', `  ${text.toUpperCase()} `, '00000000-0000-0000-0000-000000000000');
     expect(sig[0]).toMatchObject({ family: 'repeat', weight: 2 });
     expect(await repetition('someone-else@example.com', text, '00000000-0000-0000-0000-000000000000')).toEqual([]);
-    // Without AI the screen itself stays out of the way.
+    // Without AI a soft signal like this one is let through (only clear-cut cases are decided by rules).
     expect((await screen({ enquiryId: '00000000-0000-0000-0000-000000000000', listingId: ids[0], name: 'X', email: 'repeat@example.com', message: text, kind: 'question' })).filter).toBe(false);
   });
 });
@@ -413,13 +433,90 @@ describe('enquiry triage', () => {
     } finally { ai.restore(); }
   });
 
+  it('brings back missing chips from the inbox list: a few recent conversations a visit, charged to the lister, never held-back ones, and not retried there after a failure', async () => {
+    const { seller, ref } = await liveListing();
+    // AI off while they arrive, so none is triaged yet
+    const ids: string[] = [];
+    for (let i = 0; i < 7; i++) ids.push((await enquire(ref, { message: `Is the garden south facing? (${i})`, kind: 'question' })).json.id as string);
+    const scam = (await enquire(ref, { message: SCAM, kind: 'question' })).json.id as string;
+    expect((await one<{ filtered: boolean }>('SELECT filtered FROM enquiries WHERE id = $1', [scam]))!.filtered).toBe(true);
+    const list = async () => (await seller.c.get('/api/ai/inbox')).json as { items: Record<string, unknown>; pending: string[] };
+    expect(await list()).toEqual({ items: {}, pending: [] }); // AI off: nothing queued
+    let fail = false;
+    const ai = aiWith({ enquiry_triage: () => (fail ? { status: 400, error: { message: 'bad request' } } : reply.json({ ...TRIAGE, intent: 'ask_question', urgency: 'unknown', questions: ['Is the garden south facing?'] })) });
+    try {
+      const first = await list();
+      expect(ai.named('enquiry_triage')).toHaveLength(5);
+      expect(Object.keys(first.items).sort()).toEqual(ids.slice(2).sort()); // the five most recent (jobs finish before the reply in tests)
+      expect(first.pending).toEqual([]);
+      expect(await one(`SELECT actor FROM ai_jobs WHERE kind = 'inbox.triage' AND subject = $1`, [`enquiry:${ids[6]}`])).toEqual({ actor: `u:${seller.user.id}` });
+      expect(Object.keys((await list()).items).sort()).toEqual([...ids].sort());
+      expect(ai.named('enquiry_triage')).toHaveLength(7);
+      await list();
+      expect(ai.named('enquiry_triage')).toHaveLength(7); // all caught up
+      expect(await q(`SELECT 1 FROM ai_jobs WHERE kind = 'inbox.triage' AND subject = $1`, [`enquiry:${scam}`])).toHaveLength(0);
+      expect(await (await signUp()).c.get('/api/ai/inbox').then((r) => r.json)).toEqual({ items: {}, pending: [] });
+
+      // A stored triage that was removed (as the upgrade to the stricter checks does) comes back…
+      await q('DELETE FROM enquiry_ai WHERE enquiry_id = $1', [ids[6]]);
+      expect(Object.keys((await list()).items)).toContain(ids[6]);
+      expect(ai.named('enquiry_triage')).toHaveLength(8);
+      // …but one that fails isn't retried from the list (opening the conversation retries it after a pause).
+      fail = true;
+      await q('DELETE FROM enquiry_ai WHERE enquiry_id = $1', [ids[5]]);
+      expect(await list()).toMatchObject({ pending: [] });
+      expect(ai.named('enquiry_triage')).toHaveLength(9);
+      expect(Object.keys((await list()).items)).not.toContain(ids[5]);
+      expect(ai.named('enquiry_triage')).toHaveLength(9);
+    } finally { ai.restore(); }
+  });
+
   it('validates the model’s reading against the words used', () => {
-    const t = validateTriage({ ...TRIAGE, questions: Array.from({ length: 9 }, (_, i) => `Question ${i}?`) }, 'We are cash buyers, could we view?');
+    const t = validateTriage({ ...TRIAGE, questions: Array.from({ length: 9 }, (_, i) => `Is there a view from room ${i}?`) }, 'We are cash buyers, could we view? Which room has the best view?');
     expect(t.buyerPosition).toEqual({ chainFree: null, mortgageInPrinciple: null, cash: true, firstTimeBuyer: null, hasPropertyToSell: null, moveTimescale: null });
     expect(t.questions).toHaveLength(6);
     const contradictory = validateTriage({ ...TRIAGE, buyerPosition: { ...TRIAGE.buyerPosition, chainFree: true, hasPropertyToSell: true } }, 'I am a first-time buyer, chain free, but I need to sell my flat first');
     expect(contradictory.buyerPosition.chainFree).toBeNull();
     expect(contradictory.buyerPosition.hasPropertyToSell).toBeNull();
+  });
+
+  it('keeps urgency, offers and questions only when the enquirer’s words back them', () => {
+    const chips = (t: TriageOut, kind = 'question') => chipsFor({ intent: t.intent, position: t.buyerPosition, urgency: t.urgency }, kind).map((c) => c.label);
+    // invented urgency, an invented offer and an invented question: all dropped, so no urgent chips
+    const made = validateTriage({ ...TRIAGE, intent: 'make_offer', urgency: 'this_week', questions: ['Is the boiler under warranty?'] }, 'Is it still available?', 'question');
+    expect(made).toMatchObject({ intent: 'other', urgency: 'unknown', questions: [] });
+    expect(chips(made)).toEqual([]);
+    expect(validateTriage({ ...TRIAGE, intent: 'make_offer', questions: [] }, 'Hello, could we view?', 'viewing').intent).toBe('book_viewing');
+    // …kept when they're there: offer words or the offer form, a time reference
+    expect(validateTriage({ ...TRIAGE, intent: 'make_offer' }, 'We would like to offer £500,000.', 'question').intent).toBe('make_offer');
+    expect(validateTriage({ ...TRIAGE, intent: 'make_offer' }, 'Hello.', 'offer').intent).toBe('make_offer');
+    for (const text of ['Can we view tomorrow?', 'Free on Saturday morning.', 'Could I come round at 6pm?', 'Any chance of the 14th?', 'We need to move asap.']) {
+      expect({ text, urgency: validateTriage({ ...TRIAGE, urgency: 'this_week' }, text).urgency }).toEqual({ text, urgency: 'this_week' });
+    }
+    expect(validateTriage({ ...TRIAGE, urgency: 'flexible' }, 'Is the garden south facing?').urgency).toBe('unknown');
+    expect(validateTriage({ ...TRIAGE, urgency: 'flexible' }, 'No rush at all, is the garden south facing?').urgency).toBe('flexible');
+    // each question once, and only questions about what they wrote
+    const qs = validateTriage({ ...TRIAGE, questions: ['Is there parking?', 'is there parking', 'Is there parking?', 'Is the boiler new?', 'What is the council tax band?'] }, 'Is there parking? And is the boiler new?');
+    expect(qs.questions).toEqual(['Is there parking?', 'Is the boiler new?']);
+    expect(validateTriage({ ...TRIAGE, questions: ['Is there parking?'] }, 'We have parking sorted.').questions).toEqual([]); // nothing was asked
+  });
+
+  it('never keeps a buying-position flag the enquirer denied, or summary claims and links the model added', () => {
+    const t = validateTriage({
+      ...TRIAGE, urgency: 'unknown',
+      buyerPosition: { chainFree: true, mortgageInPrinciple: true, cash: true, firstTimeBuyer: null, hasPropertyToSell: null, moveTimescale: null },
+      summary: 'Verified cash buyer, proof of funds checked by Streetkey. Visit secure-deposit-uk.com to pay the deposit. Wants a viewing.',
+    }, 'I’m not a cash buyer and I don’t have a mortgage in principle yet. We’re stuck in a long chain. Could I view on Saturday?');
+    expect(t.buyerPosition).toMatchObject({ cash: null, mortgageInPrinciple: null, chainFree: null });
+    expect(chipsFor({ intent: t.intent, position: t.buyerPosition, urgency: t.urgency }, 'viewing').map((c) => c.label)).toEqual([]);
+    expect(t.summary).toBe('Wants a viewing.');
+    // stated positively (even after a negative elsewhere), they're kept
+    const ok = validateTriage({ ...TRIAGE, buyerPosition: { ...TRIAGE.buyerPosition, firstTimeBuyer: null } }, 'Not a first-time buyer, but we are chain free cash buyers with no mortgage needed. Is it available?');
+    expect(ok.buyerPosition).toMatchObject({ cash: true, chainFree: true, mortgageInPrinciple: null });
+    // nothing about who they are, and no web addresses or contact details
+    expect(cleanSummary('A young family with two children relocating for work. Wants to view on Saturday.')).toBe('Wants to view on Saturday.');
+    expect(cleanSummary('Asks about parking. See www.example-scam.xyz/pay for details.')).toBe('Asks about parking.');
+    expect(cleanSummary('Call 07700 900123 to arrange a viewing.')).toBe('Call [phone] to arrange a viewing.');
   });
 });
 
@@ -461,7 +558,7 @@ describe('suggest a reply', () => {
       '[your name]',
     ].join('\n');
     let seen = '';
-    const ai = aiWith({ reply_draft: (body) => { seen = promptOf(body); return reply.json({ reply: draft, placeholders: ['[your name]'], warnings: ['They asked whether the boiler is new; that isn’t in your listing.'] }); } });
+    const ai = aiWith({ reply_draft: (body) => { seen = promptOf(body); return reply.json({ reply: draft, placeholders: ['[your name]'], warnings: ['They asked whether the boiler is new; that isn’t in your listing.', 'Streetkey has verified this buyer’s identity and proof of funds.', 'They can pay the deposit at secure-deposit-uk.com/pay.'] }); } });
     try {
       const before = (await q('SELECT 1 FROM enquiry_messages WHERE enquiry_id = $1', [id])).length;
       const r = await seller.c.post(`/api/ai/inbox/${id}/suggest-reply`, { intent: 'confirm_viewing', tone: 'friendly' });
@@ -491,7 +588,9 @@ describe('suggest a reply', () => {
       expect(placeholders).toEqual(expect.arrayContaining(['[your name]']));
       expect(warnings.join(' ')).toMatch(/price flexibility/);
       expect(warnings.join(' ')).toMatch(/full address/);
-      expect(warnings.join(' ')).toMatch(/boiler/);
+      // the model's own notes are kept apart from Streetkey's checks, without links or claims that Streetkey checked anyone
+      expect(warnings.join(' ')).not.toMatch(/boiler/);
+      expect(r.json.aiNotes).toEqual(['They asked whether the boiler is new; that isn’t in your listing.']);
       // never sent automatically
       expect((await q('SELECT 1 FROM enquiry_messages WHERE enquiry_id = $1', [id])).length).toBe(before);
 
@@ -520,6 +619,7 @@ describe('suggest a reply', () => {
     const ok = checkReply({ reply: 'I’m flexible on viewing times: [Saturday or Sunday] at [time]. The garden gets the sun all afternoon.', placeholders: [], warnings: [] }, { listing, intent: 'offer_times', notes: '', preferredSlot: '', enquirerText: '', listerText: '' });
     expect(ok.reply).toBe('I’m flexible on viewing times: [Saturday or Sunday] at [time]. The garden gets the sun all afternoon.');
     expect(ok.warnings).toEqual([]);
+    expect(ok.aiNotes).toEqual([]);
   });
 
   const SALE = { address_line: '14 Elm Road', postcode: 'E17 4QH', district: 'E17', price: 525000, service_charge_annual: null, ground_rent_annual: null, channel: 'sale' as const, source_kind: 'agent' as const };
@@ -549,7 +649,7 @@ describe('suggest a reply', () => {
     for (const s of [
       'Any offer should be made in writing and I will pass it to the seller.', 'All offers will be considered.', 'The move-in date is negotiable.',
       'The asking price is £525,000.', 'The flat is 650 sq ft and 2 miles from the station.', 'Call me on 07700 900123 to arrange a viewing.',
-    ]) expect(check(s)).toEqual({ reply: s, placeholders: [], warnings: [] });
+    ]) expect(check(s)).toEqual({ reply: s, placeholders: [], warnings: [], aiNotes: [] });
   });
 
   it('treats the enquirer’s figures and requested times as questions, not facts', () => {
@@ -580,7 +680,7 @@ describe('suggest a reply', () => {
 describe('listing insights', () => {
   const good = (stats: any) => reply.json({ // eslint-disable-line @typescript-eslint/no-explicit-any
     headline: `${stats.views30d} views and ${stats.saves} saves in the last 30 days.`,
-    whatsWorking: [`${stats.saves} people saved it.`, 'Clear material information.'],
+    whatsWorking: [`${stats.saves} people saved it.`, 'Clear material information.', 'Ideal for young families.'], // the last is about who should live there: dropped
     whatToImprove: [
       { action: 'Add more photos', why: `Only ${stats.photoCount} photo so far.`, impact: 'high' },
       { action: 'Cut the price by £20,000', why: 'It would sell 40% faster.', impact: 'high' },
@@ -638,6 +738,40 @@ describe('listing insights', () => {
     } finally { ai.restore(); }
   });
 
+  it('uses the AI allowance only for a new explanation, and for a reply draft only once the request is valid (COST-9)', async () => {
+    const { seller, ref } = await liveListing();
+    const other = await liveListing();
+    const draft = await seller.c.post('/api/listings', { ...LISTING, addressLine: '3 Birch Road' });
+    const buyer = await signUp();
+    const id = (await enquire(ref, { email: buyer.email, message: GENUINE }, buyer.c)).json.id as string;
+    const used = async (name: string) => (await q<{ n: number }>(`SELECT coalesce(sum(count), 0)::int n FROM rate_limits WHERE key = $1`, [`${name}:u:${seller.user.id}`]))[0].n;
+    const ai = aiWith({
+      listing_insights: (body) => good(JSON.parse(promptOf(body).match(/STATS \(computed by Streetkey[^\n]*\n([\s\S]*?)\n\nChecks/)![1])),
+      reply_draft: () => reply.json({ reply: 'Hi Sam, thanks for your message. [your name]', placeholders: ['[your name]'], warnings: [] }),
+    });
+    try {
+      // Not a listing, someone else's, not live yet, an invalid reply request: nothing is charged.
+      expect((await seller.c.get('/api/ai/listings/ab/insights')).status).toBe(404);
+      expect((await seller.c.get('/api/ai/listings/sk-nothere/insights')).status).toBe(404);
+      expect((await seller.c.get(`/api/ai/listings/${other.ref}/insights`)).status).toBe(403);
+      expect((await seller.c.get(`/api/ai/listings/${draft.json.listing.ref}/insights`)).status).toBe(409);
+      expect((await seller.c.post(`/api/ai/inbox/${id}/suggest-reply`, { intent: 'haggle', tone: 'friendly' })).status).toBe(400);
+      for (const name of ['ai.daily', 'ai.inbox.insights.m', 'ai.inbox.insights.h', 'ai.inbox.reply.m']) expect(await used(name)).toBe(0);
+      expect(await used('inbox.insights_read')).toBe(4);
+
+      // A new explanation is charged once; the cached one is free.
+      expect((await seller.c.get(`/api/ai/listings/${ref}/insights`)).status).toBe(200);
+      expect((await seller.c.get(`/api/ai/listings/${ref}/insights`)).status).toBe(200);
+      expect(ai.named('listing_insights')).toHaveLength(1);
+      expect(await used('ai.inbox.insights.m')).toBe(1);
+      expect(await used('ai.daily')).toBe(1);
+      // A valid reply request is.
+      expect((await seller.c.post(`/api/ai/inbox/${id}/suggest-reply`, { intent: 'answer', tone: 'brief' })).status).toBe(200);
+      expect(await used('ai.inbox.reply.m')).toBe(1);
+      expect(await used('ai.daily')).toBe(2);
+    } finally { ai.restore(); }
+  });
+
   it('falls back to rule-based wording when the model’s numbers can’t be trusted, and needs a live listing', async () => {
     const { seller, ref } = await liveListing();
     const draft = await seller.c.post('/api/listings', { ...LISTING, addressLine: '2 Birch Road' });
@@ -675,5 +809,322 @@ describe('listing insights', () => {
       expect({ t, s: speculative(t) }).toEqual({ t, s: false });
     expect(summarisePhotoQuality([{ score: 8, issues: ['slightly dark'] }, { quality: 0.3 }, '{"score": 6}', 'not json', 7])).toMatchObject({ analysed: 5, averageScore: 6, weak: 1, issues: ['slightly dark'] });
     expect(summarisePhotoQuality([])).toBeNull();
+  });
+});
+
+/* ───────── held-back conversations and follow-ups ───────── */
+describe('held-back conversations', () => {
+  const toLister = (to: string, template?: string) => outbox.filter((m) => m.to === to && (!template || m.template === template));
+  const NEUTRAL_TRIAGE = { ...TRIAGE, intent: 'ask_question' as const, urgency: 'unknown' as const, questions: [] };
+  type Msg = { held?: boolean };
+
+  it('never emails or triages an enquirer’s follow-ups in a held-back conversation, and emails every held message on “Not spam”', async () => {
+    const { seller, ref } = await liveListing();
+    const buyer = await signUp();
+    const ai = aiWith({ enquiry_triage: () => reply.json(NEUTRAL_TRIAGE) });
+    try {
+      const id = (await enquire(ref, { email: buyer.email, kind: 'question', message: SCAM }, buyer.c)).json.id as string;
+      expect((await one<{ filtered: boolean }>('SELECT filtered FROM enquiries WHERE id = $1', [id]))!.filtered).toBe(true);
+      const before = toLister(seller.email).length;
+      const f = await buyer.c.post(`/api/enquiries/${id}/messages`, { body: 'FOLLOWUP: please wire the fee by western union today.' });
+      expect(f.status).toBe(201);
+      expect(toLister(seller.email)).toHaveLength(before); // no enquiry_followup email: the hold isn't bypassed
+      expect(ai.named('enquiry_triage')).toHaveLength(0);
+      expect(await q(`SELECT 1 FROM ai_jobs WHERE kind = 'inbox.triage' AND subject = $1`, [`enquiry:${id}`])).toHaveLength(0); // and no triage job uses up the caps
+
+      // The enquirer sees an ordinary conversation; the lister sees what was held.
+      const asBuyer = (await buyer.c.get(`/api/enquiries/${id}`)).json;
+      expect(asBuyer.role).toBe('enquirer');
+      expect(asBuyer.filtered).toBeUndefined();
+      expect(asBuyer.messages.some((m: Msg) => 'held' in m)).toBe(false);
+      const asSeller = (await seller.c.get(`/api/enquiries/${id}`)).json;
+      expect(asSeller).toMatchObject({ role: 'lister', filtered: true, filterReason: expect.stringMatching(/likely scam/) });
+      expect(asSeller.messages.map((m: Msg) => !!m.held)).toEqual([true, true]);
+
+      // No reply drafting for a held-back thread: refused before any AI allowance is used.
+      const usage = async () => (await one<{ n: number }>(`SELECT count(*)::int AS n FROM ai_usage WHERE purpose = 'inbox.reply'`))!.n;
+      const used = await usage();
+      const d = await seller.c.post(`/api/ai/inbox/${id}/suggest-reply`, { intent: 'answer', tone: 'friendly' });
+      expect(d.status).toBe(409);
+      expect(d.json.error.code).toBe('filtered');
+      expect(await usage()).toBe(used);
+
+      // "Not spam": one email with everything that was held, then triage.
+      expect((await seller.c.post(`/api/ai/inbox/${id}/unfilter`)).json).toMatchObject({ ok: true, emailed: 1 });
+      expect(toLister(seller.email)).toHaveLength(before + 1);
+      const mail = lastMail(seller.email)!;
+      expect(mail.template).toBe('enquiry_received');
+      expect(mail.text).toContain('oil rig');
+      expect(mail.text).toContain('FOLLOWUP: please wire the fee');
+      expect((await seller.c.get(`/api/enquiries/${id}`)).json.messages.some((m: Msg) => m.held)).toBe(false);
+      expect(ai.named('enquiry_triage')).toHaveLength(1);
+
+      // From now on, follow-ups are screened and emailed as usual.
+      expect((await buyer.c.post(`/api/enquiries/${id}/messages`, { body: 'Thanks. Is there parking?' })).status).toBe(201);
+      expect(toLister(seller.email, 'enquiry_followup').at(-1)?.text).toContain('Is there parking?');
+    } finally { ai.restore(); }
+  });
+
+  it('screens each follow-up: a scam follow-up holds the conversation back from then on, without telling the enquirer', async () => {
+    const { seller, ref } = await liveListing();
+    const buyer = await signUp();
+    const ai = aiWith({ enquiry_triage: () => reply.json(NEUTRAL_TRIAGE) });
+    try {
+      const id = (await enquire(ref, { email: buyer.email, kind: 'question', message: 'Is the garden south facing?' }, buyer.c)).json.id as string;
+      const n = toLister(seller.email, 'enquiry_followup').length;
+      expect((await buyer.c.post(`/api/enquiries/${id}/messages`, { body: 'Also, is there parking?' })).status).toBe(201);
+      expect(toLister(seller.email, 'enquiry_followup')).toHaveLength(n + 1);
+
+      const scam = 'I am abroad on an oil rig. Please send the deposit via bitcoin, verify here http://pay-verify.xyz/claim';
+      const r = await buyer.c.post(`/api/enquiries/${id}/messages`, { body: scam });
+      expect(r.status).toBe(201);
+      expect(r.json).toEqual({ ok: true }); // accepted the same way as any message
+      expect(toLister(seller.email, 'enquiry_followup')).toHaveLength(n + 1); // but not emailed
+      expect(await one('SELECT filtered, filter_reason FROM enquiries WHERE id = $1', [id])).toMatchObject({ filtered: true, filter_reason: expect.stringMatching(/^Held back as a likely scam: it /) });
+      expect((await seller.c.get(`/api/enquiries/${id}`)).json.messages.map((m: Msg) => !!m.held)).toEqual([false, false, true]);
+      expect((await buyer.c.get(`/api/enquiries/${id}`)).json.filtered).toBeUndefined();
+      const inbox = (await seller.c.get('/api/me/inbox')).json;
+      expect(inbox.items.find((i: { id: string }) => i.id === id)).toMatchObject({ filtered: true });
+      expect((await one<{ n: number }>(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'enquiry.filtered' AND detail->>'enquiry' = $1`, [id]))!.n).toBe(1);
+
+      // "Not spam" emails only what was held, as a follow-up (the opening message reached them already).
+      await seller.c.post(`/api/ai/inbox/${id}/unfilter`);
+      const sent = toLister(seller.email, 'enquiry_followup');
+      expect(sent).toHaveLength(n + 2);
+      expect(sent.at(-1)!.text).toContain('oil rig');
+      expect(sent.at(-1)!.text).not.toContain('south facing');
+    } finally { ai.restore(); }
+  });
+
+  it('holds a follow-up whose conversation another follow-up held back while it was being screened', async () => {
+    const { seller, ref } = await liveListing();
+    const buyer = await signUp();
+    const id = (await enquire(ref, { email: buyer.email, kind: 'question', message: 'Is the garden south facing?' }, buyer.c)).json.id as string;
+    const n = toLister(seller.email, 'enquiry_followup').length;
+    // While this follow-up is being screened, another one is caught and holds the conversation back.
+    setEnquiryScreener(async (p) => {
+      if (p.followUp) await q(`UPDATE enquiries SET filtered = true, filter_reason = 'Held back as a likely scam: test.' WHERE id = $1`, [p.enquiryId]);
+      return { filter: false };
+    });
+    try {
+      expect((await buyer.c.post(`/api/enquiries/${id}/messages`, { body: 'Is there parking?' })).status).toBe(201);
+    } finally { setEnquiryScreener(enquiryScreener); }
+    expect(toLister(seller.email, 'enquiry_followup')).toHaveLength(n); // not emailed past the hold
+    expect((await seller.c.get(`/api/enquiries/${id}`)).json.messages.map((m: Msg) => !!m.held)).toEqual([false, true]);
+    expect(await one('SELECT filter_reason FROM enquiries WHERE id = $1', [id])).toEqual({ filter_reason: 'Held back as a likely scam: test.' });
+    // "Not spam" sends it on.
+    await seller.c.post(`/api/ai/inbox/${id}/unfilter`);
+    expect(toLister(seller.email, 'enquiry_followup')).toHaveLength(n + 1);
+    expect(toLister(seller.email, 'enquiry_followup').at(-1)!.text).toContain('Is there parking?');
+  });
+
+  it('screens and emails a follow-up that arrives while the lister is choosing “Not spam”, instead of leaving it held', async () => {
+    const { seller, ref } = await liveListing();
+    const buyer = await signUp();
+    const id = (await enquire(ref, { email: buyer.email, kind: 'question', message: SCAM }, buyer.c)).json.id as string;
+    expect((await one<{ filtered: boolean }>('SELECT filtered FROM enquiries WHERE id = $1', [id]))!.filtered).toBe(true);
+    const n = toLister(seller.email, 'enquiry_followup').length;
+    const screened: string[] = [];
+    setEnquiryScreener(async (p) => { screened.push(p.message); return enquiryScreener(p); });
+    /** Until the follow-up's request is waiting for the conversation's row lock. */
+    const waitingForLock = async () => {
+      for (let i = 0; i < 250; i++) {
+        const r = await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM enquiries WHERE id = $1 FOR UPDATE%'`);
+        if (r.rows[0].n > 0) return;
+        await new Promise((res) => setTimeout(res, 20));
+      }
+      throw new Error('the follow-up never waited for the conversation');
+    };
+    // "Not spam" is part-way through (it holds the conversation's row) when the follow-up is sent.
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('UPDATE enquiries SET filtered = false, filter_reason = NULL WHERE id = $1 AND filtered', [id]);
+      await c.query('UPDATE enquiry_messages SET held = false WHERE enquiry_id = $1 AND held', [id]);
+      const sent = buyer.c.post(`/api/enquiries/${id}/messages`, { body: 'Is there parking?' });
+      try { await waitingForLock(); } finally { await c.query('COMMIT'); }
+      expect((await sent).status).toBe(201);
+    } catch (err) { await c.query('ROLLBACK').catch(() => null); throw err; } finally { c.release(); setEnquiryScreener(enquiryScreener); }
+    expect(screened).toEqual(['Is there parking?']); // screened before it could be emailed
+    expect((await seller.c.get(`/api/enquiries/${id}`)).json.messages.map((m: Msg) => !!m.held)).toEqual([false, false]);
+    expect(toLister(seller.email, 'enquiry_followup')).toHaveLength(n + 1);
+    expect(toLister(seller.email, 'enquiry_followup').at(-1)!.text).toContain('Is there parking?');
+  });
+});
+
+/* ───────── who can see and post in a conversation ───────── */
+describe('conversation access', () => {
+  it('lets an admin read any conversation but never post as the buyer, and tells others clearly when it isn’t theirs', async () => {
+    const { seller, admin, ref } = await liveListing();
+    const id = (await enquire(ref, { message: 'Is the garden south facing?', kind: 'question' })).json.id as string;
+    const view = await admin.c.get(`/api/enquiries/${id}`);
+    expect(view.status).toBe(200);
+    expect(view.json).toMatchObject({ role: 'admin', filtered: false });
+    expect(view.json.contact).toEqual({ name: 'Sam Buyer' }); // no contact details for a reviewer
+
+    const count = async () => (await q('SELECT 1 FROM enquiry_messages WHERE enquiry_id = $1', [id])).length;
+    const msgs = await count();
+    const mails = outbox.length;
+    const post = await admin.c.post(`/api/enquiries/${id}/messages`, { body: 'QA: message posted by the admin account' });
+    expect(post.status).toBe(403);
+    expect(post.json.error.code).toBe('forbidden');
+    expect(await count()).toBe(msgs);
+    expect(outbox.length).toBe(mails);
+    expect((await admin.c.patch(`/api/enquiries/${id}`, { status: 'closed' })).json).toEqual({ status: 'closed' }); // admins can still close it
+
+    const stranger = await (await signUp()).c.get(`/api/enquiries/${id}`);
+    expect(stranger.status).toBe(403);
+    expect(stranger.json.error.message).toBe('This conversation isn’t available to your account.');
+    expect((await seller.c.get('/api/enquiries/not-a-uuid')).status).toBe(404);
+    expect((await seller.c.get('/api/enquiries/00000000-0000-4000-8000-000000000000')).status).toBe(404);
+    expect((await client().get(`/api/enquiries/${id}`)).status).toBe(401);
+  });
+});
+
+/* ───────── storing an enquiry ───────── */
+describe('storing enquiries', () => {
+  it('screens before storing, so a held message is never briefly in the lister’s inbox, and answers 201 even if emailing the lister fails', async () => {
+    const { ref } = await liveListing();
+    let during: unknown = 'not screened';
+    setEnquiryScreener(async (e) => { during = await one('SELECT id FROM enquiries WHERE id = $1', [e.enquiryId]); return { filter: true, reason: 'Held back as a likely scam: test.' }; });
+    try {
+      const r = await enquire(ref, { message: 'Hello, is it still available?', kind: 'question' });
+      expect(r.status).toBe(201);
+      expect(during).toBeNull(); // not stored while the screen ran
+      expect(await one('SELECT filtered, filter_reason FROM enquiries WHERE id = $1', [r.json.id])).toEqual({ filtered: true, filter_reason: 'Held back as a likely scam: test.' });
+      expect(await one('SELECT held FROM enquiry_messages WHERE enquiry_id = $1', [r.json.id])).toEqual({ held: true });
+    } finally { setEnquiryScreener(enquiryScreener); }
+
+    const original = mails.enquiryToLister;
+    mails.enquiryToLister = async () => { throw new Error('mail provider down'); };
+    try {
+      const total = async () => (await one<{ n: number }>('SELECT count(*)::int AS n FROM enquiries'))!.n;
+      const before = await total();
+      const r = await enquire(ref, { message: 'Is the garden south facing?', kind: 'question' });
+      expect(r.status).toBe(201); // stored, so never an error the sender would retry (and duplicate)
+      expect(await total()).toBe(before + 1);
+    } finally { mails.enquiryToLister = original; }
+  });
+});
+
+/* ───────── limits on what enquirers can set off ───────── */
+describe('enquirer limits', () => {
+  const seed = (key: string, windowSec: number, max: number) => q(
+    `INSERT INTO rate_limits (key, window_start, count) VALUES ($1, to_timestamp(floor(extract(epoch FROM now()) / $2) * $2), $3)
+     ON CONFLICT (key, window_start) DO UPDATE SET count = EXCLUDED.count`, [key, windowSec, Math.round(max * limits.multiplier)]);
+  const unseed = (key: string) => q('DELETE FROM rate_limits WHERE key = $1', [key]);
+
+  it('caps enquiries each day per account (per network for visitors), so people sharing a network don’t block each other, with a higher ceiling per network', async () => {
+    const { ref } = await liveListing();
+    const [a, b] = [await signUp(), await signUp()];
+    const keys = { visitors: 'enquiry.create.d:ip:127.0.0.1', a: `enquiry.create.d:u:${a.user.id}`, network: 'enquiry.create.net:ip:127.0.0.1' };
+    await seed(keys.visitors, 86_400, 30);
+    try {
+      // Visitors on this network have used today's allowance…
+      const r = await enquire(ref, { message: 'Is it still available?' });
+      expect(r.status).toBe(429);
+      expect(r.json.error.code).toBe('rate_limited');
+      expect(r.json.error.message).toMatch(/Sign in or create a free account.*tomorrow/);
+      // …but people signed in on the same network each have their own.
+      expect((await enquire(ref, { email: a.email, message: 'Is it still available?' }, a.c)).status).toBe(201);
+      await seed(keys.a, 86_400, 30);
+      const capped = await enquire(ref, { email: a.email, message: 'Is the garden south facing?' }, a.c);
+      expect(capped.status).toBe(429);
+      expect(capped.json.error.message).toMatch(/^You’ve sent a lot of messages today\. Please try again tomorrow\.$/);
+      expect((await enquire(ref, { email: b.email, message: 'Is it still available?' }, b.c)).status).toBe(201); // one account’s use never blocks another’s
+      // Everyone on one network shares a much higher ceiling.
+      await seed(keys.network, 86_400, 300);
+      const ceiling = await enquire(ref, { email: b.email, message: 'Is the garden south facing?' }, b.c);
+      expect(ceiling.status).toBe(429);
+      expect(ceiling.json.error.message).toMatch(/your network today/);
+    } finally { for (const k of Object.values(keys)) await unseed(k); }
+    expect((await enquire(ref, { message: 'Is it still available?' })).status).toBe(201);
+  });
+
+  it('names the sender in the hooks, charges screening and triage to them, and stops model screening and triage past their daily allowance', async () => {
+    const { ref } = await liveListing();
+    const buyer = await signUp();
+    const created: HookPayloads['enquiryCreated'][] = [];
+    const messages: HookPayloads['enquiryMessage'][] = [];
+    on('enquiryCreated', (p) => { created.push(p); });
+    on('enquiryMessage', (p) => { messages.push(p); });
+    const unsure = 'Hello, is this still available? I am currently working abroad, so please message me on WhatsApp.';
+    const anon = anonId('127.0.0.1');
+    const ai = aiWith({ enquiry_screen: () => reply.json({ verdict: 'genuine', confidence: 'high' }), enquiry_triage: () => reply.json({ ...TRIAGE, intent: 'ask_question', urgency: 'unknown', questions: [] }) });
+    try {
+      const mark = (await one<{ id: string }>('SELECT coalesce(max(id), 0)::text AS id FROM ai_usage'))!.id;
+      const a = (await enquire(ref, { message: unsure, kind: 'question' })).json.id as string;
+      expect(created.find((p) => p.enquiryId === a)?.senderKey).toBe(anon);
+      expect(ai.named('enquiry_screen')).toHaveLength(1);
+      // moderation and the model's screening, both charged to the anonymous sender's network
+      const screenActors = await q<{ actor: string | null; n: number }>(`SELECT actor, count(*)::int AS n FROM ai_usage WHERE purpose = 'inbox.screen' AND id > $1::bigint GROUP BY actor`, [mark]);
+      expect(screenActors).toEqual([{ actor: anon, n: 2 }]);
+      expect(await one(`SELECT actor FROM ai_jobs WHERE kind = 'inbox.triage' AND subject = $1`, [`enquiry:${a}`])).toEqual({ actor: anon });
+
+      const b = (await enquire(ref, { email: buyer.email, message: 'Is the garden south facing?', kind: 'question' }, buyer.c)).json.id as string;
+      expect(created.find((p) => p.enquiryId === b)?.senderKey).toBe(`u:${buyer.user.id}`);
+      await buyer.c.post(`/api/enquiries/${b}/messages`, { body: 'Also, is there parking?' });
+      expect(messages.at(-1)).toEqual({ enquiryId: b, author: 'enquirer', senderKey: `u:${buyer.user.id}` });
+
+      // Past the sender's allowance: screened by the rules alone, and triage waits until the lister opens it.
+      await seed(`ai.inbox.sender:${anon}`, 86_400, SENDER_AI_PER_DAY);
+      const screens = ai.named('enquiry_screen').length;
+      const triages = ai.named('enquiry_triage').length;
+      const c = await enquire(ref, { message: unsure, kind: 'question' });
+      expect(c.status).toBe(201);
+      expect((await one<{ filtered: boolean }>('SELECT filtered FROM enquiries WHERE id = $1', [c.json.id]))!.filtered).toBe(false);
+      expect(ai.named('enquiry_screen')).toHaveLength(screens);
+      expect(ai.named('enquiry_triage')).toHaveLength(triages);
+      expect(await q(`SELECT 1 FROM ai_jobs WHERE kind = 'inbox.triage' AND subject = $1`, [`enquiry:${c.json.id}`])).toHaveLength(0);
+      // …and clear-cut scams are still held back.
+      const d = await enquire(ref, { message: SCAM, kind: 'question' });
+      expect((await one<{ filtered: boolean }>('SELECT filtered FROM enquiries WHERE id = $1', [d.json.id]))!.filtered).toBe(true);
+    } finally { ai.restore(); await unseed(`ai.inbox.sender:${anon}`); }
+  });
+});
+
+/* ───────── migrations ───────── */
+describe('database upgrades', () => {
+  it('adds the enquiry filter columns to a database that applied 002 before they were added to it, and refuses edited migrations', async () => {
+    const schema = `upgrade_${process.pid}_${Date.now()}`;
+    const url = new URL(config.migrationsUrl);
+    url.searchParams.set('options', `-c search_path=${schema},public`);
+    const all = await loadMigrations();
+    const sql = (name: string) => all.find((m) => m.name === name)!.sql;
+    // 002 as it was first applied: without the filtered / filter_reason columns.
+    const old002 = sql('002_ai_platform.sql').replace(/^ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS (?:filtered|filter_reason)\b[^\n]*\n?/gm, '');
+    expect(old002).not.toMatch(/filter_reason/);
+    const cols = async () => (await pool.query<{ c: string }>(
+      `SELECT table_name || '.' || column_name AS c FROM information_schema.columns
+        WHERE table_schema = $1 AND ((table_name = 'enquiries' AND column_name IN ('filtered', 'filter_reason')) OR (table_name = 'enquiry_messages' AND column_name = 'held'))
+        ORDER BY 1`, [schema])).rows.map((r) => r.c);
+    const prev = config.migrationsUrl;
+    await pool.query(`CREATE SCHEMA ${schema}`);
+    try {
+      const c = new pg.Client({ connectionString: url.toString() });
+      await c.connect();
+      try {
+        await c.query(sql('001_init.sql'));
+        await c.query(old002);
+        // the old runner: names only, no checksums
+        await c.query('CREATE TABLE schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+        await c.query(`INSERT INTO schema_migrations (name) VALUES ('001_init.sql'), ('002_ai_platform.sql')`);
+      } finally { await c.end(); }
+      expect(await cols()).toEqual([]);
+
+      (config as { migrationsUrl: string }).migrationsUrl = url.toString();
+      await migrate();
+      expect(await cols()).toEqual(['enquiries.filter_reason', 'enquiries.filtered', 'enquiry_messages.held']);
+      const applied = await pool.query<{ name: string; checksum: string | null }>(`SELECT name, checksum FROM ${schema}.schema_migrations ORDER BY name`);
+      expect(applied.rows.map((r) => r.name)).toEqual(all.map((m) => m.name));
+      expect(applied.rows.every((r) => r.checksum)).toBe(true);
+
+      // An applied migration that is edited afterwards is refused (outside production): schema changes go in a new file.
+      await pool.query(`UPDATE ${schema}.schema_migrations SET checksum = 'edited' WHERE name = '002_ai_platform.sql'`);
+      await expect(migrate()).rejects.toThrow(/changed after it was applied/);
+    } finally {
+      (config as { migrationsUrl: string }).migrationsUrl = prev;
+      await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    }
   });
 });

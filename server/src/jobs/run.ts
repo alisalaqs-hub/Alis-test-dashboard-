@@ -1,11 +1,15 @@
 /**
  * Scheduled jobs. Run with: npm run job -- <name>
- *   alerts   email saved-search matches (instant/daily/weekly), run hourly
+ *   alerts   email saved-search matches (instant/daily/weekly), run hourly. Each alert runs the filters the
+ *            person saw when saving (older saves: their words, read by the built-in rules in the saved mode)
  *   cleanup  remove expired sessions and links, and raw analytics older than 13 months, run daily
  */
 import { ensureLiveRegistry } from '../ai/registry';
+import { knownPlaces } from '../ai/search/intent';
+import { alertSearch } from '../ai/search/saved';
 import { deleteFile } from '../services/storage';
-import { parseQuery, runSearch } from '../../../src/engine/search';
+import { runSearch } from '../../../src/engine/search';
+import { applyExtras } from '../../../src/lib/ai/search';
 import { one, q } from '../db';
 import { mails } from '../services/email';
 import { LISTING_SELECT, type ListingRow } from '../services/listings';
@@ -13,8 +17,8 @@ import { LISTING_SELECT, type ListingRow } from '../services/listings';
 const DUE: Record<string, string> = { instant: '50 minutes', daily: '23 hours', weekly: '6 days 23 hours' };
 
 export async function runAlerts(now = new Date(), o: { deadline?: number; limit?: number } = {}) {
-  const searches = await q<{ id: string; query: string; mode: string; alert_frequency: string; last_alerted_at: Date | null; created_at: Date; email: string }>(
-    `SELECT s.id, s.query, s.mode, s.alert_frequency, s.last_alerted_at, s.created_at, u.email FROM saved_searches s JOIN users u ON u.id = s.user_id
+  const searches = await q<{ id: string; query: string; mode: string; filters: unknown; alert_frequency: string; last_alerted_at: Date | null; created_at: Date; email: string }>(
+    `SELECT s.id, s.query, s.mode, s.filters, s.alert_frequency, s.last_alerted_at, s.created_at, u.email FROM saved_searches s JOIN users u ON u.id = s.user_id
       WHERE u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL AND s.alert_frequency <> 'off'
         AND (s.last_alerted_at IS NULL OR s.last_alerted_at < $1::timestamptz - (CASE s.alert_frequency WHEN 'instant' THEN $2 WHEN 'daily' THEN $3 ELSE $4 END)::interval)
       ORDER BY s.last_alerted_at NULLS FIRST LIMIT $5`,
@@ -24,12 +28,13 @@ export async function runAlerts(now = new Date(), o: { deadline?: number; limit?
   const byRef = new Map(rows.map((r) => [r.ref, r]));
   // Search the same registry the website uses (demo + every live listing), then keep recent live matches.
   await ensureLiveRegistry(0);
+  const places = knownPlaces();
   let emails = 0, done = 0;
   for (const s of searches) {
     if (o.deadline && Date.now() > o.deadline) break; // the rest go out next run
     const since = s.last_alerted_at ?? s.created_at;
-    const text = s.mode === 'rent' && !/\brent|to let\b/i.test(s.query) ? `${s.query} to rent` : s.query;
-    const hits = runSearch(parseQuery(text)).map((h) => byRef.get(h.property.id)).filter((r): r is ListingRow => !!r && !!r.published_at && r.published_at > since);
+    const { query, extras } = alertSearch(s, places);
+    const hits = applyExtras(runSearch(query), extras).map((h) => byRef.get(h.property.id)).filter((r): r is ListingRow => !!r && !!r.published_at && r.published_at > since);
     if (hits.length) {
       await mails.searchAlert(s.email, s.query, hits.slice(0, 10).map((r) => ({ title: r.title ?? `${r.beds}-bed ${r.property_type} in ${r.town}`, ref: r.ref, price: `£${Math.round(r.price).toLocaleString('en-GB')}${r.channel === 'rent' ? ' pcm' : ''}` })));
       emails++;

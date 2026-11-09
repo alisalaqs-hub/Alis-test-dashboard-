@@ -9,3 +9,7 @@ server/uploads
 server/.test-uploads
 .netlify-check
 .netlify
+
+# Local dev uploads (per-team dev servers) and TypeScript build info
+server/.dev-uploads*/
+*.tsbuildinfo

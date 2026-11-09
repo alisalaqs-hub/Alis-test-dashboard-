@@ -7,6 +7,7 @@
  */
 import type { ProposedAction } from '../../ai/agents';
 import { ApiError } from '../api';
+import { ACCOUNT_CHANGED_EVENT } from '../server';
 import { aiPost, pollJob, type AiJob } from './core';
 
 export type BriefingKind = 'agent' | 'landlord' | 'developer' | 'my-agency';
@@ -25,7 +26,8 @@ export interface Briefing {
   opportunities: string[];
   questions: string[];
   labels: Record<string, string>;
-  grounding: { checked: number; dropped: number };
+  /** dropped: removed because a £/% figure wasn't in the data; withheld: removed under the content rules. */
+  grounding: { checked: number; dropped: number; withheld?: number };
   source: 'dashboard' | 'live';
   generatedAt: string;
 }
@@ -33,7 +35,9 @@ export interface Briefing {
 export interface AiProposal { id: string; agent: string; title: string; detail: string; consequential: boolean; rationale: string }
 export interface AutomationResult {
   agent: string; basis: 'demo' | 'demo+context'; cached: boolean;
-  findings: string[]; toolsCalled: string[]; proposals: AiProposal[]; grounding: { checked: number; dropped: number };
+  findings: string[]; toolsCalled: string[]; proposals: AiProposal[]; grounding: { checked: number; dropped: number; withheld?: number };
+  /** Proposals left out because the same one is already waiting in the approval queue. */
+  alreadyWaiting?: number;
 }
 
 /** The server's limits (server/src/ai/briefing/snapshot.ts). */
@@ -64,13 +68,24 @@ export function boundSnapshot(s: BriefingSnapshot): BriefingSnapshot {
   return out;
 }
 
-/** Ask for a briefing. Resolves immediately when cached; otherwise follows the background job. */
-export async function requestBriefing(kind: BriefingKind, snapshot: BriefingSnapshot | null, o: { onProgress?: (job: AiJob<Briefing>) => void; signal?: AbortSignal } = {}): Promise<Briefing> {
+type BriefingOptions = { onProgress?: (job: AiJob<Briefing>) => void; signal?: AbortSignal };
+
+/**
+ * Ask for a briefing, and say whether it came from the cache (the server keeps each briefing for an
+ * hour while the figures don't change). Resolves immediately when cached; otherwise follows the job.
+ */
+export async function fetchBriefing(kind: BriefingKind, snapshot: BriefingSnapshot | null, o: BriefingOptions = {}): Promise<{ briefing: Briefing; cached: boolean }> {
   const body = kind === 'my-agency' ? { kind } : { kind, snapshot: boundSnapshot(snapshot ?? { items: [] }) };
   const r = await aiPost<{ briefing: Briefing | null; jobId: string | null; cached: boolean }>('/api/ai/briefing', body, 30_000);
-  if (r.briefing) return r.briefing;
+  if (o.signal?.aborted) throw new ApiError(0, 'Cancelled.', 'cancelled');
+  if (r.briefing) return { briefing: r.briefing, cached: r.cached };
   if (!r.jobId) throw new ApiError(502, 'The AI couldn’t write a briefing just now. Please try again.', 'ai_failed');
-  return pollJob<Briefing>(r.jobId, { onProgress: o.onProgress, signal: o.signal, timeoutMs: 3 * 60_000 });
+  return { briefing: await pollJob<Briefing>(r.jobId, { onProgress: o.onProgress, signal: o.signal, timeoutMs: 3 * 60_000 }), cached: false };
+}
+
+/** Ask for a briefing. Resolves immediately when cached; otherwise follows the background job. */
+export async function requestBriefing(kind: BriefingKind, snapshot: BriefingSnapshot | null, o: BriefingOptions = {}): Promise<Briefing> {
+  return (await fetchBriefing(kind, snapshot, o)).briefing;
 }
 
 /** Ask the AI what an agent should do next, from the agent's deterministic findings. Nothing is executed. */
@@ -99,3 +114,109 @@ export function queueContext(queue: ProposedAction[], agent: string): BriefingSn
 
 /** Stable text form of a snapshot, to tell when the dashboard has changed since a briefing. */
 export const snapshotKey = (s: BriefingSnapshot | null) => (s ? JSON.stringify(boundSnapshot(s)) : '');
+
+/** A short fingerprint of a snapshot (FNV-1a of its stable text, plus its length), for comparing and storing. */
+export function snapshotFingerprint(s: BriefingSnapshot | null): string {
+  const text = snapshotKey(s);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return `${(h >>> 0).toString(36)}.${text.length.toString(36)}`;
+}
+
+/* ───────────── the last briefing per dashboard and source ───────────── */
+
+/** How long the server keeps a briefing while its figures stay the same (server/src/routes/ai-briefing.ts). */
+export const BRIEFING_TTL_MS = 60 * 60_000;
+
+export interface SavedBriefing {
+  briefing: Briefing;
+  /** snapshotFingerprint() of the dashboard it was written from ('' for live listings). */
+  key: string;
+  /** It came from the server's hour-long cache rather than a new AI call. */
+  cached: boolean;
+  /** Asking again returned the same briefing as before (nothing had changed). */
+  same: boolean;
+}
+type Source = Briefing['source'];
+
+/**
+ * Who a saved briefing belongs to: the account id, or 'anon' for a visitor. Briefings are kept per
+ * person, so whoever uses the tab next never sees someone else's.
+ */
+export const briefingOwner = (userId: string | null | undefined) => (userId ? `u:${userId}` : 'anon');
+
+const SAVED_PREFIX = 'streetkey-briefing:';
+const memory = new Map<string, SavedBriefing>();
+const slot = (owner: string, kind: BriefingKind, source: Source) => `${SAVED_PREFIX}${owner}:${kind}:${source}`;
+
+function looksSaved(v: unknown): v is SavedBriefing {
+  const s = v as SavedBriefing | null;
+  const b = s?.briefing;
+  return !!b && typeof s!.key === 'string' && typeof b.headline === 'string' && typeof b.summary === 'string' && typeof b.generatedAt === 'string'
+    && Array.isArray(b.priorities) && Array.isArray(b.risks) && Array.isArray(b.opportunities) && Array.isArray(b.questions)
+    && !!b.grounding && typeof b.grounding.dropped === 'number' && (b.source === 'dashboard' || b.source === 'live');
+}
+
+/**
+ * The last briefing this person had for a dashboard and source. Briefings of the dashboard's own
+ * figures are kept for the browser tab (sessionStorage), so they are still there after leaving the
+ * page. Briefings of an agency's live listings are kept only in memory: they hold real listing
+ * figures, and coming back to them costs nothing (the server returns its cached copy).
+ */
+export function savedBriefing(owner: string, kind: BriefingKind, source: Source): SavedBriefing | null {
+  const k = slot(owner, kind, source);
+  const mem = memory.get(k);
+  if (mem) return mem;
+  if (source !== 'dashboard') return null;
+  try {
+    const raw = sessionStorage.getItem(k);
+    const v = raw ? JSON.parse(raw) : null;
+    if (looksSaved(v)) { memory.set(k, v); return v; }
+  } catch { /* storage unavailable or corrupted: nothing saved */ }
+  return null;
+}
+
+/** Keep (or with null, forget) the last briefing for a dashboard and source. */
+export function saveBriefing(owner: string, kind: BriefingKind, source: Source, v: SavedBriefing | null) {
+  const k = slot(owner, kind, source);
+  if (v) memory.set(k, v); else memory.delete(k);
+  if (source !== 'dashboard') return;
+  try { if (v) sessionStorage.setItem(k, JSON.stringify(v)); else sessionStorage.removeItem(k); } catch { /* storage unavailable or full */ }
+}
+
+/** Forget every saved briefing, in memory and in this tab's storage. */
+export function forgetAllBriefings() {
+  memory.clear();
+  try {
+    const drop: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); if (k?.startsWith(SAVED_PREFIX)) drop.push(k); }
+    drop.forEach((k) => sessionStorage.removeItem(k));
+  } catch { /* storage unavailable */ }
+}
+
+// Signing out (or another account in this tab) forgets every briefing, including live-agency ones
+// with real listing figures, so nothing of the last person's stays in the tab.
+if (typeof window !== 'undefined') window.addEventListener(ACCOUNT_CHANGED_EVENT, forgetAllBriefings);
+
+/** Forget every briefing kept for anyone other than `owner` (call once the signed-in account is known). */
+export function forgetBriefingsExcept(owner: string) {
+  const mine = `${SAVED_PREFIX}${owner}:`;
+  for (const k of [...memory.keys()]) if (!k.startsWith(mine)) memory.delete(k);
+  try {
+    const drop: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); if (k?.startsWith(SAVED_PREFIX) && !k.startsWith(mine)) drop.push(k); }
+    drop.forEach((k) => sessionStorage.removeItem(k));
+  } catch { /* storage unavailable */ }
+}
+
+/** One line for screen readers when a briefing arrives. */
+export function briefingAnnouncement(s: SavedBriefing): string {
+  const b = s.briefing;
+  const n = b.priorities.length;
+  const parts = [n ? `Briefing ready: ${n} priorit${n === 1 ? 'y' : 'ies'}.` : 'Briefing ready.'];
+  if (s.same) parts.push('Nothing has changed since it was written, so it is the same briefing.');
+  else if (s.cached) parts.push('This is the saved briefing for these figures.');
+  if (b.grounding.dropped) parts.push(`${b.grounding.dropped} statement${b.grounding.dropped === 1 ? ' was' : 's were'} left out because their figures weren’t in the data.`);
+  if (b.grounding.withheld) parts.push(`${b.grounding.withheld} statement${b.grounding.withheld === 1 ? ' was' : 's were'} left out under Streetkey’s content rules.`);
+  return parts.join(' ');
+}

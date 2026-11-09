@@ -2,20 +2,22 @@
  * "Similar homes" and semantic re-ranking.
  *
  * Similar: hard constraints in code (same channel, ±35% price, ±1 bed, commercial with
- * commercial), then cosine similarity of listing embeddings blended with structural closeness.
+ * commercial, and the same district, area or city unless fewer than 3 local homes qualify), then
+ * cosine similarity of listing embeddings blended with structural closeness.
  * Each card's reason is written in code from the facts, so it is free, instant and true.
  * If embeddings are unavailable the structural ranking is returned (semantic: false).
  * The semantic ranking (ids and scores only) is cached for an hour per target and candidate set,
  * so repeat page views cost no vector reads; the cards are always rebuilt from current facts.
  *
  * Rank: orders candidate ids by similarity to the query's embedding; the website blends this
- * with the engine's own fit score.
+ * with the engine's own fit score. Text about who lives somewhere is refused (422 'demographic'):
+ * ranking by it would rank areas by a proxy for the people there.
  */
 import { createHash } from 'node:crypto';
 import { getProperty, PROPERTIES, type Property } from '../../../../src/data/properties';
-import { isLiveRef, isPublic, similarOk, similarReason, structuralSimilarity, toSimilarItem, type RankResult, type SimilarResult } from '../../../../src/lib/ai/search';
+import { asksForDemographics, isLiveRef, isPublic, mentionsProtected, POLICY_NOTE, similarCandidates, similarReason, structuralSimilarity, toSimilarItem, type RankResult, type SimilarResult } from '../../../../src/lib/ai/search';
 import { q } from '../../db';
-import { notFound } from '../../services/http';
+import { HttpError, notFound } from '../../services/http';
 import { AiError, cached, cosine, modelFor } from '../core';
 import { ensureLiveRegistry } from '../registry';
 import { propertyText, queryVector, textHash, vectorsFor } from './vectors';
@@ -59,7 +61,7 @@ export async function similarHomes(id: string, meta: { userId: string | null }, 
   await ensureLiveRegistry();
   const target = getProperty(id);
   if (!target || !isPublic(target)) throw notFound('That listing');
-  const pool = PROPERTIES.filter((p) => isPublic(p) && similarOk(target, p))
+  const pool = similarCandidates(target, PROPERTIES)
     .map((p) => ({ p, s: structuralSimilarity(target, p) }))
     .sort((a, b) => b.s - a.s)
     .slice(0, POOL);
@@ -92,6 +94,7 @@ export async function similarHomes(id: string, meta: { userId: string | null }, 
 }
 
 export async function rankByQuery(text: string, ids: string[], meta: { userId: string | null }): Promise<RankResult> {
+  if (asksForDemographics(text) || mentionsProtected(text)) throw new HttpError(422, POLICY_NOTE, 'demographic');
   await ensureLiveRegistry();
   const unique = [...new Set(ids)];
   const props = unique.map((id) => getProperty(id)).filter((p): p is Property => !!p && isPublic(p));

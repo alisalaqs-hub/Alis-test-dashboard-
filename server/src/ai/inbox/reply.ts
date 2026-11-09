@@ -10,12 +10,14 @@
  *     unless the lister's notes say the same thing (or give the same amount);
  *   - a private seller's house number and full postcode are removed unless the lister typed them;
  *   - Tenant Fees Act, rental bidding, discrimination and "send money" wording raise warnings.
+ * Streetkey's own checks are returned as `warnings`; the model's suggestions for the lister are kept
+ * apart as `aiNotes` (shown labelled as AI), without web addresses or claims that Streetkey checked anyone.
  */
 import { chatJSON, HOUSE_RULES, untrusted } from '../core';
 import { S, type Infer } from '../schema';
 import { one, q } from '../../db';
 import { LISTING_SELECT, streetOnly, type ListingRow } from '../../services/listings';
-import { clip, isPrivateSeller, redactContacts, type EnquiryRow } from './shared';
+import { claimsStreetkeyCheck, clip, isPrivateSeller, redactContacts, stripLinks, type EnquiryRow } from './shared';
 
 export const REPLY_INTENTS = ['answer', 'confirm_viewing', 'offer_times', 'decline', 'request_info'] as const;
 export const REPLY_TONES = ['friendly', 'formal', 'brief'] as const;
@@ -28,6 +30,8 @@ const ReplySchema = S.obj({
   warnings: S.arr(S.str('Something the lister should check before sending, in under 25 words')),
 });
 type ReplyOut = Infer<typeof ReplySchema>;
+/** A checked draft: Streetkey's own warnings, and the model's notes kept apart (labelled as AI where shown). */
+export interface CheckedReply { reply: string; placeholders: string[]; warnings: string[]; aiNotes: string[] }
 
 const INTENT_GUIDE: Record<ReplyIntent, string> = {
   answer: 'Answer the enquirer’s questions using only the LISTING facts and the lister’s NOTES. Where a fact isn’t available, say you’ll check and come back to them, using a placeholder such as [answer about the boiler]. Never guess.',
@@ -54,7 +58,7 @@ const SYSTEM = [
   'Never ask about or comment on age, disability, race, religion, sex, sexual orientation, pregnancy, marital or family status, children, nationality or benefits (Equality Act 2010).',
   'Rentals: never ask for fees beyond the payments the Tenant Fees Act 2019 permits, and never invite offers above the advertised rent.',
   'Never ask the enquirer to send money, bank details or identity documents through messages.',
-  'warnings: short notes for the lister, e.g. a question you couldn’t answer from the listing. Do not repeat the placeholders.',
+  'warnings: short notes for the lister, e.g. a question you couldn’t answer from the listing. Do not repeat the placeholders. Never include web addresses, and never say that Streetkey (or anyone) has checked or verified the enquirer.',
 ].join('\n');
 
 const fmtGbp = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
@@ -198,7 +202,7 @@ export interface ReplyContext {
 }
 
 /** Applies the code checks to a draft. Returns the cleaned reply, its placeholders and warnings. */
-export function checkReply(draft: ReplyOut, ctx: ReplyContext): ReplyOut {
+export function checkReply(draft: ReplyOut, ctx: ReplyContext): CheckedReply {
   const warnings: string[] = [];
   let reply = draft.reply.replace(/\r/g, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/^#+\s*/gm, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 2500);
   const notes = ctx.notes;
@@ -278,13 +282,14 @@ export function checkReply(draft: ReplyOut, ctx: ReplyContext): ReplyOut {
   if (MONEY_REQUEST.test(reply)) warnings.push('Never ask for money or bank details through messages. Use a documented, secure process.');
 
   const found = [...new Set(reply.match(/\[[^[\]\n]{1,60}\]/g) ?? [])];
-  const modelWarnings = draft.warnings.map((w) => clip(w, 220)).filter(Boolean).slice(0, 4);
-  return { reply, placeholders: found.slice(0, 12), warnings: [...new Set([...warnings, ...modelWarnings])].slice(0, 8) };
+  // The model's notes: never a web address, and never a claim that Streetkey checked or verified anyone.
+  const aiNotes = [...new Set(draft.warnings.map((w) => clip(w, 220)).filter((w) => w && stripLinks(w) === w && !claimsStreetkeyCheck(w) && !warnings.includes(w)))].slice(0, 4);
+  return { reply, placeholders: found.slice(0, 12), warnings: [...new Set(warnings)].slice(0, 8), aiNotes };
 }
 
 export interface SuggestInput { intent: ReplyIntent; tone: ReplyTone; notes?: string | null }
 
-export async function suggestReply(e: EnquiryRow, input: SuggestInput, userId: string): Promise<ReplyOut> {
+export async function suggestReply(e: EnquiryRow, input: SuggestInput, userId: string): Promise<CheckedReply> {
   const l = await one<ListingRow>(`${LISTING_SELECT} WHERE l.id = $1`, [e.listing_id]);
   if (!l) throw new Error('listing missing');
   const msgs = await q<{ author: 'enquirer' | 'lister'; body: string; created_at: Date }>(

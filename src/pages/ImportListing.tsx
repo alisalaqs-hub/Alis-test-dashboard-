@@ -8,9 +8,9 @@ import { gbp, Section, Tag } from '../components/ui';
 import { Icon } from '../components/Icons';
 import { AiDisclaimer, AiLabel, AiThinking, AiUnavailable } from '../components/ai/Ai';
 import { useStore } from '../store';
-import { aiPost, useAi } from '../lib/ai/core';
+import { aiPost, announce, useAi } from '../lib/ai/core';
 import { ApiError } from '../lib/api';
-import { combineFlags, combineQuestions, FIELD_LABEL, foundOf, isRuleQuestion, missingOf, rulesOnlyResult, type FieldKey, type ImportResult, type ImportValues, type RedFlag } from '../lib/ai/importer';
+import { combineFlags, combineQuestions, CONDITION_OPTIONS, ERA_OPTIONS, FIELD_LABEL, foundOf, isRuleQuestion, missingOf, rulesOnlyResult, type FieldKey, type ImportResult, type ImportValues, type RedFlag } from '../lib/ai/importer';
 import '../components/ai/studio.css';
 
 const MAX_TEXT = 15_000;
@@ -24,6 +24,8 @@ export default function ImportListing() {
   const [readText, setReadText] = useState('');
   const [fields, setFields] = useState<ImportValues>({});
   const [edited, setEdited] = useState<Set<FieldKey>>(new Set());
+  /** Fields where the person chose Streetkey AI's reading, with the built-in reader's value to go back to. */
+  const [adopted, setAdopted] = useState<Partial<Record<FieldKey, { before: unknown }>>>({});
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const headRef = useRef<HTMLSpanElement>(null);
@@ -32,6 +34,7 @@ export default function ImportListing() {
   const uid = useId();
 
   const run = async () => {
+    if (busy) return;
     const t = text.slice(0, MAX_TEXT);
     const u = url.trim();
     setBusy(true); setCopied(false);
@@ -43,7 +46,7 @@ export default function ImportListing() {
         r.note = `${e instanceof ApiError ? e.message : 'Streetkey AI couldn’t read it.'} Streetkey’s built-in reader was used instead, so please check the details carefully.`;
       }
     } else r = rulesOnlyResult(t, u);
-    setRes(r); setFields(r.values); setReadText(t); setEdited(new Set()); setBusy(false);
+    setRes(r); setFields(r.values); setReadText(t); setEdited(new Set()); setAdopted({}); setBusy(false);
     requestAnimationFrame(() => headRef.current?.focus());
   };
 
@@ -53,10 +56,32 @@ export default function ImportListing() {
   const missing = missingOf(fields);
   const found = foundOf(fields);
   const ok = !!fields.price && !!fields.postcode && POSTCODE_RE.test(fields.postcode) && fields.beds != null;
+  // The results were read from readText: say so if the box now holds something else.
+  const stale = !!res && !busy && text.slice(0, MAX_TEXT) !== readText;
 
   const set = <K extends FieldKey>(k: K, v: ImportValues[K & keyof ImportValues]) => {
     setFields((f) => ({ ...f, [k]: v }));
     setEdited((e) => new Set(e).add(k));
+    setAdopted((a) => { if (!(k in a)) return a; const { [k]: _gone, ...rest } = a; return rest; });
+  };
+  const focusField = (k: FieldKey) => requestAnimationFrame(() => document.getElementById(`${uid}-${k}`)?.focus());
+  /** Use Streetkey AI's reading instead of the built-in reader's, keeping the old value for Undo. */
+  const adoptAlt = (k: FieldKey, value: string | number) => {
+    const before = fields[k as keyof ImportValues];
+    setFields((f) => ({ ...f, [k]: value }));
+    setEdited((e) => new Set(e).add(k));
+    setAdopted((a) => ({ ...a, [k]: { before } }));
+    announce(`The ${FIELD_LABEL[k]} is now ${altText(k, value)}, Streetkey AI’s reading. Undo is next to it.`);
+    focusField(k);
+  };
+  const undoAlt = (k: FieldKey) => {
+    const prev = adopted[k];
+    if (!prev) return;
+    setFields((f) => ({ ...f, [k]: prev.before }));
+    setEdited((e) => { const n = new Set(e); n.delete(k); return n; });
+    setAdopted((a) => { const { [k]: _gone, ...rest } = a; return rest; });
+    announce(`The ${FIELD_LABEL[k]} is back to the built-in reader’s value.`);
+    focusField(k);
   };
   const save = () => {
     const site = fields.sourceSite ?? 'another website';
@@ -79,14 +104,18 @@ export default function ImportListing() {
     const info = res?.fields[k];
     const value = fields[k as keyof ImportValues];
     let body: ReactNode;
-    if (edited.has(k)) body = <span className="sk-pill edited">Edited by you</span>;
+    if (adopted[k] && info?.alt) body = <><span className="sk-pill edited">Streetkey AI’s reading, chosen by you</span>{info.alt.evidence && <q>{info.alt.evidence}</q>}</>;
+    else if (edited.has(k)) body = <span className="sk-pill edited">Edited by you</span>;
     else if (!info || value === undefined || value === '') body = <span className="sk-pill missing">Not found</span>;
     else body = <><span className={`sk-pill ${info.confidence}`}>{info.confidence === 'stated' ? 'Stated' : 'Inferred: please check'}</span>{info.evidence && <q>{info.evidence}</q>}</>;
     // Streetkey AI and the built-in reader disagreed: the built-in value is shown, with the AI's reading to compare.
     const alt = !edited.has(k) && info?.alt && String(info.alt.value) !== String(value ?? '') ? info.alt : null;
+    const noteId = `${id}-alt`;
     return <>
-      <span className="sk-prov" id={id}>{body}{alt && <span className="sk-alt-note">Streetkey AI read {altText(k, alt.value)}{alt.evidence ? <> from <q>{alt.evidence}</q></> : null}</span>}</span>
-      {alt && <button type="button" className="btn ghost sm sk-alt-use" onClick={() => set(k, alt.value as never)} aria-label={`Use ${altText(k, alt.value)} for the ${FIELD_LABEL[k]}`}>Use AI’s reading</button>}
+      <span className="sk-prov" id={id}>{body}{alt && <span className="sk-alt-note" id={noteId}>Streetkey AI read {altText(k, alt.value)}{alt.evidence ? <> from <q>{alt.evidence}</q></> : null}</span>}</span>
+      {/* The accessible name starts with the visible words, so "click Use AI's reading" works by voice. */}
+      {alt && <button type="button" className="btn ghost sm sk-alt-use" onClick={() => adoptAlt(k, alt.value)} aria-describedby={noteId} aria-label={`Use AI’s reading: ${altText(k, alt.value)} for the ${FIELD_LABEL[k]}`}>Use AI’s reading</button>}
+      {adopted[k] && <button type="button" className="btn ghost sm sk-alt-use" onClick={() => undoAlt(k)} aria-label={`Undo: go back to the built-in reader’s ${FIELD_LABEL[k]}`}>Undo</button>}
     </>;
   };
   const altText = (k: FieldKey, v: string | number) => {
@@ -104,6 +133,8 @@ export default function ImportListing() {
   const num = (k: 'price' | 'beds' | 'baths' | 'floorArea' | 'leaseYears' | 'serviceChargeAnnual' | 'groundRentAnnual', label: string) =>
     field(k, label, (id, d) => <input id={id} aria-describedby={d} className="input num" type="number" min={0} inputMode="numeric" value={fields[k] ?? ''} onChange={(e) => set(k, e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)))} />);
   const leasehold = fields.tenure === 'leasehold' || fields.tenure === 'share-of-freehold';
+  const textField = (k: 'title' | 'addressLine' | 'town', label: string, max: number) =>
+    field(k, label, (id, d) => <input id={id} aria-describedby={d} className="input" value={fields[k] ?? ''} maxLength={max} autoComplete="off" onChange={(e) => set(k, e.target.value || undefined)} />);
 
   return (
     <div className="stack" style={{ gap: 18 }}>
@@ -114,14 +145,14 @@ export default function ImportListing() {
       </div>
       <div className="split">
         <Section title="1. Paste the listing" kicker="From Rightmove, Zoopla, OnTheMarket, an agent’s site…">
-          <label className="field">Listing link (optional: we link back to it, we never visit it)<input className="input" type="url" inputMode="url" value={url} maxLength={500} placeholder="https://…" onChange={(e) => setUrl(e.target.value)} /></label>
+          <label className="field">Listing link (optional: we link back to it, we never visit it)<input className="input" type="url" inputMode="url" value={url} maxLength={500} placeholder="https://…" readOnly={busy} onChange={(e) => setUrl(e.target.value)} /></label>
           <label className="field" style={{ marginTop: 10 }}>Listing details: select all on the listing page, copy and paste here
-            <textarea className="input" rows={9} value={text} maxLength={MAX_TEXT} onChange={(e) => setText(e.target.value)} placeholder="Price, address with postcode, bedrooms, tenure, EPC…" aria-describedby={`${uid}-count`} />
+            <textarea className="input" rows={9} value={text} maxLength={MAX_TEXT} readOnly={busy} onChange={(e) => setText(e.target.value)} placeholder="Price, address with postcode, bedrooms, tenure, EPC…" aria-describedby={`${uid}-count`} />
           </label>
           <div className="xs muted" id={`${uid}-count`} style={{ marginTop: 4 }}>{text.length.toLocaleString('en-GB')} of {MAX_TEXT.toLocaleString('en-GB')} characters</div>
           <div className="row" style={{ marginTop: 10 }}>
-            <button type="button" className="btn accent" onClick={() => void run()} disabled={!text.trim() || busy} aria-busy={busy || undefined}><Icon name="spark" size={16} /> {busy ? 'Reading…' : 'Read it'}</button>
-            <button type="button" className="btn ghost sm" onClick={() => { setText(SAMPLE_PASTE); setUrl('https://www.example-portal.co.uk/listing/123456'); }}>Use a sample</button>
+            <button type="button" className="btn accent" onClick={() => void run()} disabled={!text.trim()} aria-disabled={busy || undefined} aria-busy={busy || undefined}><Icon name="spark" size={16} /> {busy ? 'Reading…' : stale ? 'Read it again' : 'Read it'}</button>
+            <button type="button" className="btn ghost sm" disabled={busy} onClick={() => { setText(SAMPLE_PASTE); setUrl('https://www.example-portal.co.uk/listing/123456'); }}>Use a sample</button>
           </div>
           {busy && <AiThinking label="Streetkey AI is reading the listing" />}
           {ai.available ? <p className="xs muted" style={{ marginTop: 10 }}>Streetkey AI reads only what you paste, and the built-in reader double-checks it. The link is never visited or copied, and the result stays private to you.</p>
@@ -133,8 +164,13 @@ export default function ImportListing() {
           {res ? <>
             <Section title={<span ref={headRef} tabIndex={-1}>2. Check what we found</span>} kicker={`${found.length} details found · ${res.engine === 'ai' ? 'read by Streetkey AI' : 'built-in reader'}`} right={res.engine === 'ai' ? <AiLabel>Read by AI: please confirm</AiLabel> : <Tag kind="inf">Extracted: please confirm</Tag>}>
               {res.note && <p className="callout info small" role="status" style={{ marginBottom: 10 }}>{res.note}</p>}
+              <div role="status">{stale && <p className="callout small" style={{ marginBottom: 10 }}>The listing text has changed since it was read, so these details may not match it. <button type="button" className="btn ghost sm" onClick={() => void run()}>Read it again</button> <span className="xs muted">(this replaces any changes you’ve made below)</span></p>}</div>
               <p className="sk-legend"><span><span className="sk-pill stated">Stated</span> written in the listing</span><span><span className="sk-pill inferred">Inferred: please check</span> worked out from clues</span><span><span className="sk-pill missing">Not found</span></span></p>
               {missing.length > 0 && <div className="callout small" style={{ marginBottom: 10 }}>Couldn’t find: <b>{missing.join(', ')}</b>. Fill them in below.</div>}
+              <div className="grid g3" style={{ gap: 12, marginBottom: 12 }}>
+                <div style={{ gridColumn: '1 / -1' }}>{textField('title', 'Listing title', 120)}</div>
+                {textField('addressLine', 'Street', 120)}{textField('town', 'Town', 60)}
+              </div>
               <div className="grid g3" style={{ gap: 12 }}>
                 {field('listing', 'For', (id, d) => <select id={id} aria-describedby={d} className="input" value={fields.listing ?? 'sale'} onChange={(e) => set('listing', e.target.value as 'sale' | 'rent')}><option value="sale">Sale</option><option value="rent">Rent (pcm)</option></select>)}
                 {num('price', fields.listing === 'rent' ? 'Rent £ pcm' : 'Price £')}
@@ -144,8 +180,11 @@ export default function ImportListing() {
                 {field('tenure', 'Tenure', (id, d) => <select id={id} aria-describedby={d} className="input" value={fields.tenure ?? ''} onChange={(e) => set('tenure', (e.target.value || undefined) as Property['tenure'] | undefined)}><option value="">Not stated</option><option value="freehold">Freehold</option><option value="leasehold">Leasehold</option><option value="share-of-freehold">Share of freehold</option></select>)}
                 {field('epc', 'EPC rating', (id, d) => <select id={id} aria-describedby={d} className="input" value={fields.epc ?? ''} onChange={(e) => set('epc', e.target.value || undefined)}><option value="">Not stated</option>{'ABCDEFG'.split('').map((x) => <option key={x} value={x}>{x}</option>)}</select>)}
                 {field('councilTax', 'Council tax band', (id, d) => <select id={id} aria-describedby={d} className="input" value={fields.councilTax ?? ''} onChange={(e) => set('councilTax', e.target.value || undefined)}><option value="">Not stated</option>{'ABCDEFGHI'.split('').map((x) => <option key={x} value={x}>{x}</option>)}</select>)}
-                {leasehold && <>{num('leaseYears', 'Lease years left')}{num('serviceChargeAnnual', 'Service charge £/yr')}{fields.tenure === 'leasehold' && num('groundRentAnnual', 'Ground rent £/yr')}</>}
+                {field('era', 'Age of the building', (id, d) => <select id={id} aria-describedby={d} className="input" value={fields.era ?? ''} onChange={(e) => set('era', (e.target.value || undefined) as ImportValues['era'])}><option value="">Not stated</option>{ERA_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>)}
+                {field('condition', 'Condition', (id, d) => <select id={id} aria-describedby={d} className="input" value={fields.condition ?? ''} onChange={(e) => set('condition', (e.target.value || undefined) as ImportValues['condition'])}><option value="">Not stated</option>{CONDITION_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>)}
+                {leasehold && <>{num('leaseYears', 'Lease years left')}{num('serviceChargeAnnual', 'Service charge £/yr')}{(fields.tenure === 'leasehold' || fields.groundRentAnnual != null) && num('groundRentAnnual', 'Ground rent £/yr')}</>}
               </div>
+              <p className="xs muted" style={{ marginTop: 8 }}>The age and condition shape the refurbishment estimate. When the listing doesn’t say, Streetkey uses typical values.</p>
               {(fields.features?.length ?? 0) > 0 && <div className="small" style={{ marginTop: 12 }}>Features: {fields.features!.join(', ')}</div>}
               {(fields.priceQualifier || fields.saleMethod) && <div className="small" style={{ marginTop: 6 }}>{[fields.priceQualifier, fields.saleMethod && fields.saleMethod !== 'private treaty' ? `Sale method: ${fields.saleMethod}` : null].filter(Boolean).join(' · ')}</div>}
               {fields.sourceSite && <div className="xs muted" style={{ marginTop: 6 }}>Original listing: {fields.sourceSite}</div>}

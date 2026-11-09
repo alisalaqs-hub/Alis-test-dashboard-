@@ -7,6 +7,12 @@
  * amount (never by a count such as 3 bedrooms, 30m² or 12 weeks), and a percentage by a rate.
  * Money is recognised with £, "GBP", "pounds", k/m/bn and million-style suffixes, and amounts
  * written next to "pcm", "a month", "a year" and similar.
+ *
+ * Only Streetkey's own figures count as evidence: text a lister wrote (titles, towns, features,
+ * descriptions, anything wrapped as <<<…>>>) and text that just echoes what the model asked for
+ * (error messages, "understood" search summaries) never ground a figure. See engineOnly(). Nor do
+ * the numbers the model chose as a tool's arguments and got straight back (a stamp duty price, a
+ * mortgage loan and rate): see toolsEvidence().
  */
 
 export interface Figure { raw: string; value: number; tol: number; kind: 'money' | 'pct' }
@@ -14,7 +20,7 @@ export interface Figure { raw: string; value: number; tol: number; kind: 'money'
 export interface Allowed { money: number[]; pct: number[] }
 
 type Kind = 'money' | 'pct' | 'count' | 'plain';
-interface Token { kind: Kind; value: number; unit: number; raw: string }
+interface Token { kind: Kind; value: number; unit: number; raw: string; /** Where the digits are in the text. */ at: number; len: number }
 
 const MULT: Record<string, number> = { k: 1e3, thousand: 1e3, m: 1e6, million: 1e6, bn: 1e9, billion: 1e9 };
 const NUM_RE = /\d(?:[\d,]*\d)?(?:\.\d+)?/g;
@@ -61,7 +67,7 @@ function tokens(text: string): Token[] {
     const prefix = currency ? currency[0] : '';
     if (PCT_AFTER.test(after)) {
       const { value, unit } = parse(m[0], undefined);
-      out.push({ kind: 'pct', value, unit, raw: `${m[0]}${PCT_AFTER.exec(after)![0]}`.trim() });
+      out.push({ kind: 'pct', value, unit, raw: `${m[0]}${PCT_AFTER.exec(after)![0]}`.trim(), at: start, len: m[0].length });
       continue;
     }
     let suffix: string | undefined;
@@ -79,16 +85,17 @@ function tokens(text: string): Token[] {
     const { value, unit } = parse(m[0], suffix);
     if (!Number.isFinite(value)) continue;
     const raw = (tail = '') => `${prefix}${m[0]}${consumed}${tail}`.trim();
-    if (currency || suffix) { out.push({ kind: 'money', value, unit, raw: raw() }); continue; }
+    const tok = (kind: Kind, tail = ''): Token => ({ kind, value, unit, raw: raw(tail), at: start, len: m[0].length });
+    if (currency || suffix) { out.push(tok('money')); continue; }
     const cur = CURRENCY_AFTER.exec(after);
-    if (cur) { out.push({ kind: 'money', value, unit, raw: raw(cur[0]) }); continue; }
+    if (cur) { out.push(tok('money', cur[0])); continue; }
     const period = PERIOD_MONEY.exec(after);
-    if (period) { out.push({ kind: 'money', value, unit, raw: raw(period[0]) }); continue; }
+    if (period) { out.push(tok('money', period[0])); continue; }
     const words = PERIOD_WORDS.exec(after);
-    if (words && (m[0].includes(',') || value >= 100)) { out.push({ kind: 'money', value, unit, raw: raw(words[0]) }); continue; }
-    if (UNIT_AFTER.test(after) || /^\/$/.test(before.slice(-1))) { out.push({ kind: 'count', value, unit, raw: raw() }); continue; }
+    if (words && (m[0].includes(',') || value >= 100)) { out.push(tok('money', words[0])); continue; }
+    if (UNIT_AFTER.test(after) || /^\/$/.test(before.slice(-1))) { out.push(tok('count')); continue; }
     if (/^[A-Za-z]/.test(after)) continue; // "3rd", "5RB": part of a word
-    out.push({ kind: 'plain', value, unit, raw: raw() });
+    out.push(tok('plain'));
   }
   return out;
 }
@@ -106,7 +113,117 @@ const COUNT_KEY = /^(?:beds|baths|storeys|weeks|weeksOnSite|years|days|minutes|w
 /** JSON keys whose numbers are rates (percentages or fractions). */
 const PCT_KEY = /(?:pct|percent|rate|yield)$/i;
 
-/** Every number the evidence allows, by kind: numbers themselves and numbers written inside strings. */
+/**
+ * Keys whose values are not Streetkey's figures: what a lister wrote about a home, and text that
+ * echoes the model's own tool arguments (an error naming the id it asked for, the search it ran).
+ */
+const NOT_EVIDENCE_KEY = /^(?:title|town|street|features|description|source|error|understood|notSupportedYet|notFound)$/;
+/** Untrusted blocks made by untrusted(): they can't nest (markers inside are collapsed). */
+const UNTRUSTED_BLOCK = /<<<[\s\S]*?(?:>>>|$)/g;
+
+/**
+ * The parts of a tool result (or the page's property data) that come from Streetkey's engines:
+ * lister-written fields and untrusted blocks removed. Used as the evidence for the grounding check
+ * and for the correction pass, so a figure in a listing's description can never vouch for a reply.
+ */
+export function engineOnly(v: unknown, depth = 0): unknown {
+  if (depth > 10) return null;
+  if (v == null) return v;
+  if (typeof v === 'string') return v.includes('<<<') ? v.replace(UNTRUSTED_BLOCK, ' ').trim() || null : v;
+  if (Array.isArray(v)) return v.map((x) => engineOnly(x, depth + 1));
+  if (typeof v === 'object') {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => !NOT_EVIDENCE_KEY.test(k)).map(([k, x]) => [k, engineOnly(x, depth + 1)]));
+  }
+  return v;
+}
+
+/**
+ * Defaults the tools tell the model to use when the person gives none ("use 25 if not given").
+ * They are Streetkey's stated assumptions, so they may be quoted even though they arrive as arguments.
+ */
+const ARG_DEFAULTS: Record<string, Record<string, number>> = {
+  investment_check: { depositPct: 25, ratePct: 5 },
+  mortgage_payment: { ratePct: 5, years: 25 },
+  design_cost: { widthM: 3, lengthM: 4 },
+};
+/** Figures a tool works out directly from one argument and hands back (loan to value is 100 − deposit). */
+const DERIVED: Record<string, Record<string, (v: number) => number>> = {
+  investment_check: { depositPct: (d) => 100 - d },
+};
+
+/**
+ * The numbers the model chose as a tool's arguments: numeric arguments, and amounts and rates written
+ * in text arguments (a search query's budget or minimum yield), plus what the tool derives straight
+ * from them. Documented defaults, and figures `accepted` vouches for (the person's own words, the page
+ * home's engine data, another engine output), are not echoes.
+ * A model following instructions planted in listing text could pass a lister's figure as an argument
+ * (stamp_duty with the lister's "valuation" as the price, mortgage_payment with their "rent" as the
+ * loan) and quote it back as checked, so these are never evidence on their own.
+ */
+export function echoedArgs(tool: string, args: unknown, accepted: (n: number) => boolean = () => false): number[] {
+  const out: number[] = [];
+  const defaults = ARG_DEFAULTS[tool] ?? {};
+  const derived = DERIVED[tool] ?? {};
+  const add = (n: number) => { if (Number.isFinite(n) && n !== 0 && !accepted(n)) { out.push(n); return true; } return false; };
+  const walk = (v: unknown, key: string, depth: number) => {
+    if (depth > 4 || v == null) return;
+    if (typeof v === 'number') {
+      if (defaults[key] !== v && add(v) && derived[key]) out.push(derived[key](v));
+      return;
+    }
+    // In text, only what reads as a figure: "£450k", "9.7%", "450000", "9.7" (not "2 bed", "flat for 2").
+    if (typeof v === 'string') {
+      for (const t of tokens(v.slice(0, 600))) if (t.kind === 'money' || t.kind === 'pct' || (t.kind === 'plain' && (t.value >= 100 || !Number.isInteger(t.value)))) add(t.value);
+      return;
+    }
+    if (Array.isArray(v)) { for (const x of v.slice(0, 20)) walk(x, key, depth + 1); return; }
+    if (typeof v === 'object') for (const [k, x] of Object.entries(v as Record<string, unknown>)) walk(x, k, depth + 1);
+  };
+  walk(args, '', 0);
+  return out.filter((n) => Number.isFinite(n) && n !== 0);
+}
+
+/** The same number, allowing only for the rounding a tool applies to its own argument (Math.round on a price or loan). */
+const sameNumber = (n: number, e: number) => Math.abs(Math.abs(n) - Math.abs(e)) <= Math.max(0.005, Math.abs(e) * 1e-4, Math.abs(e) >= 100 ? 0.5 : 0);
+
+/** Removes every number equal to an echoed argument (fields become null; digits in text become "…"). */
+function withoutEchoes(v: unknown, echoes: number[], depth = 0): unknown {
+  if (!echoes.length || depth > 10 || v == null) return v;
+  const echoed = (n: number) => echoes.some((e) => sameNumber(n, e));
+  if (typeof v === 'number') return echoed(v) ? null : v;
+  if (typeof v === 'string') {
+    const hits = tokens(v).filter((t) => echoed(t.value));
+    if (!hits.length) return v;
+    let s = v;
+    for (const t of hits.reverse()) s = `${s.slice(0, t.at)}…${s.slice(t.at + t.len)}`;
+    return s;
+  }
+  if (Array.isArray(v)) return v.map((x) => withoutEchoes(x, echoes, depth + 1));
+  if (typeof v === 'object') return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, withoutEchoes(x, echoes, depth + 1)]));
+  return v;
+}
+
+export interface ToolCall { name: string; args: unknown; result: unknown }
+
+/**
+ * What each tool call contributes as evidence: its engine output (engineOnly) without the numbers the
+ * model chose as its arguments, wherever the tool echoes them: stamp_duty's price (and the top of its
+ * last band), mortgage_payment's loan, rate and term (and a 0% loan's total repaid), investment_check's
+ * deposit, loan to value and rate, design_cost's room size, a search's budget or minimum yield.
+ * An argument still counts when `trusted` (the person's own messages, the page home's engine data) or
+ * another engine output has the same figure; then what the tool derives from it counts too.
+ */
+export function toolsEvidence(calls: ToolCall[], trusted: unknown): { tool: string; result: unknown }[] {
+  const engine = calls.map((c) => engineOnly(c.result));
+  // First, every output without any of its echoes: what Streetkey's engines said on their own.
+  const strict = calls.map((c, i) => withoutEchoes(engine[i], echoedArgs(c.name, c.args)));
+  const base = numbersIn([trusted, strict]);
+  const known = [...base.money, ...base.pct];
+  const accepted = (n: number) => known.some((k) => sameNumber(k, n));
+  return calls.map((c, i) => ({ tool: c.name, result: withoutEchoes(engine[i], echoedArgs(c.name, c.args, accepted)) }));
+}
+
+/** Every number the evidence allows, by kind: numbers themselves and numbers written inside strings (never inside <<<…>>> blocks). */
 export function numbersIn(v: unknown, out: Allowed = { money: [], pct: [] }, depth = 0, key = ''): Allowed {
   if (depth > 8 || v == null) return out;
   if (typeof v === 'number') {
@@ -118,8 +235,9 @@ export function numbersIn(v: unknown, out: Allowed = { money: [], pct: [] }, dep
   }
   if (typeof v === 'string') {
     if (v.startsWith('/')) return out; // internal links: ids and query strings, not figures
-    // Dates ("2024-05", "2026-11-09T…") are not figures.
-    for (const t of tokens(v.replace(/\b\d{4}-\d{2}(?:-\d{2})?(?:T[\d:.]+Z?)?\b/g, ' '))) {
+    // Listing text wrapped as data is never evidence. Dates ("2024-05", "2026-11-09T…") are not figures.
+    const text = v.replace(UNTRUSTED_BLOCK, ' ').replace(/\b\d{4}-\d{2}(?:-\d{2})?(?:T[\d:.]+Z?)?\b/g, ' ');
+    for (const t of tokens(text)) {
       if (t.kind === 'money' || t.kind === 'plain') out.money.push(t.value);
       if (t.kind === 'pct' || t.kind === 'plain') out.pct.push(t.value);
     }
@@ -141,19 +259,30 @@ export function ungrounded(text: string, allowed: Allowed): string[] {
   return [...new Set(figuresIn(text).filter((f) => !matches(f, allowed)).map((f) => f.raw))];
 }
 
-/** Removes the sentences that carry unchecked figures, keeping list structure. */
-export function stripUngrounded(text: string, allowed: Allowed): { text: string; removed: number } {
+/**
+ * Removes the sentences `drop` rejects, keeping list structure (a list item goes when all its sentences do).
+ * Every sentence is judged on its own: a hedged sentence ("…, not a valuation") never shields an
+ * unhedged one written on the same line. Lines with nothing removed are kept exactly as written.
+ */
+export function dropSentences(text: string, drop: (sentence: string) => boolean): { text: string; removed: number } {
   let removed = 0;
   const out: string[] = [];
   for (const line of text.split('\n')) {
-    if (!ungrounded(line, allowed).length) { out.push(line); continue; }
+    if (!line.trim()) { out.push(line); continue; }
     const m = line.match(/^(\s*(?:[-•*]|\d+\.)\s+)?([\s\S]*)$/)!;
-    const kept = m[2].split(/(?<=[.!?])\s+(?=[A-Z£(*"“‘'])/).filter((s) => {
-      const bad = ungrounded(s, allowed).length > 0;
+    const parts = m[2].split(/(?<=[.!?])\s+(?=[A-Z£(*"“‘'])/);
+    const kept = parts.filter((s) => {
+      const bad = drop(s);
       if (bad) removed++;
       return !bad;
     });
-    if (kept.length) out.push(`${m[1] ?? ''}${kept.join(' ')}`);
+    if (kept.length === parts.length) out.push(line);
+    else if (kept.length) out.push(`${m[1] ?? ''}${kept.join(' ')}`);
   }
   return { text: out.join('\n').replace(/\n{3,}/g, '\n\n').trim(), removed };
+}
+
+/** Removes the sentences that carry unchecked figures, keeping list structure. */
+export function stripUngrounded(text: string, allowed: Allowed): { text: string; removed: number } {
+  return dropSentences(text, (s) => ungrounded(s, allowed).length > 0);
 }

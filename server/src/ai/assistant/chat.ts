@@ -3,23 +3,30 @@
  *
  * The model (role 'main') answers with tools that run Streetkey's engines, in a structured
  * shape. The server then checks the answer before the website sees it:
- *  - homes: only real, public listings; cards come from the registry, never from the model
- *  - links: only internal Streetkey paths
- *  - figures: every money amount and percentage must match a tool result, the page's property
- *    data or the person's own messages (never an earlier reply, which the browser sends back);
- *    otherwise one quick correction pass, and failing that the sentence goes. Button labels and
- *    suggested questions with unchecked figures are dropped.
+ *  - homes: only real, public listings that a tool returned this turn, the page's home or homes
+ *    earlier replies showed; cards come from the registry, never from the model
+ *  - links: only internal Streetkey paths (and links to homes only for those homes)
+ *  - figures: every money amount and percentage must match an engine figure in a tool result or
+ *    the page's property data, or the person's own messages (never an earlier reply, which the
+ *    browser sends back, never text a lister wrote, and never a number the model chose as a tool
+ *    argument that the tool merely echoes); otherwise one quick correction pass, and failing that
+ *    the sentence goes. Button labels and suggested questions with unchecked
+ *    figures are dropped.
+ *  - claims: sentences stating a valuation as fact, giving contact details or describing areas by
+ *    who lives there are removed. Questions asking to pick areas by who lives there get Streetkey's
+ *    policy without a model call.
  * Stateless: the browser keeps the conversation (sessionStorage) and sends the last 12 messages.
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { POLICY_NOTE } from '../../../../src/lib/ai/search';
 import { config } from '../../config';
-import { AiError, cached, chatJSON, HOUSE_RULES, moderate, runWithTools, untrusted, type ToolTrace } from '../core';
+import { AiError, cached, chatJSON, HOUSE_RULES, moderate, runWithTools, untrusted, type Message, type ToolTrace } from '../core';
 import { ensureLiveRegistry } from '../registry';
 import { conforms, S, type Infer } from '../schema';
-import { numbersIn, stripUngrounded, ungrounded } from './grounding';
+import { numbersIn, stripUngrounded, toolsEvidence, ungrounded } from './grounding';
 import { contextNote, historyMessages, PAGE_RE, ReplySchema, SYSTEM_PROMPT } from './prompt';
-import { knownIds, sanitiseActions, sanitiseFollowUps, sanitiseReply, type Action } from './sanitise';
+import { asksAboutPeople, dropClaims, fitToShow, idsIn, knownIds, sanitiseActions, sanitiseFollowUps, sanitiseReply, type Action } from './sanitise';
 import { findHome, ID_RE, publicCard, TOOL_LABELS, TOOLS, type PublicCard } from './tools';
 
 export const ChatBody = z.object({
@@ -53,6 +60,9 @@ export interface AssistantReply {
 type Reply = Infer<typeof ReplySchema>;
 export const STARTERS = ['Find a 3-bed house with a garden under £450k', 'What’s the stamp duty on a £350,000 first home?', 'Which homes look like good buy-to-let deals?'];
 const TRIM_NOTE = 'I’ve left out a figure I couldn’t check against Streetkey’s calculations.';
+/** Answer to requests to pick or describe areas by who lives there (no model call). */
+export const DEMOGRAPHIC_REPLY = `${POLICY_NOTE} I can help with objective facts instead: journey times, Ofsted ratings in our data, flood risk and prices.`;
+const DEMOGRAPHIC_FOLLOW_UPS = ['Which homes are near a station?', 'Show me homes near Good or Outstanding schools', 'What’s the stamp duty on a £350,000 first home?'];
 
 /** Model output → reply object; tolerates a plain-text answer. */
 function parseReply(content: string): Reply {
@@ -65,13 +75,13 @@ function parseReply(content: string): Reply {
   throw new AiError('bad output', 'The AI returned something unexpected. Please try again.', 502, 'ai_bad_output');
 }
 
-/** One quick pass that rewrites a draft so its figures match the evidence. */
-async function correctFigures(draft: string, bad: string[], evidence: unknown, userId: string | null, timeoutMs: number) {
+/** One quick pass that rewrites a draft so its figures match the evidence (engine figures only). */
+async function correctFigures(draft: string, bad: string[], evidence: unknown, homes: ReadonlySet<string>, userId: string | null, timeoutMs: number) {
   const out = await chatJSON<{ reply: string }>([
     { role: 'system', content: `${HOUSE_RULES}\nYou correct figures in a draft reply written by Streetkey’s assistant. Every money amount (£, “pounds”, “600k”, “2,100 a month”…) and percentage must appear in the evidence (rounding to the nearest £1,000 or 0.1% is fine). Correct or remove the unchecked figures listed; do not add new figures or facts. Keep the meaning, tone, length and the "- " bullet and **bold** format.` },
     { role: 'user', content: `${untrusted('draft', draft, 3500)}\nUnchecked figures: ${bad.join(', ').slice(0, 300)}\nEvidence from Streetkey’s tools (JSON):\n${JSON.stringify(evidence ?? null).slice(0, 12_000)}` },
   ], S.obj({ reply: S.str() }), 'streetkey_answer_fix', { purpose: 'assistant.fix', userId, role: 'fast', maxTokens: 900, timeoutMs });
-  return sanitiseReply(out.reply);
+  return sanitiseReply(out.reply, homes);
 }
 
 function canned(reply: string, followUps: string[] = STARTERS): AssistantReply {
@@ -83,9 +93,11 @@ async function answer(body: ChatBodyT, userId: string | null, deadline: number):
   const ctx = await contextNote(body.context);
   // Leave time for the checks (and a quick correction pass) inside the request deadline.
   const left = deadline - Date.now();
+  // Only Streetkey's engine data goes in a system note; the page path and the lister's words go in a data block.
+  const context: Message[] = ctx ? [...(ctx.system ? [{ role: 'system' as const, content: ctx.system }] : []), { role: 'user' as const, content: ctx.block }] : [];
   const r = await runWithTools([
     { role: 'system', content: SYSTEM_PROMPT },
-    ...(ctx ? [{ role: 'system' as const, content: ctx.text }] : []),
+    ...context,
     ...historyMessages(body.messages),
   ], TOOLS, {
     purpose: 'assistant.chat', userId, role: 'main', maxTokens: 1400, effort: 'low', maxSteps: 4,
@@ -95,16 +107,26 @@ async function answer(body: ChatBodyT, userId: string | null, deadline: number):
   const out = parseReply(r.content);
   const traces: ToolTrace[] = r.traces.filter((t) => t.ok);
 
-  // Figures must come from Streetkey (tool results, the page's home) or from the person's own words.
-  // Earlier assistant replies don't count: they come back from the browser and could say anything.
-  const allowed = numbersIn([traces.map((t) => t.result), ctx?.data ?? null, body.messages.filter((m) => m.role === 'user').map((m) => m.content)]);
+  // Homes this answer may show: ones a tool returned this turn, the page's home, and homes earlier replies showed.
+  const homes = idsIn(traces.map((t) => t.result));
+  if (ctx?.propertyId) homes.add(ctx.propertyId);
+  for (const m of body.messages) if (m.role === 'assistant') for (const id of knownIds(m.propertyIds ?? [])) homes.add(id);
+
+  // Figures must come from Streetkey's engines (tool results, the page's home) or from the person's own words.
+  // Never from text a lister wrote (titles, towns, features, descriptions), from earlier assistant
+  // replies (those come back from the browser and could say anything) or from numbers the model chose
+  // as a tool's arguments and got straight back (a "price" or "loan" it could have read in a listing).
+  const own = body.messages.filter((m) => m.role === 'user').map((m) => m.content);
+  const page = ctx?.data ?? null;
+  const evidence = { tools: toolsEvidence(traces, [page, own]), page };
+  const allowed = numbersIn([evidence.tools.map((t) => t.result), page, own]);
   const checked = (s: string) => !ungrounded(s, allowed).length;
-  let reply = sanitiseReply(out.reply);
+  let reply = sanitiseReply(out.reply, homes);
   let grounding: Grounding = 'checked';
   let bad = ungrounded(reply, allowed);
   if (bad.length && deadline - Date.now() > 6_000) {
     try {
-      const fixed = await correctFigures(reply, bad, { tools: traces.map((t) => ({ tool: t.name, result: t.result })), page: ctx?.data ?? null }, userId, deadline - Date.now() - 1_000);
+      const fixed = await correctFigures(reply, bad, evidence, homes, userId, deadline - Date.now() - 1_000);
       if (fixed && checked(fixed)) { reply = fixed; grounding = 'corrected'; bad = []; }
     } catch { /* fall through to trimming */ }
   }
@@ -113,16 +135,19 @@ async function answer(body: ChatBodyT, userId: string | null, deadline: number):
     reply = `${s.text || 'I couldn’t check the figures for that answer against Streetkey’s calculations, so I’ve left them out. The calculators linked below give exact numbers.'}\n\n${TRIM_NOTE}`;
     grounding = 'trimmed';
   }
+  // Never in Streetkey's voice: a valuation stated as fact, contact details, areas described by who lives there.
+  reply = dropClaims(reply).text;
   if (!reply.trim()) throw new AiError('empty reply', 'The AI didn’t answer. Please try again.', 502, 'ai_bad_output');
 
-  const propertyIds = knownIds(out.propertyIds);
+  const propertyIds = knownIds(out.propertyIds, 6, homes);
   const sources = [...new Set(traces.map((t) => TOOL_LABELS[t.name]).filter(Boolean))];
+  const fit = (s: string) => checked(s) && fitToShow(s);
   return {
     reply, propertyIds,
     homes: propertyIds.map((id) => publicCard(findHome(id)!)),
     // Buttons and suggested questions carry no unchecked figures either (a clicked suggestion becomes the person's words).
-    actions: sanitiseActions(out.actions, 4, checked),
-    followUps: sanitiseFollowUps(out.followUps, 3, checked),
+    actions: sanitiseActions(out.actions, 4, fit, homes),
+    followUps: sanitiseFollowUps(out.followUps, 3, fit),
     sources, grounding,
   };
 }
@@ -131,8 +156,12 @@ async function answer(body: ChatBodyT, userId: string | null, deadline: number):
 export async function assistantChat(body: ChatBodyT, meta: { userId: string | null }): Promise<AssistantReply> {
   const deadline = Date.now() + config.ai.quickTimeoutMs;
   const question = body.messages[body.messages.length - 1].content;
+  // Choosing or describing areas by who lives there: Streetkey's policy, in code (no model call).
+  // Facilities and things named after a place ("Is the Leyton community centre nearby?") are not that.
+  if (asksAboutPeople(question)) return canned(DEMOGRAPHIC_REPLY, DEMOGRAPHIC_FOLLOW_UPS);
   const cacheable = body.messages.length === 1 && question.length <= 200;
-  const key = cacheable ? `assistant:v1:${createHash('sha256').update(JSON.stringify([question.toLowerCase().replace(/\s+/g, ' '), body.context ?? null])).digest('hex')}` : '';
+  // v2: answers cached before the stricter checks (homes, lister figures, claims) are never served.
+  const key = cacheable ? `assistant:v2:${createHash('sha256').update(JSON.stringify([question.toLowerCase().replace(/\s+/g, ' '), body.context ?? null])).digest('hex')}` : '';
   const run = () => answer(body, meta.userId, deadline);
   const [mod, res] = await Promise.all([
     moderate({ text: question }, { purpose: 'assistant.moderation', userId: meta.userId }).catch(() => null),

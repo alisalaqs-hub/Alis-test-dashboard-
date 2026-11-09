@@ -16,8 +16,15 @@ const g = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
 const pc = (n: number, dp = 1) => `${(n * 100).toFixed(dp)}%`;
 
 /* ================= Property assistant (buyers / investors) ================= */
+
+/**
+ * Starter questions about the home on a page (the Ask sheet shows them on property pages).
+ * Each one is answered by a skill below too, so they still work with the built-in rules.
+ */
+export const PROPERTY_STARTS = ['Is this home fairly priced?', 'What could it rent for?', 'What would it cost to refurbish?', 'What are the main risks?'];
+
 export const propertySkills: Skill<Property>[] = [
-  { id: 'overpriced', label: 'Is this property overpriced?', match: /overpric|fair price|worth|value|underpric/i, run: (p) => {
+  { id: 'overpriced', label: 'Is this property overpriced?', match: /overpric|underpric|fair(?:ly)?[\s-]*pric|pric(?:ed|e)\s+(?:right|fairly|fair)|(?:good|right|sensible|reasonable)\s+price|asking price|worth|value/i, run: (p) => {
     const v = valuationScenario(p);
     return { confidence: v.confidence, tools: ['valuation.valuationScenario', 'refurb.estimateRefurb'],
       text: v.verdict === 'insufficient evidence' ? 'There is not enough sold evidence to judge the price.' : `The asking price of ${g(p.price)} is ${v.verdict} of Streetkey's indicative as-is range of ${k(v.asIs.low)}–${k(v.asIs.high)} (${v.askingVsMid >= 0 ? '+' : ''}${pc(v.askingVsMid)} vs midpoint).`,

@@ -1,16 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { SavedSearchDTO } from '../../../src/lib/apiTypes';
+import { MAX_QUERY_CHARS } from '../../../src/lib/ai/search';
 import { newToken, verifyPassword } from '../auth/crypto';
 import { getUser, publicUser } from '../auth/session';
 import { config } from '../config';
 import { one, q, tx } from '../db';
 import { audit, HttpError, notFound, parse, requireUser } from '../services/http';
 import { deleteFile } from '../services/storage';
+import { SavedFiltersSchema, savedMode, storedFilters } from '../ai/search/saved';
 
 const KEY = z.string().trim().min(2).max(80).regex(/^[a-z0-9-]+$/i);
-const toSearch = (r: { id: string; query: string; mode: string; alert_frequency: SavedSearchDTO['alertFrequency']; created_at: Date }): SavedSearchDTO =>
-  ({ id: r.id, query: r.query, mode: r.mode, alertFrequency: r.alert_frequency, createdAt: r.created_at.toISOString() });
+const toSearch = (r: { id: string; query: string; mode: string; alert_frequency: SavedSearchDTO['alertFrequency']; created_at: Date; filters?: unknown }): SavedSearchDTO =>
+  ({ id: r.id, query: r.query, mode: r.mode, alertFrequency: r.alert_frequency, createdAt: r.created_at.toISOString(), filters: storedFilters(r.filters) });
 
 export async function meRoutes(app: FastifyInstance) {
   /* ---------- profile ---------- */
@@ -38,7 +40,7 @@ export async function meRoutes(app: FastifyInstance) {
     const [listings, saved, searches, sent, consents, images, sessions] = await Promise.all([
       q('SELECT ref, status, channel, title, address_line, town, postcode, price, created_at FROM listings WHERE owner_user_id = $1', [u.id]),
       q('SELECT listing_key, created_at FROM saved_listings WHERE user_id = $1', [u.id]),
-      q('SELECT query, mode, alert_frequency, created_at FROM saved_searches WHERE user_id = $1', [u.id]),
+      q('SELECT query, mode, alert_frequency, filters, created_at FROM saved_searches WHERE user_id = $1', [u.id]),
       q(`SELECT e.kind, e.name, e.email, e.phone, e.preferred_slot, e.created_at, l.ref AS listing FROM enquiries e JOIN listings l ON l.id = e.listing_id WHERE e.from_user_id = $1`, [u.id]),
       q('SELECT purpose, version, granted_at, withdrawn_at FROM consents WHERE user_id = $1', [u.id]),
       q('SELECT room, style, brief, status, result_url, created_at FROM ai_images WHERE user_id = $1', [u.id]),
@@ -116,7 +118,17 @@ export async function meRoutes(app: FastifyInstance) {
   });
 
   /* ---------- saved searches & alerts ---------- */
-  const SearchBody = z.object({ query: z.string().trim().min(2).max(200), mode: z.string().max(20).default('buy'), alertFrequency: z.enum(['instant', 'daily', 'weekly', 'off']).default('daily') });
+  /**
+   * filters: the reading the person saw on the search page (validated again here), so alerts run that
+   * exact search. Optional: without it alerts read the words with the built-in rules, in this mode.
+   * The words may be as long as the search box allows (MAX_QUERY_CHARS, shared with the website).
+   */
+  const SearchBody = z.object({
+    query: z.string().trim().min(2).max(MAX_QUERY_CHARS, `Keep the search under ${MAX_QUERY_CHARS} characters.`),
+    mode: z.string().max(20).default('buy').transform(savedMode),
+    alertFrequency: z.enum(['instant', 'daily', 'weekly', 'off']).default('daily'),
+    filters: SavedFiltersSchema.nullish(),
+  });
   app.get('/api/me/searches', async (req) => {
     const u = requireUser(req);
     return { items: (await q<Parameters<typeof toSearch>[0]>('SELECT * FROM saved_searches WHERE user_id = $1 ORDER BY created_at DESC', [u.id])).map(toSearch) };
@@ -127,8 +139,9 @@ export async function meRoutes(app: FastifyInstance) {
     const count = (await one<{ n: number }>('SELECT count(*)::int n FROM saved_searches WHERE user_id = $1', [u.id]))!.n;
     if (count >= 50) throw new HttpError(409, 'You can save up to 50 searches.', 'limit');
     const r = await one<Parameters<typeof toSearch>[0]>(
-      `INSERT INTO saved_searches (user_id, query, mode, alert_frequency, last_alerted_at) VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (user_id, query, mode) DO UPDATE SET alert_frequency = EXCLUDED.alert_frequency RETURNING *`, [u.id, b.query, b.mode, b.alertFrequency]);
+      `INSERT INTO saved_searches (user_id, query, mode, alert_frequency, filters, last_alerted_at) VALUES ($1, $2, $3, $4, $5::jsonb, now())
+       ON CONFLICT (user_id, query, mode) DO UPDATE SET alert_frequency = EXCLUDED.alert_frequency, filters = coalesce(EXCLUDED.filters, saved_searches.filters) RETURNING *`,
+      [u.id, b.query, b.mode, b.alertFrequency, b.filters ? JSON.stringify(b.filters) : null]);
     return reply.code(201).send({ search: toSearch(r!) });
   });
   app.patch('/api/me/searches/:id', async (req) => {

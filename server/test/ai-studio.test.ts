@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { designCost, STYLES, TIERS, type Tier } from '../../src/engine/design';
+import { briefBudget, briefMentions, designCost, parseDesignBrief, STYLES, studioBudget, TIERS, type Tier } from '../../src/engine/design';
 import { config } from '../src/config';
-import { q } from '../src/db';
+import { pool, q } from '../src/db';
 import { limits } from '../src/services/ratelimit';
-import { DEFAULT_DIMS } from '../src/ai/studio/brief';
+import { DEFAULT_DIMS, groundBrief } from '../src/ai/studio/brief';
+import { lockImageAllowance } from '../src/ai/studio/roomImage';
 import { mergeExtraction, type Extraction } from '../src/ai/importer/extract';
-import { rulesOnlyResult } from '../../src/lib/ai/importer';
+import { rulesOnlyResult, ruleFlags, tenureOf } from '../../src/lib/ai/importer';
 import { client, getApp, jpegWithExif, multipart, signUp } from './helpers';
 import { mockOpenAI, reply, TINY_PNG } from './openai-mock';
 import { fakeHosts } from './setup';
@@ -20,6 +21,12 @@ For sale by modern method of auction. A reservation fee applies.
 Period features, private garden, needs updating.`;
 
 const f = (value: unknown, confidence: 'stated' | 'inferred' = 'stated', evidence: string | null = null) => ({ value, confidence, evidence });
+/** A new account whose email address is confirmed (image generation and photo analysis need one). */
+async function verifiedSignUp() {
+  const s = await signUp();
+  await q('UPDATE users SET email_verified_at = now() WHERE id = $1', [s.user.id]);
+  return s;
+}
 const EMPTY = {
   title: null, listing: null, price: null, priceQualifier: null, addressLine: null, town: null, postcode: null, type: null, tenure: null, leaseYears: null,
   beds: null, baths: null, floorArea: null, era: null, condition: null, epc: null, councilTax: null, serviceCharge: null, groundRent: null, saleMethod: null,
@@ -197,7 +204,9 @@ describe('AI import: merging the AI reading with the rule reader', () => {
     const text = 'Two bedroom flat for sale. Guide price £375,000. Offers over £350,000 considered. Leasehold, 120 years remaining. London SE22 8JL.';
     const r = mergeExtraction(read({ price: f({ amount: 350000, period: 'total' }, 'stated', 'Offers over £350,000') }), text, '');
     expect(r.values.price).toBe(375000);
-    expect(r.fields.price).toEqual({ confidence: 'inferred', evidence: null, source: 'rules', alt: { value: 350000, evidence: 'Offers over £350,000' } });
+    // The rule reader's value is shown with the words it read it from, and the AI's reading beside it.
+    expect(r.fields.price).toMatchObject({ confidence: 'inferred', source: 'rules', alt: { value: 350000, evidence: 'Offers over £350,000' } });
+    expect(r.fields.price?.evidence).toMatch(/Guide price £375,000/);
   });
 
   it('accepts values that the quote really supports, converting units and periods in code', () => {
@@ -287,6 +296,119 @@ describe('AI import: the built-in reader on its own', () => {
   });
 });
 
+/* ───────────── labelled facts, age and condition, and the AI's own flags ───────────── */
+describe('AI import: labelled facts, quotes, age and condition, and the AI’s own flags', () => {
+  const read = (over: Partial<Record<keyof Extraction, unknown>>) => ({ ...EMPTY, ...over }) as unknown as Extraction;
+  // Laid out as Rightmove pages copy: key features, a facts row and labelled tenure.
+  const RIGHTMOVE = `2 bedroom flat for sale
+Flat 12, Marlowe Court, Forest Road, London E17 6JF
+Guide Price £325,000
+
+KEY FEATURES
+- Two double bedrooms
+- Share of freehold option not available
+- EPC Rating: D
+
+PROPERTY TYPE: Flat   BEDROOMS: x2   BATHROOMS: x1   SIZE: 721 sq ft
+
+Tenure: Leasehold. Length of lease: 68 years remaining
+Service charge: £2,400 per annum
+Ground rent: £350 per annum (doubling every 10 years)
+Council Tax Band: C
+
+A bright second floor apartment flooded with natural light.`;
+
+  it('reads labelled tenure and room counts, quotes what it read and flags the short lease', () => {
+    const r = rulesOnlyResult(RIGHTMOVE);
+    expect(r.values).toMatchObject({ tenure: 'leasehold', beds: 2, baths: 1, leaseYears: 68, serviceChargeAnnual: 2400, groundRentAnnual: 350, epc: 'D', councilTax: 'C' });
+    expect(r.fields.tenure).toEqual({ confidence: 'stated', evidence: 'Tenure: Leasehold. Length of lease: 68 years remaining', source: 'rules' });
+    expect(r.fields.baths).toMatchObject({ confidence: 'stated', evidence: expect.stringContaining('BATHROOMS: x1') });
+    // every value marked "stated" carries the words it was read from
+    for (const [k, info] of Object.entries(r.fields)) if (info?.confidence === 'stated') expect(info.evidence, k).toBeTruthy();
+    expect(r.fields.listing?.confidence).toBe('inferred');
+    expect(r.redFlags.find((x) => x.id === 'short-lease')).toMatchObject({ severity: 'high' });
+    // the count on the line after its label, or straight after "×"; room sizes aren't counts
+    expect(rulesOnlyResult('Flat for sale £300,000\nBEDROOMS\n×3\nBATHROOMS\n×2').values).toMatchObject({ beds: 3, baths: 2 });
+    expect(rulesOnlyResult('Flat for sale £300,000. BEDROOMS ×2 BATHROOMS ×1').values).toMatchObject({ beds: 2, baths: 1 });
+    expect(rulesOnlyResult('Flat for sale £300,000. Bedroom 1: 3.5m x 3.0m. Bedroom 2: 2.9m x 2.5m.').values.beds).toBeUndefined();
+  });
+
+  it('reads tenure from its label and ignores negated or cancelled mentions', () => {
+    expect(tenureOf('Share of freehold option not available. Tenure: Leasehold')?.value).toBe('leasehold');
+    expect(tenureOf('Share of freehold option not available. Leasehold flat.')?.value).toBe('leasehold');
+    expect(tenureOf('Leasehold with a share of the freehold')?.value).toBe('share-of-freehold');
+    expect(tenureOf('Not freehold. Leasehold.')?.value).toBe('leasehold');
+    expect(tenureOf('Tenure: Freehold')?.value).toBe('freehold');
+    expect(tenureOf('Lovely garden')).toBeNull();
+  });
+
+  it('applies the lease checks to a share of freehold once the lease length is known', () => {
+    expect(ruleFlags({ tenure: 'share-of-freehold', leaseYears: 68 }, '').map((x) => x.id)).toContain('short-lease');
+    expect(ruleFlags({ tenure: 'share-of-freehold', leaseYears: 90 }, '').map((x) => x.id)).toContain('lease-under-100');
+    expect(ruleFlags({ tenure: 'share-of-freehold' }, '').map((x) => x.id)).not.toContain('lease-unknown');
+  });
+
+  it('keeps the labelled reading when the AI quotes a cancelled mention or disagrees with a label', () => {
+    const r = mergeExtraction(read({ tenure: f('share-of-freehold', 'stated', 'Share of freehold option not available') }), RIGHTMOVE, '');
+    expect(r.values.tenure).toBe('leasehold');
+    expect(r.fields.tenure).toMatchObject({ source: 'rules', confidence: 'stated', evidence: expect.stringMatching(/^Tenure: Leasehold/) });
+    expect(r.redFlags.map((x) => x.id)).toContain('short-lease');
+    expect(r.fields.baths).toMatchObject({ source: 'rules', confidence: 'stated' }); // the AI found none: the rule reader's, with its quote
+    const text = 'Three bedroom house for sale £400,000. Freehold. London E17 6JF.\nBEDROOMS: 2 (the third is now a study)';
+    const beds = mergeExtraction(read({ beds: f(3, 'stated', 'Three bedroom house') }), text, '');
+    expect(beds.values.beds).toBe(2);
+    expect(beds.fields.beds).toMatchObject({ confidence: 'inferred', source: 'rules', alt: { value: 3, evidence: 'Three bedroom house' } });
+  });
+
+  it('drops an age or condition the AI can’t quote a clue for, and keeps the ones it can as inferred', () => {
+    const text = 'Three bedroom terraced house for sale. £450,000. Freehold. London E17 6JF. Lovely garden. Requires modernisation throughout.';
+    const none = mergeExtraction(read({ era: f('pre-1919', 'stated', 'Lovely garden'), condition: f('good', 'inferred', null) }), text, '');
+    expect(none.values.era).toBeUndefined();
+    expect(none.found).not.toContain('age');
+    expect(none.values.condition).toBe('poor'); // the rule reader's, from the wording
+    expect(none.fields.condition).toMatchObject({ source: 'rules', confidence: 'inferred', evidence: expect.stringMatching(/Requires modernisation/) });
+    const victorian = 'Victorian three bedroom terraced house for sale. £450,000. Freehold. London E17 6JF. Beautifully presented.';
+    const ok = mergeExtraction(read({ era: f('pre-1919', 'stated', 'Victorian three bedroom'), condition: f('good', 'stated', 'Beautifully presented') }), victorian, '');
+    expect(ok.values).toMatchObject({ era: 'pre-1919', condition: 'good' });
+    expect(ok.fields.era).toMatchObject({ confidence: 'inferred', evidence: 'Victorian three bedroom' });
+    expect(ok.fields.condition?.confidence).toBe('inferred');
+    // a quote that says otherwise doesn't support it: the rule reader's reading stays
+    expect(mergeExtraction(read({ condition: f('derelict', 'stated', 'Beautifully presented') }), victorian, '').values.condition).toBe('good');
+    expect(mergeExtraction(read({ era: f('2000+', 'stated', 'Victorian three bedroom') }), victorian, '').values.era).toBe('pre-1919');
+    // no clue anywhere: no age or condition at all (the estimate uses its defaults)
+    const plain = mergeExtraction(read({ era: f('1945-1979', 'inferred', null), condition: f('fair', 'inferred', 'Freehold') }), 'Three bedroom house for sale. £450,000. Freehold. London E17 6JF.', '');
+    expect(plain.values.era).toBeUndefined();
+    expect(plain.values.condition).toBeUndefined();
+  });
+
+  it('keeps the AI’s quoted flags only when the title is about the quote and names a concern', () => {
+    const text = 'Bright three-bedroom terrace with a south-facing garden. Freehold. £500,000. London E17 6JF. EPC C. Council tax band D. 95 sq m. The boiler is 25 years old. There is a shared driveway with the neighbour.';
+    const r = mergeExtraction(read({ redFlags: [
+      { kind: 'stated', severity: 'high', title: 'Bright three-bedroom terrace with a south-facing garden', detail: 'Worth a look.', evidence: 'The boiler is 25 years old' },
+      { kind: 'stated', severity: 'high', title: 'South-facing garden', detail: 'A lovely garden.', evidence: 'south-facing garden' },
+      { kind: 'stated', severity: 'high', title: 'Old boiler may need replacing', detail: 'Ask when it was last serviced.', evidence: 'The boiler is 25 years old' },
+      { kind: 'stated', severity: 'medium', title: 'Shared driveway', detail: 'Ask who maintains it.', evidence: 'shared driveway with the neighbour' },
+    ] }), text, '');
+    const ai = r.redFlags.filter((x) => x.source === 'ai');
+    expect(ai.map((x) => x.title)).toEqual(['Old boiler may need replacing', 'Shared driveway']);
+    expect(ai.map((x) => x.severity)).toEqual(['medium', 'medium']); // not one of the rules' topics: at most medium
+  });
+
+  it('reads a flag title for polarity: positive features quoted from the listing are never “things to check”', () => {
+    const text = 'Three bedroom terraced house for sale. £450,000. Freehold. London E17 6JF. EPC C. Council tax band D. 95 sq m. Recently refurbished kitchen. Modernised throughout. No onward chain. Newly fitted bathroom. Close to the railway station. Spacious shared garden. No admin fees. Updated electrics in 2024. Low risk of flooding. No work needed. Long lease. Not overlooked. '
+      + 'The roof needs some repairs. Shared driveway with the neighbour. Backs onto the railway line. Damp in the cellar. Lease length not stated. Lift not working.';
+    const kept = (title: string, evidence = title) => mergeExtraction(read({ redFlags: [{ kind: 'stated', severity: 'high', title, detail: 'Worth knowing.', evidence }] }), text, '').redFlags.filter((x) => x.source === 'ai');
+    const positives: [string, string?][] = [
+      ['Recently refurbished kitchen'], ['Modernised throughout'], ['No onward chain'], ['Newly fitted bathroom'], ['Close to the railway station'],
+      ['Spacious shared garden'], ['No admin fees'], ['Updated electrics', 'Updated electrics in 2024'], ['Low risk of flooding'], ['No work needed'], ['Long lease'], ['Not overlooked'],
+    ];
+    for (const [title, evidence] of positives) expect(kept(title, evidence), title).toEqual([]);
+    const concerns = ['Roof needs some repairs', 'Shared driveway', 'Backs onto the railway line', 'Damp in the cellar', 'Lease length not stated', 'Lift not working'];
+    const quotes: Record<string, string> = { 'Roof needs some repairs': 'The roof needs some repairs', 'Shared driveway': 'Shared driveway with the neighbour' };
+    for (const title of concerns) expect(kept(title, quotes[title] ?? title).map((x) => [x.title, x.severity]), title).toEqual([[title, 'medium']]);
+  });
+});
+
 /* ───────────────────────── Room redesign (background job) ───────────────────────── */
 describe('AI room redesign job', () => {
   const photo = (fields: Record<string, string> = { room: 'kitchen', style: 'scandi', brief: 'Pale oak, sage green', consent: 'true' }) =>
@@ -303,7 +425,7 @@ describe('AI room redesign job', () => {
     config.ai.dailyImagesPerUser = 2;
     try {
       expect((await send('')).status).toBe(401);
-      const { c, user } = await signUp();
+      const { c, user } = await verifiedSignUp();
       const noConsent = await send(c.cookie, photo({ room: 'kitchen', style: 'scandi' }));
       expect(noConsent.status).toBe(400);
       expect(noConsent.json.error.fields.consent).toMatch(/AI provider/);
@@ -330,15 +452,94 @@ describe('AI room redesign job', () => {
       // someone else can't see the job
       const other = await signUp();
       expect((await other.c.get(`/api/ai/jobs/${r.json.jobId}`)).status).toBe(403);
-      // daily limit
+      // daily limit, with when the next design can be made
       expect((await send(c.cookie)).status).toBe(202);
-      const third = await send(c.cookie);
-      expect(third.status).toBe(429);
-      expect(third.json.error.message).toMatch(/today’s 2 AI designs/);
+      const third = await (await getApp()).inject({ method: 'POST', url: '/api/ai/room-image', payload: photo().payload, headers: { ...photo().headers, cookie: c.cookie } });
+      expect(third.statusCode).toBe(429);
+      const err = third.json().error;
+      expect(err).toMatchObject({ code: 'quota' });
+      expect(err.message).toMatch(/today’s 2 AI designs\. You can create another in about \d+ hours?/);
+      expect(Number(err.fields.retryAfter)).toBeGreaterThan(23 * 3600);
+      expect(third.headers['retry-after']).toBe(err.fields.retryAfter);
       const hist = (await c.get('/api/ai/room-images')).json.items;
       expect(hist).toHaveLength(2);
       expect(hist.every((h: { status: string }) => h.status === 'done')).toBe(true);
     } finally { config.ai.dailyImagesPerUser = prevLimit; ai.restore(); }
+  });
+
+  it('needs a confirmed email address before redesigning or analysing a photo', async () => {
+    const ai = mockOpenAI({ images: () => TINY_PNG, chat: () => reply.json({}) });
+    try {
+      const { c, user } = await signUp();
+      const r = await send(c.cookie);
+      expect(r.status).toBe(403);
+      expect(r.json.error.code).toBe('verify_email');
+      expect(r.json.error.message).toMatch(/Confirm your email address/);
+      const m = multipart([{ field: 'photo', name: 'room.jpg', type: 'image/jpeg', data: jpegWithExif() }], { consent: 'true' });
+      const d = await (await getApp()).inject({ method: 'POST', url: '/api/ai/design/describe-photo', payload: m.payload, headers: { ...m.headers, cookie: c.cookie } });
+      expect(d.statusCode).toBe(403);
+      expect(d.json().error.code).toBe('verify_email');
+      expect(await q('SELECT 1 FROM ai_images WHERE user_id = $1', [user.id])).toHaveLength(0);
+      expect(ai.calls('images')).toHaveLength(0);
+      expect(ai.calls('chat')).toHaveLength(0);
+    } finally { ai.restore(); }
+  });
+
+  it('re-checks the daily limit under a lock once the upload is in, so parallel uploads can’t all pass it', async () => {
+    const ai = mockOpenAI({ images: () => TINY_PNG });
+    const prevLimit = config.ai.dailyImagesPerUser;
+    config.ai.dailyImagesPerUser = 1;
+    const holder = await pool.connect();
+    try {
+      const { c, user } = await verifiedSignUp();
+      // Another upload from this person is between its check and its insert, holding the lock.
+      await holder.query('BEGIN');
+      await lockImageAllowance(user.id, holder);
+      let settled = false;
+      const pending = send(c.cookie).then((r) => { settled = true; return r; });
+      await new Promise((r) => setTimeout(r, 400));
+      expect(settled).toBe(false); // the fast check before the upload passed; now it waits for the lock
+      await holder.query(`INSERT INTO ai_images (user_id, room, style, prompt, model, status) VALUES ($1, 'kitchen', 'Modern', 'x', 'gpt-image-1', 'running')`, [user.id]);
+      await holder.query('COMMIT');
+      const r = await pending;
+      expect(r.status).toBe(429);
+      expect(r.json.error.code).toBe('quota');
+      expect(await q('SELECT 1 FROM ai_images WHERE user_id = $1', [user.id])).toHaveLength(1);
+      expect(ai.calls('images')).toHaveLength(0);
+
+      // End to end: several uploads at once never go over the limit.
+      config.ai.dailyImagesPerUser = 2;
+      const other = await verifiedSignUp();
+      const codes = (await Promise.all(Array.from({ length: 4 }, () => send(other.c.cookie)))).map((x) => x.status).sort();
+      expect(codes).toEqual([202, 202, 429, 429]);
+      expect(await q(`SELECT 1 FROM ai_images WHERE user_id = $1 AND status <> 'failed'`, [other.user.id])).toHaveLength(2);
+    } finally {
+      await holder.query('ROLLBACK').catch(() => {});
+      holder.release();
+      config.ai.dailyImagesPerUser = prevLimit; ai.restore();
+    }
+  });
+
+  it('stops new designs once the whole site has reached its daily cap, and says when to try again', async () => {
+    const ai = mockOpenAI({ images: () => TINY_PNG });
+    const prevSite = config.ai.dailyImagesSite;
+    try {
+      const { c, user } = await verifiedSignUp();
+      await q(`INSERT INTO ai_images (user_id, room, style, prompt, model, status) VALUES ($1, 'kitchen', 'Modern', 'x', 'gpt-image-1', 'done')`, [(await signUp()).user.id]);
+      const [{ n }] = await q<{ n: number }>(`SELECT count(*)::int n FROM ai_images WHERE status <> 'failed' AND created_at > now() - interval '24 hours'`);
+      config.ai.dailyImagesSite = n;
+      const r = await send(c.cookie);
+      expect(r.status).toBe(429);
+      expect(r.json.error.code).toBe('site_quota');
+      expect(r.json.error.message).toMatch(/limit for today across the whole site/);
+      expect(Number(r.json.error.fields.retryAfter)).toBeGreaterThan(0);
+      expect(await q('SELECT 1 FROM ai_images WHERE user_id = $1', [user.id])).toHaveLength(0);
+      expect(ai.calls('images')).toHaveLength(0);
+      config.ai.dailyImagesSite = n + 1;
+      expect((await send(c.cookie)).status).toBe(202);
+      config.ai.dailyImagesSite = 0; // 0 switches the site-wide cap off
+      expect((await send(c.cookie)).status).toBe(202);
+    } finally { config.ai.dailyImagesSite = prevSite; ai.restore(); }
   });
 
   it('marks the design as failed with a safe message when the AI declines, without using up the limit', async () => {
@@ -346,7 +547,7 @@ describe('AI room redesign job', () => {
     const prevLimit = config.ai.dailyImagesPerUser;
     config.ai.dailyImagesPerUser = 1;
     try {
-      const { c } = await signUp();
+      const { c } = await verifiedSignUp();
       const r = await send(c.cookie);
       expect(r.status).toBe(202);
       const job = (await c.get(`/api/ai/jobs/${r.json.jobId}`)).json.job;
@@ -365,7 +566,7 @@ describe('AI room redesign job', () => {
     let n = 0;
     const ai = mockOpenAI({ images: () => (++n <= 2 ? { status: 503, error: { message: 'overloaded' } } : TINY_PNG) });
     try {
-      const { c } = await signUp();
+      const { c } = await verifiedSignUp();
       const r = await send(c.cookie);
       expect(r.status).toBe(202);
       const job = (await c.get(`/api/ai/jobs/${r.json.jobId}`)).json.job;
@@ -438,6 +639,26 @@ describe('AI design brief', () => {
     } finally { ai.restore(); }
   });
 
+  it('follows the room and style the brief names when the AI reads others', async () => {
+    const ai = mockOpenAI({ chat: () => reply.json({ ...PLAN, room: 'kitchen', styleId: 'modern', tier: 'standard', budget: 3500 }) });
+    try {
+      const b = (await client().post('/api/ai/design/brief', { text: 'Scandinavian bedroom for £3,500, keep the wooden floor', room: 'kitchen', postcode: 'E17 4QH' })).json;
+      expect(b).toMatchObject({ engine: 'ai', room: 'bedroom', styleId: 'scandi', styleName: 'Scandinavian', budget: 3500 });
+      expect(b.note).toMatch(/suggested a kitchen, Modern, but your brief asks for a bedroom, Scandinavian/);
+      // the model's materials and notes were for another room and style: the catalogue's are used
+      expect(b.materials.length).toBeGreaterThan(0);
+      expect(b.materials.every((m: { why: string }) => /cost catalogue/.test(m.why))).toBe(true);
+      expect(b.notes).toBe('');
+      expect(b.cost.total).toBe(designCost('bedroom', b.tier, DEFAULT_DIMS, 'E17 4QH', { furniture: true }).total);
+    } finally { ai.restore(); }
+    // A brief that names no room or style: the model's reading is used.
+    const plan = (o: Record<string, unknown>) => ({ ...PLAN, ...o }) as unknown as Parameters<typeof groundBrief>[0];
+    const free = groundBrief(plan({ room: 'bedroom', styleId: 'industrial', tier: 'standard', budget: null }), { text: 'Something warm and cosy with lots of texture', room: 'living' });
+    expect(free).toMatchObject({ room: 'bedroom', styleId: 'industrial', note: null });
+    // A brief naming two rooms: the model may choose either of them.
+    expect(groundBrief(plan({ room: 'living', budget: null }), { text: 'Open-plan kitchen and living space, Scandinavian' }).room).toBe('living');
+  });
+
   it('ignores a budget the brief never stated', async () => {
     const ai = mockOpenAI({ chat: () => reply.json({ ...PLAN, room: 'kitchen', styleId: 'luxury', tier: 'luxury', budget: 20000 }) });
     try {
@@ -474,6 +695,37 @@ describe('AI design brief', () => {
   });
 });
 
+describe('Design brief reader (built-in rules)', () => {
+  it('reads a budget without swallowing punctuation or the next word', () => {
+    expect(briefBudget('Scandinavian bedroom for £3,500, keep the wooden floor')).toBe(3500); // not £3,500,000
+    expect(briefBudget('Kitchen for £5k')).toBe(5000);
+    expect(briefBudget('£5k kitchen')).toBe(5000);
+    expect(briefBudget('£8,000 kitchen')).toBe(8000);
+    expect(briefBudget('£5 kitchen refresh')).toBeUndefined(); // the "k" of kitchen isn't thousands, and £5 isn't a budget
+    expect(briefBudget('£3,500.')).toBe(3500);
+    expect(briefBudget('£4,250.50 for the bathroom')).toBe(4251);
+    expect(briefBudget('A budget of 4500 for the bathroom')).toBe(4500);
+    expect(briefBudget('Around 6k pounds')).toBe(6000);
+    expect(briefBudget('2 bedrooms, no budget yet')).toBeUndefined();
+    expect(parseDesignBrief('Scandinavian bedroom for £3,500, keep the wooden floor')).toEqual({ room: 'bedroom', budget: 3500, style: 'scandi' });
+  });
+
+  it('names rooms and styles only as whole words, first mentioned first', () => {
+    expect(briefMentions('New bedside lamps and a toilet roll holder')).toEqual({ rooms: [], styles: [] });
+    expect(briefMentions('Modernise the bathroom').styles).toEqual([]);
+    expect(briefMentions('Bedroom with an en-suite bathroom').rooms).toEqual(['bedroom', 'bathroom']);
+    expect(briefMentions('Living room with a sofa bed').rooms[0]).toBe('living');
+    expect(briefMentions('Scandinavian with a modern twist').styles).toEqual(['scandi', 'modern']);
+    expect(parseDesignBrief('Modernise this rental flat bathroom for £4,000')).toEqual({ room: 'bathroom', budget: 4000, style: 'rental' });
+  });
+
+  it('keeps the studio’s budget designer within its range', () => {
+    expect(studioBudget(3_500_000)).toEqual({ value: 40_000, clamped: true });
+    expect(studioBudget(500)).toEqual({ value: 1500, clamped: true });
+    expect(studioBudget(3500)).toEqual({ value: 3500, clamped: false });
+  });
+});
+
 /* ───────────────────────── Analyse this room ───────────────────────── */
 describe('AI describe a room photo', () => {
   const form = (fields: Record<string, string> = { consent: 'true', room: 'kitchen' }, data = jpegWithExif(), type = 'image/jpeg') =>
@@ -494,7 +746,7 @@ describe('AI describe a room photo', () => {
     const ai = mockOpenAI({ chat: () => reply.json(ANALYSIS) });
     try {
       expect((await send('')).status).toBe(401);
-      const { c } = await signUp();
+      const { c } = await verifiedSignUp();
       expect((await send(c.cookie, form({ room: 'kitchen' }))).status).toBe(400);
       const notImage = await send(c.cookie, form({ consent: 'true' }, Buffer.from('hello, not an image'), 'image/jpeg'));
       expect(notImage.status).toBe(400);
@@ -512,7 +764,7 @@ describe('AI describe a room photo', () => {
   it('describes the room with the vision model at low detail and tidies the answer', async () => {
     const ai = mockOpenAI({ chat: () => reply.json(ANALYSIS) });
     try {
-      const { c } = await signUp();
+      const { c } = await verifiedSignUp();
       const r = await send(c.cookie);
       expect(r.status).toBe(200);
       expect(r.json.label).toMatch(/Not a survey/);
@@ -532,7 +784,7 @@ describe('AI describe a room photo', () => {
     let fail = true;
     const ai = mockOpenAI({ chat: () => (fail ? { status: 500, error: { message: 'upstream exploded sk-proj-SECRETKEY123' } } : reply.json(ANALYSIS)) });
     try {
-      const { c } = await signUp();
+      const { c } = await verifiedSignUp();
       const bathroom = () => form({ consent: 'true', room: 'bathroom' }); // a photo and hint not cached by earlier tests
       const r = await send(c.cookie, bathroom());
       expect(r.status).toBe(502);
@@ -548,7 +800,7 @@ describe('AI describe a room photo', () => {
   it('says so when the photo is not of a room', async () => {
     const ai = mockOpenAI({ chat: () => reply.json({ ...ANALYSIS, isRoom: false, room: 'other' }) });
     try {
-      const { c } = await signUp();
+      const { c } = await verifiedSignUp();
       const r = await send(c.cookie, form({ consent: 'true' }, TINY_PNG, 'image/png'));
       expect(r.status).toBe(200);
       expect(r.json.analysis).toMatchObject({ isRoom: false, room: null, keepWorthy: [], problems: [], suggestedStyleIds: [] });

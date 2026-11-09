@@ -12,21 +12,25 @@
  *    bands and lease lengths are dropped; other unsupported values become "inferred".
  *  - When the AI and the rule reader both find a value for a fact the rules read reliably and they
  *    disagree, the rule value is kept as "inferred" and the AI's is shown next to it to check.
+ *  - The age and condition change refurbishment estimates, so the AI's are kept only when its quote
+ *    has a clue for them (an era or build year; wording such as "requires modernisation"), and
+ *    always as "inferred" for the person to check.
  *  - Unit conversions (per week → per month, sq ft → m², quarterly → annual) happen in code.
  *  - Red flags come from shared rules (src/lib/ai/importer.ts); the AI's own flags are kept only
  *    when they quote the listing, or (for gaps) when they match a short list of material topics the
- *    text really doesn't mention, worded by Streetkey. Features must be written in the text, and
+ *    text really doesn't mention, worded by Streetkey. A quoted flag's title must be about its quote
+ *    and name a concern, and without a known topic it is at most medium priority. Features must be written in the text, and
  *    nothing about who a home suits (schools, families, "young professionals"…) is added.
  */
 import { createHash } from 'node:crypto';
 import { normalisePostcode, POSTCODE_RE } from '../../../../src/engine/listings';
 import {
-  combineFlags, combineQuestions, foundOf, keyBefore, mention, missingOf, notPriceBefore, periodAfter, ruleReading, rulesOnlyResult, topicsIn,
+  combineFlags, combineQuestions, conditionClues, eraClues, foundOf, keyBefore, mention, missingOf, notPriceBefore, periodAfter, ruleRead, rulesOnlyResult, tenureOf, topicsIn,
   type Confidence, type FieldInfo, type FieldKey, type ImportResult, type ImportValues, type Period, type RedFlag, type SaleMethod,
 } from '../../../../src/lib/ai/importer';
 import { AiError, cached, chatJSON, HOUSE_RULES, untrusted } from '../core';
 import { S, type Infer } from '../schema';
-import { bandIn, clean, contextsOf, groundedPhrase, LEGAL_CLAIM, noMoney, numberIn, numbersIn, quoteIn, steers } from './validate';
+import { bandIn, clean, concernIn, contextsOf, groundedPhrase, LEGAL_CLAIM, noMoney, numberIn, numbersIn, quoteIn, sharesTerms, steers } from './validate';
 
 export const MAX_TEXT = 15_000;
 
@@ -134,13 +138,16 @@ const MISSING_TOPICS: { id: string; about: RegExp; mentioned: RegExp; title: str
 /* ───────────── merging ───────────── */
 /** Facts the rule reader reads reliably: on a disagreement its value is kept (as "inferred") and the AI's shown. */
 const RULE_FIRST = new Set<FieldKey>(['price', 'epc', 'councilTax', 'leaseYears', 'floorArea', 'serviceChargeAnnual', 'groundRentAnnual', 'postcode']);
+/** The same, but only when the rule reader found the value written out ("Tenure: Leasehold", "BEDROOMS: x2"). */
+const RULE_FIRST_WHEN_QUOTED = new Set<FieldKey>(['tenure', 'beds', 'baths']);
+const CONDITION_ORDER = ['good', 'fair', 'poor', 'derelict'] as const;
 
 /**
  * Merge the AI's reading with the rule-based reader.
  * Exported for tests; `text` is what the person pasted.
  */
 export function mergeExtraction(ai: Raw, text: string, url: string): ImportResult {
-  const r = ruleReading(text, url);
+  const { values: r, evidence: ruleEv } = ruleRead(text, url);
   const nums = numbersIn(text);
   const values: ImportValues = { features: [] };
   const fields: ImportResult['fields'] = {};
@@ -163,18 +170,26 @@ export function mergeExtraction(ai: Raw, text: string, url: string): ImportResul
     if (o.needStated && confidence !== 'stated') return null;
     return { value: c.value, confidence, evidence: ev };
   };
-  /** Choose between the AI's value and the rule reader's for one field. */
-  const put = <K extends FieldKey>(key: K, a: Cand<ImportValues[K & keyof ImportValues]>, rule: ImportValues[K & keyof ImportValues] | undefined, ruleConfidence: Confidence = 'stated', same: (x: unknown, y: unknown) => boolean = (x, y) => x === y) => {
+  /**
+   * Choose between the AI's value and the rule reader's for one field. The rule reader's value is
+   * "stated" only with the words it read it from (its quote is shown); anything it worked out is "inferred".
+   */
+  const put = <K extends FieldKey>(key: K, a: Cand<ImportValues[K & keyof ImportValues]>, rule: ImportValues[K & keyof ImportValues] | undefined, same: (x: unknown, y: unknown) => boolean = (x, y) => x === y) => {
     const ruleHas = rule !== undefined && rule !== null && rule !== '';
+    const rq = ruleEv[key]?.quote ?? null;
+    const rc: Confidence = rq ? ruleEv[key]!.confidence : 'inferred';
     let info: FieldInfo | null = null;
     let value: unknown;
-    if (a && ruleHas && same(a.value, rule)) { value = a.value; info = { confidence: a.confidence === 'stated' || (ruleConfidence === 'stated' && !a.evidence) ? 'stated' : 'inferred', evidence: a.evidence, source: 'both' }; }
-    else if (a && ruleHas && a.confidence === 'stated' && RULE_FIRST.has(key)) {
+    if (a && ruleHas && same(a.value, rule)) {
+      const stated = a.confidence === 'stated' || rc === 'stated';
+      value = a.value; info = { confidence: stated ? 'stated' : 'inferred', evidence: a.confidence === 'stated' ? a.evidence : rc === 'stated' ? rq : a.evidence ?? rq, source: 'both' };
+    }
+    else if (a && ruleHas && a.confidence === 'stated' && (RULE_FIRST.has(key) || (RULE_FIRST_WHEN_QUOTED.has(key) && rc === 'stated'))) {
       // Two readings of the same fact: keep the rule reader's, flag it to check and show the AI's beside it.
-      value = rule; info = { confidence: 'inferred', evidence: null, source: 'rules', alt: { value: a.value as string | number, evidence: a.evidence } };
+      value = rule; info = { confidence: 'inferred', evidence: rq, source: 'rules', alt: { value: a.value as string | number, evidence: a.evidence } };
     }
     else if (a && (a.confidence === 'stated' || !ruleHas)) { value = a.value; info = { confidence: a.confidence, evidence: a.evidence, source: 'ai' }; }
-    else if (ruleHas) { value = rule; info = { confidence: ruleConfidence, evidence: null, source: 'rules' }; }
+    else if (ruleHas) { value = rule; info = { confidence: rc, evidence: rq, source: 'rules' }; }
     if (info) { (values as Record<string, unknown>)[key] = value; fields[key] = info; }
   };
   /** Is this amount written in the quote with the right period next to it, and not after a charge, deposit or fee? */
@@ -194,7 +209,7 @@ export function mergeExtraction(ai: Raw, text: string, url: string): ImportResul
       if (!listing || listing.value !== (isRent ? 'rent' : 'sale')) listing = { value: isRent ? 'rent' : 'sale', confidence: c.confidence, evidence: c.evidence };
     }
   }
-  put('listing', listing, r.listing, 'inferred');
+  put('listing', listing, r.listing);
   // If the AI's verified reading says rent where the rule reader saw a sale price (or the reverse), the rule price is the wrong kind.
   if (values.listing && r.listing && values.listing !== r.listing && fields.listing?.source === 'ai') r.price = undefined;
   put('price', price, r.price);
@@ -205,7 +220,7 @@ export function mergeExtraction(ai: Raw, text: string, url: string): ImportResul
     const v = check(c); const t = v ? clean(v.value, max) : '';
     return v && t ? { ...v, value: t } : null;
   };
-  put('title', str(ai.title, 120), r.title ? clean(r.title, 120) || undefined : undefined, 'stated');
+  put('title', str(ai.title, 120), r.title ? clean(r.title, 120) || undefined : undefined);
   put('priceQualifier', str(ai.priceQualifier, 40), undefined);
   put('addressLine', str(ai.addressLine, 120), undefined);
   put('town', str(ai.town, 60), undefined);
@@ -223,14 +238,24 @@ export function mergeExtraction(ai: Raw, text: string, url: string): ImportResul
     const t = ai.type!.value;
     return yes(t === 'detached' ? TYPE_WORDS.detached.test(ev.replace(/semi[- ]?detached/gi, '')) : TYPE_WORDS[t].test(ev));
   } }) : null, r.type);
+  // The quote must give this tenure, read the way the rules read it: labels first, and negated or
+  // cancelled wording ("Share of freehold option not available") doesn't count.
   put('tenure', ai.tenure ? check(ai.tenure, { supports: (ev) => {
-    const sof = /share (of|in) (the )?freehold/i.test(ev);
-    if (ai.tenure!.value === 'share-of-freehold') return yes(sof);
-    if (ai.tenure!.value === 'freehold') return yes(!sof && /\bfreehold\b/i.test(ev));
-    return /\bleasehold\b/i.test(ev) ? 'yes' : /\blease\b/i.test(ev) ? 'weak' : 'no';
+    const said = tenureOf(ev);
+    if (said) return yes(said.value === ai.tenure!.value);
+    return ai.tenure!.value === 'leasehold' && /\blease\b/i.test(ev) ? 'weak' : 'no';
   } }) : null, r.tenure);
-  put('era', check(ai.era), undefined);
-  put('condition', check(ai.condition), r.condition, 'inferred');
+  // Age and condition move refurbishment estimates by thousands, so the AI's reading needs a quote with
+  // a clue for it (Victorian, built in 1895, new build; requires modernisation, beautifully presented),
+  // and is always shown as "inferred" for the person to check. Without one, it is dropped.
+  put('era', ai.era ? check(ai.era, { strict: true, supports: (ev) => {
+    const clue = eraClues(ev, { loose: true }).find((c) => c.value === ai.era!.value);
+    return clue ? 'weak' : 'no';
+  } }) : null, r.era);
+  put('condition', ai.condition ? check(ai.condition, { strict: true, supports: (ev) => {
+    const want = CONDITION_ORDER.indexOf(ai.condition!.value);
+    return conditionClues(ev).some((c) => Math.abs(CONDITION_ORDER.indexOf(c.value) - want) <= 1) ? 'weak' : 'no';
+  } }) : null, r.condition);
 
   // Auction terms raise a high-priority flag, so they need a quote that really says so (and isn't negated).
   const saleMethod = (() => {
@@ -280,7 +305,7 @@ export function mergeExtraction(ai: Raw, text: string, url: string): ImportResul
     const c = check({ ...ai.floorArea, value: amount }, { number: amount, strict: true, supports: (ev) => yes(contextsOf(amount, text, ev).some((x) => UNIT_WORDS[unit].test(x.after))) });
     return c ? { ...c, value: m2 } : null;
   })();
-  put('floorArea', area, r.floorArea, 'stated', (x, y) => Math.abs(Number(x) - Number(y)) <= 1);
+  put('floorArea', area, r.floorArea, (x, y) => Math.abs(Number(x) - Number(y)) <= 1);
 
   /** A charge: the amount, its period and the charge it belongs to must all be in the quote (or right after it). */
   const charge = (c: Raw['serviceCharge'], hi: number, zeroOk: boolean, key: string) => {
@@ -324,11 +349,21 @@ export function mergeExtraction(ai: Raw, text: string, url: string): ImportResul
     if (!ev) return;
     const about = `${title} ${detail}`;
     if (steers(about) || LEGAL_CLAIM.test(about)) return;
-    const topics = [...new Set([...topicsIn(ev), ...topicsIn(title)])];
+    // The title must be about its quote (shared words or the same topic), and must name a concern:
+    // "Bright three-bedroom terrace with a south-facing garden" quoting another sentence isn't a red flag.
+    const evTopics = topicsIn(ev);
+    const titleTopics = topicsIn(title);
+    if (!sharesTerms(title, ev) && !titleTopics.some((t) => evTopics.includes(t))) return;
+    // ...and name a concern, read for polarity: "Recently refurbished kitchen", "No onward chain" and "Spacious
+    // shared garden" are features, even though "refurbished", "no" and "shared" can be part of a concern.
+    if (!concernIn(title)) return;
+    const topics = [...new Set([...evTopics, ...titleTopics])];
     if (topics.length && topics.every((t) => !mention(text, t, values))) return; // "No admin fees", "flooded with light", "not subject to auction"
     const figures = [...about.matchAll(/£\s?([\d,.]+)\s?(k|m)?/gi)].map((m) => Number(m[1].replace(/,/g, '')) * (m[2]?.toLowerCase() === 'k' ? 1000 : m[2]?.toLowerCase() === 'm' ? 1e6 : 1));
     if (figures.some((n) => !numberIn(n, nums))) return;
-    aiFlags.push({ id: `ai-${i}`, severity: f.severity, title, detail, evidence: ev, source: 'ai' });
+    // Only the rules' own topics can be high priority; the AI's other findings are at most medium.
+    const severity = topics.length || f.severity !== 'high' ? f.severity : 'medium';
+    aiFlags.push({ id: `ai-${i}`, severity, title, detail, evidence: ev, source: 'ai' });
   });
   const redFlags = combineFlags(values, text, aiFlags.slice(0, 5));
   const aiQuestions = ai.questionsToAsk.slice(0, 8).map((q) => noMoney(clean(q, 160))).filter((q) => q.length >= 8 && !steers(q) && !LEGAL_CLAIM.test(q));

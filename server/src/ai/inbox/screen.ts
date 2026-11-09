@@ -16,14 +16,20 @@
  * Each signal family counts once (its strongest signal). Any AI failure or timeout lets the
  * message through. The whole screen answers within ~5.5s.
  *
+ * Steps 1-2 (code heuristics, repetition) also run when AI is off or paused: clear-cut cases are
+ * still held back by the rules; only moderation and the model are skipped. The model is asked at
+ * most SENDER_AI_PER_DAY times a day per sender (with background triage), so one person or network
+ * can't drive AI use by writing; past that, messages are screened by the rules alone. AI usage is
+ * charged to the sender ('u:<id>' or their anonymised network).
+ *
  * Held-back enquiries are kept (the lister sees them under "Filtered" and can release them);
  * the reason shown is written by code from the signals, never free text from the model.
  */
 import type { EnquiryScreenInput, ScreenVerdict } from '../hooks';
-import { aiAvailable, chatJSON, HOUSE_RULES, moderate, untrusted } from '../core';
+import { aiAvailable, chatJSON, HOUSE_RULES, moderate, untrusted, withActor } from '../core';
 import { S, type Infer } from '../schema';
 import { one } from '../../db';
-import { normaliseText } from './shared';
+import { normaliseText, senderAiAllowed } from './shared';
 
 export type SignalFamily = 'link' | 'payment' | 'crypto' | 'abroad' | 'phishing' | 'marketing' | 'offplatform' | 'repeat' | 'moderation' | 'shouting';
 /** strong = an unambiguous marker of spam or a scam (required before code alone holds a message back). */
@@ -43,7 +49,9 @@ const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 
 const RULES: { id: string; family: SignalFamily; weight: number; strong: boolean; re: RegExp; reason: string }[] = [
   // Paying in, or being paid in, cryptocurrency (or a wallet address): unambiguous.
-  { id: 'crypto', family: 'crypto', weight: 3, strong: true, re: /\b(?:pay|paid|send|sent|transfer|wire)\s+(?:you\s+|it\s+|me\s+|us\s+|the\s+\w+\s+)?(?:in|with|via|using|by)\s+(?:bitcoin|btc|usdt|tether|ethereum|eth|crypto(?:currency)?)\b|\b(?:bitcoin|btc|usdt|tether|ethereum|crypto(?:currency)?) (?:payment|transfer|wallet)s?\b|\b\d+(?:\.\d+)?\s?(?:btc|bitcoin|eth|usdt)\b|\bwallet address\b|\bbc1[ac-hj-np-z02-9]{25,62}\b|\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b|\b0x[a-fA-F0-9]{40}\b/i, reason: 'mentions paying in cryptocurrency' },
+  // Up to three words between the verb and the currency ("send deposit via crypto", "pay the full deposit in bitcoin"),
+  // but not where crypto is only where their money came from ("paid off my loan with crypto gains").
+  { id: 'crypto', family: 'crypto', weight: 3, strong: true, re: /\b(?:pay|paid|send|sent|transfer|wire)\s+(?:\w+\s+){0,3}(?:in|with|via|using|by)\s+(?:bitcoin|btc|usdt|tether|ethereum|eth|crypto(?:currency)?)\b(?!\s+(?:gains|profits|savings|investments?|money|wealth|holdings|portfolio))|\b(?:bitcoin|btc|usdt|tether|ethereum|crypto(?:currency)?) (?:payment|transfer|wallet|link|address)s?\b|\b\d+(?:\.\d+)?\s?(?:btc|bitcoin|eth|usdt)\b|\bwallet address\b|\bbc1[ac-hj-np-z02-9]{25,62}\b|\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b|\b0x[a-fA-F0-9]{40}\b/i, reason: 'mentions paying in cryptocurrency' },
   // Merely mentioning crypto ("I made my money in crypto") is not a scam on its own.
   { id: 'crypto-mention', family: 'crypto', weight: 2, strong: false, re: /\b(?:bitcoin|btc|usdt|tether|ethereum|crypto(?:currency)?|binance|coinbase)\b/i, reason: 'mentions cryptocurrency' },
   { id: 'wire', family: 'payment', weight: 3, strong: true, re: /\b(?:western union|moneygram|money ?gram|gift ?cards?|itunes cards?|steam cards?|google play cards?|amazon vouchers?|paysafe ?card|money transfer agent)\b/i, reason: 'mentions money-transfer services or gift cards' },
@@ -151,10 +159,13 @@ export async function screen(e: EnquiryScreenInput, opts: { budgetMs?: number } 
   const budget = opts.budgetMs ?? 5500;
   const left = () => budget - (Date.now() - started);
   const allow = (signals: Signal[], score: number, decidedBy: ScreenOutcome['decidedBy'] = 'none'): ScreenOutcome => ({ filter: false, signals, score, decidedBy });
-  if (!aiAvailable()) return allow([], 0);
+  const ai = aiAvailable();
   const meta = { purpose: 'inbox.screen', userId: null };
+  /** AI calls made for this message are charged to whoever sent it. */
+  const asSender = <T>(fn: () => Promise<T>) => withActor(e.senderKey ?? null, fn);
 
-  const moderation = withTimeout(moderate({ text: `${e.name}\n${e.message}`.slice(0, 4000) }, meta).catch(() => null), Math.min(3000, left()), null);
+  // Moderation is free and is a safety check, so it runs whenever AI is available. The rules run regardless.
+  const moderation = ai ? withTimeout(asSender(() => moderate({ text: `${e.name}\n${e.message}`.slice(0, 4000) }, meta)).catch(() => null), Math.min(3000, left()), null) : Promise.resolve(null);
   const [mod, repeat] = await Promise.all([moderation, repetition(e.email, e.message, e.enquiryId).catch(() => [] as Signal[])]);
   const signals = [...heuristics(e.message, e.name), ...repeat];
   if (mod?.flagged) {
@@ -167,12 +178,15 @@ export async function screen(e: EnquiryScreenInput, opts: { budgetMs?: number } 
   if (score <= 1) return allow(signals, score);
   if (a.rulesDecide) return { filter: true, reason: reasonFrom(a.kind, signals), signals, score, decidedBy: 'rules' };
 
-  // Unusual but not clear-cut: ask a small model, briefly. Any failure lets the message through.
-  if (left() < 1500) return allow(signals, score);
-  const verdict = await withTimeout(chatJSON<ClassifyT>([
+  // Unusual but not clear-cut: ask a small model, briefly (AI on, time left, and within the sender's daily allowance).
+  // Any failure lets the message through.
+  if (!ai || left() < 1500) return allow(signals, score);
+  if (!(await senderAiAllowed(e.senderKey))) return allow(signals, score);
+  const what = e.followUp ? `A follow-up message in a conversation that began as ${e.kind === 'offer' ? 'an offer' : e.kind === 'viewing' ? 'a viewing request' : 'a question'}` : `Enquiry type: ${e.kind}`;
+  const verdict = await withTimeout(asSender(() => chatJSON<ClassifyT>([
     { role: 'system', content: CLASSIFY_PROMPT },
-    { role: 'user', content: `Enquiry type: ${e.kind}\nAutomatic checks noticed: ${signals.map((s) => s.reason).join('; ') || 'nothing unusual'}\n\n${untrusted('enquiry', `Name: ${e.name}\nMessage:\n${e.message}`, 3000)}` },
-  ], Classify, 'enquiry_screen', { ...meta, role: 'fast', maxTokens: 600, effort: 'low', timeoutMs: Math.max(1500, Math.min(4000, left() - 200)) }).catch(() => null), left() - 100, null);
+    { role: 'user', content: `${what}\nAutomatic checks noticed: ${signals.map((s) => s.reason).join('; ') || 'nothing unusual'}\n\n${untrusted('enquiry', `Name: ${e.name}\nMessage:\n${e.message}`, 3000)}` },
+  ], Classify, 'enquiry_screen', { ...meta, role: 'fast', maxTokens: 600, effort: 'low', timeoutMs: Math.max(1500, Math.min(4000, left() - 200)) })).catch(() => null), left() - 100, null);
   if (verdict && (verdict.verdict === 'scam' || verdict.verdict === 'spam') && verdict.confidence === 'high') {
     return { filter: true, reason: reasonFrom(verdict.verdict, signals), signals, score, decidedBy: 'model' };
   }

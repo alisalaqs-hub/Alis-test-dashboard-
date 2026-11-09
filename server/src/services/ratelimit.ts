@@ -58,11 +58,12 @@ export const anonId = (ip: string | undefined | null) => `ip:${createHash('sha25
 
 const who = (req: FastifyRequest, by: LimitBy) => (by === 'ip' ? ipKey(req.ip) : by === 'user' ? `u:${req.user?.id ?? ipKey(req.ip)}` : req.user ? `u:${req.user.id}` : ipKey(req.ip));
 
-export async function enforce(req: FastifyRequest, name: string, max: number, windowSec: number, by: LimitBy = 'ip', message?: string) {
+/** Throws 429 (code 'rate_limited' unless another is given, with retryAfter in seconds) once the limit is used up. */
+export async function enforce(req: FastifyRequest, name: string, max: number, windowSec: number, by: LimitBy = 'ip', message?: string, code = 'rate_limited') {
   const r = await hit(`${name}:${who(req, by)}`, max, windowSec);
   if (!r.ok) {
     const mins = Math.ceil(r.resetSec / 60);
-    throw new HttpError(429, message ?? (windowSec >= 3600 ? `You’ve reached the limit for now. Please try again in about ${mins >= 60 ? `${Math.ceil(mins / 60)} hour${mins >= 120 ? 's' : ''}` : `${mins} minutes`}.` : 'Too many attempts. Please wait a minute and try again.'), 'rate_limited', { retryAfter: String(r.resetSec) });
+    throw new HttpError(429, message ?? (windowSec >= 3600 ? `You’ve reached the limit for now. Please try again in about ${mins >= 60 ? `${Math.ceil(mins / 60)} hour${mins >= 120 ? 's' : ''}` : `${mins} minutes`}.` : 'Too many attempts. Please wait a minute and try again.'), code, { retryAfter: String(r.resetSec) });
   }
   return r;
 }

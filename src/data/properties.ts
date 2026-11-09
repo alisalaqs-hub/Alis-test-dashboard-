@@ -304,17 +304,27 @@ PROPERTIES.push(
   },
 );
 
-export const getProperty = (id: string) => PROPERTIES.find((p) => p.id === id);
+/**
+ * Listings merged into another listing for the same home (see dedupe in engine/listings): left out of
+ * PROPERTIES, so no list or search shows the home twice, but still found by their own reference
+ * (a link to an owner's post that duplicates an agent's listing still opens and prefills from that post).
+ */
+const mergedAway = new Map<string, Property>();
+export const getProperty = (id: string) => PROPERTIES.find((p) => p.id === id) ?? mergedAway.get(id);
 
 /** Base (demo) set, captured before any dynamic listings are registered. */
 const BASE_COUNT = PROPERTIES.length;
 /**
  * Register user-posted, feed-ingested and privately tracked listings into the
  * shared registry so every engine and screen can use them. Replaces any
- * previously registered dynamic listings.
+ * previously registered dynamic listings. `hidden`: listings merged into another
+ * one for the same home, findable only by getProperty(id). Optional.
  */
-export function setDynamicListings(list: Property[]) {
+export function setDynamicListings(list: Property[], hidden: Property[] = []) {
   PROPERTIES.splice(BASE_COUNT, PROPERTIES.length - BASE_COUNT, ...list.filter((p) => !PROPERTIES.slice(0, BASE_COUNT).some((b) => b.id === p.id)));
+  mergedAway.clear();
+  const shown = new Set(PROPERTIES.map((p) => p.id));
+  for (const p of hidden) if (!shown.has(p.id)) mergedAway.set(p.id, p);
 }
 export const baseListings = () => PROPERTIES.slice(0, BASE_COUNT);
 export const publicListings = () => PROPERTIES.filter((p) => p.visibility !== 'private' && p.status !== 'withdrawn');

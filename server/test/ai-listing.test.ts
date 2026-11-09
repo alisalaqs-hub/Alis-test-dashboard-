@@ -171,6 +171,11 @@ describe('POST /api/ai/listing/describe', () => {
     expect(out.headline).toBe('Three-bedroom terraced house in Walthamstow');
     expect(out.description).toMatch(/^A 3-bedroom terraced house for sale in Walthamstow, London\./);
     expect(out.keyFeatures.length).toBeGreaterThanOrEqual(5);
+    // facts topped up from the structured fields are marked, so they aren't copied into the saved features (L13)
+    expect(out.structuredFeatures).toEqual(expect.arrayContaining(['3 bedrooms', '1 bathroom']));
+    expect(out.structuredFeatures.some((x) => /m²/.test(x))).toBe(true);
+    expect(out.structuredFeatures).not.toContain('Close to station');
+    expect(out.keyFeatures).toContain('Close to station');
   });
 });
 
@@ -424,9 +429,37 @@ describe('POST /api/ai/listing/precheck', () => {
       expect(wording.find((i: { message: string }) => /Best flat/.test(i.message))).toMatchObject({ severity: 'warn' });
       expect(wording.find((i: { message: string }) => /Offers over/.test(i.message))).toMatchObject({ severity: 'block' });
       expect(bySource('ai')).toHaveLength(2);
+      // rule-based "must fix" items are enforced (they block publishing everywhere); AI points are advice
+      expect(wording.find((i: { message: string }) => /No DSS/.test(i.message))).toMatchObject({ severity: 'block', reason: 'discrimination', enforced: true });
+      expect(bySource('ai').every((i: { enforced: boolean }) => i.enforced === false)).toBe(true);
       expect(issues[0].severity).toBe('block');
       expect(issues.at(-1).severity).toBe('tip');
       expect(ai.calls('chat')[0].body.messages[1].content).toContain('<<<listing_description');
+    } finally { ai.restore(); }
+  });
+
+  it('flags who-it-would-suit wording as a check, not a must-fix, and an AI "block" alone never stops publishing', async () => {
+    const ai = mockOpenAI({ chat: () => reply.json({ issues: [{ severity: 'block', field: 'description', message: 'This wording might put some people off.' }] }) });
+    try {
+      const { c } = await signUp();
+      const r = await c.post('/api/ai/listing/precheck', { facts: SALE_FACTS, description: 'A three-bedroom terraced house with a garden, ideal for professionals.', photoCount: 4 });
+      expect(r.status).toBe(200);
+      const steer = r.json.issues.find((i: { source: string }) => i.source === 'wording');
+      expect(steer).toMatchObject({ severity: 'warn', reason: 'steering', enforced: false });
+      expect(r.json.issues.find((i: { source: string }) => i.source === 'ai')).toMatchObject({ severity: 'block', enforced: false });
+      expect(r.json.ready).toBe(true);
+      // the shared compliance checks agree: nothing blocks
+      expect(r.json.checks.filter((x: { ok: boolean; severity: string }) => !x.ok && x.severity === 'block')).toEqual([]);
+    } finally { ai.restore(); }
+  });
+
+  it('warns about contact details, payment requests and scam wording before submitting (TS-14)', async () => {
+    const ai = mockOpenAI({ chat: () => reply.json({ issues: [] }) });
+    try {
+      const { c } = await signUp();
+      const r = await c.post('/api/ai/listing/precheck', { facts: SALE_FACTS, description: 'A three-bedroom house. Call 07700 900123 or WhatsApp me. Pay a holding deposit by bank transfer before viewing. I am currently abroad.', photoCount: 4 });
+      const ids = r.json.issues.filter((i: { source: string }) => i.source === 'checks').map((i: { checkId: string; severity: string }) => `${i.checkId}:${i.severity}`);
+      expect(ids).toEqual(expect.arrayContaining(['contact:warn', 'payment:warn', 'scam:warn']));
     } finally { ai.restore(); }
   });
 
@@ -761,5 +794,60 @@ describe('price guide basis and timing', () => {
       expect(r.status).toBe(504);
       expect(r.json.error.message).toMatch(/took too long/);
     } finally { Object.assign(PRICE_TIMING, before); ai.restore(); }
+  });
+});
+
+/* ───────── alt text is public: no contact details or links (INJ-10) ───────── */
+describe('AI alt text with contact details', () => {
+  const signReply = (body: any) => reply.json({ // eslint-disable-line @typescript-eslint/no-explicit-any
+    photos: imagesIn(body).map((_, i) => ({ photo: i + 1, room: 'front exterior', alt: 'House with a sign reading call 07700 900123 or visit www.agent-site.co.uk', quality: { score: 7, issues: [] }, features: [], flags: [] })),
+  });
+
+  it('uses the room name instead, in the background check and the preview', async () => {
+    const ai = mockOpenAI({ chat: (body) => signReply(body) });
+    try {
+      const { c, ref } = await newListing({}, { consent: true });
+      const up = await upload(c, ref, [{ name: 'IMG_1.png', data: FRONT }]);
+      const row = (await q<{ alt: string; ai_alt: string }>('SELECT alt, ai_alt FROM listing_photos WHERE id = $1', [up.json.added[0].id]))[0];
+      expect(row).toEqual({ alt: 'Front exterior', ai_alt: 'Front exterior' });
+      const m = multipart([{ field: 'photos', name: 'a.png', type: 'image/png', data: pngOfSize(1500, 1000) }], { consent: 'true' });
+      const pre = await c.raw('POST', '/api/ai/listing/photos/preview', m.payload, m.headers);
+      expect(pre.json.photos[0].analysis.alt).toBe('Front exterior');
+    } finally { ai.restore(); }
+  });
+});
+
+/* ───────── the AI allowance is charged only when the model is called (COST-9) ───────── */
+describe('AI allowance for listing tools (COST-9)', () => {
+  it('charges nothing for rejected forms, someone else’s listing, nothing to check, no price evidence or a cached answer', async () => {
+    const ai = mockOpenAI({ chat: (body) => (schemaName(body) === 'listing_precheck' ? reply.json({ issues: [] }) : visionReply(body)) });
+    try {
+      const other = await newListing();
+      const { c, user } = await signUp({ accountType: 'owner' });
+      const mine = (await c.post('/api/listings', { ...LISTING })).json.listing.ref as string;
+      const used = async (name: string) => (await q<{ n: number }>(`SELECT coalesce(sum(count), 0)::int n FROM rate_limits WHERE key = $1`, [`${name}:u:${user.id}`]))[0].n;
+      const TOOLS = ['describe', 'photos_preview', 'photos_check', 'price_guide', 'precheck'];
+
+      expect((await c.post('/api/ai/listing/describe', {})).status).toBe(400);
+      expect((await c.post('/api/ai/listing/photos/preview', { photos: [] })).status).toBe(400);
+      expect((await c.post(`/api/ai/listing/${other.ref}/photos/check`, { consent: true })).status).toBe(403);
+      expect((await c.post(`/api/ai/listing/${mine}/photos/check`, { consent: true })).json).toMatchObject({ job: null, note: 'All photos have already been checked.' });
+      expect((await c.post(`/api/ai/listing/${mine}/photos/check`, { recheck: true })).json).toMatchObject({ job: null });
+      expect((await c.post('/api/ai/listing/price-guide', { postcode: 'E17 4QH', type: 'terraced', beds: 3, floorArea: 2, condition: 'fair', channel: 'sale' })).status).toBe(400);
+      const noEvidence = await c.post('/api/ai/listing/price-guide', { postcode: 'JE2 3AB', type: 'flat', beds: 2, floorArea: 64, condition: 'good', channel: 'sale' });
+      expect(noEvidence.json.narrative).toBeNull();
+      expect((await c.post('/api/ai/listing/precheck', { facts: { ...SALE_FACTS, channel: 'swap' }, description: '' })).status).toBe(400);
+      expect(await used('ai.daily')).toBe(0);
+      for (const t of TOOLS) expect(await used(`ai.listing.${t}.m`)).toBe(0);
+      expect(ai.calls('chat')).toHaveLength(0);
+
+      // A valid request that reaches the model is charged once; the same request again comes from the cache, free.
+      const body = { facts: SALE_FACTS, description: `A three-bedroom terraced house with a garden and period features (${user.id}).`, photoCount: 4 };
+      expect((await c.post('/api/ai/listing/precheck', body)).json.aiUsed).toBe(true);
+      expect((await c.post('/api/ai/listing/precheck', body)).json.aiUsed).toBe(true);
+      expect(ai.calls('chat')).toHaveLength(1);
+      expect(await used('ai.listing.precheck.m')).toBe(1);
+      expect(await used('ai.daily')).toBe(1);
+    } finally { ai.restore(); }
   });
 });

@@ -33,12 +33,10 @@ export const isInlineSafe = (kind: string) => handlers.get(kind)?.inlineSafe ?? 
 export const jobKinds = () => [...handlers.keys()];
 
 /**
- * @param o.dedupe true: reuse a queued or running job for the same subject; 'queued': only reuse one that
- *        hasn't started yet (use when the job reads data that may have just changed, e.g. embeddings).
- */
-/**
  * Queue a job. Its AI usage is charged to `actor` (default: whoever the current request is for, else the user),
  * so per-person token caps also cover work done in the background.
+ * @param o.dedupe true: reuse a queued or running job for the same subject; 'queued': only reuse one that
+ *        hasn't started yet (use when the job reads data that may have just changed, e.g. embeddings).
  */
 export async function enqueue(kind: string, input: unknown, o: { userId?: string | null; subject?: string | null; dedupe?: boolean | 'queued'; actor?: string | null } = {}) {
   if (!handlers.has(kind)) throw new Error(`no handler for job ${kind}`);

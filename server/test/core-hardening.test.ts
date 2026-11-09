@@ -6,7 +6,7 @@ import { AiError, aiAvailable, aiOffReason, chatJSON, refreshAiState, withActor 
 import { S } from '../src/ai/schema';
 import { ipKey, anonId } from '../src/services/ratelimit';
 import { fetchExternalImage, fetchableExternal, getFile, isBlockedAddress, safeExternalUrl } from '../src/services/storage';
-import { client, signUp } from './helpers';
+import { client, getApp, signUp } from './helpers';
 import { outbox } from '../src/services/email';
 import { mockOpenAI, reply, TINY_PNG } from './openai-mock';
 import { fakeHosts } from './setup';
@@ -52,6 +52,34 @@ describe('external photo fetching (SSRF guard)', () => {
       expect(await getFile('ext:http://b.example.com/2.jpg')).toBeNull();
       expect((await getFile('ext:https://b.example.com/2.jpg'))?.length).toBe(PNG.length);
     } finally { for (const h of ['a', 'b', 'evil', 'loop', 'html']) fakeHosts.delete(`${h}.example.com`); }
+  });
+});
+
+describe('CORS when the website and the API are on different origins', () => {
+  it('answers an allowed origin that isn’t the API’s own (the website dev server), and keeps the origin check for writes', async () => {
+    const app = await getApp();
+    const site = config.publicUrl; // PUBLIC_URL: the website, e.g. Vite on :5196 while the API runs on :8816
+    const call = (method: 'GET' | 'POST' | 'OPTIONS', url: string, origin: string, host = 'localhost:8816') => app.inject({ method, url, headers: { origin, host } });
+
+    const get = await call('GET', '/api/health', site);
+    expect(get.headers).toMatchObject({ 'access-control-allow-origin': site, 'access-control-allow-credentials': 'true' });
+    expect(String(get.headers.vary)).toMatch(/Origin/);
+    const preflight = await call('OPTIONS', '/api/auth/login', site);
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers['access-control-allow-methods']).toContain('PATCH');
+    expect(preflight.headers['access-control-allow-headers']).toBe('Content-Type');
+    // Same origin (the API serves the website itself): nothing to add.
+    expect((await call('GET', '/api/health', site, new URL(site).host)).headers['access-control-allow-origin']).toBeUndefined();
+
+    // Any other origin gets no CORS headers, and its state-changing requests are refused as before.
+    const evil = 'https://evil.example';
+    expect((await call('GET', '/api/health', evil)).headers['access-control-allow-origin']).toBeUndefined();
+    const preEvil = await call('OPTIONS', '/api/auth/login', evil);
+    expect(preEvil.headers['access-control-allow-origin']).toBeUndefined();
+    const write = await call('POST', '/api/auth/logout', evil);
+    expect(write.statusCode).toBe(403);
+    expect(write.json().error.code).toBe('bad_origin');
+    expect((await call('POST', '/api/auth/logout', site)).statusCode).toBe(200);
   });
 });
 

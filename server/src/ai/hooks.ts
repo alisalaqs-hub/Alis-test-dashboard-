@@ -10,14 +10,20 @@ export interface HookPayloads {
   listingSubmitted: { listingId: string; ref: string; userId: string | null };
   /** Listings became publicly visible (approved, published, agency verified, feed upload). */
   listingsPublished: { listingIds: string[] };
-  /** Listing content changed (edit), e.g. to refresh embeddings. */
-  listingUpdated: { listingId: string; ref: string; fields: string[] };
+  /**
+   * Listing content changed (edit), e.g. to refresh embeddings. fields: the columns that changed ('photos' for a
+   * reorder or deletion, 'photo_alt' for alt text). userId: who made the change, when a person did.
+   */
+  listingUpdated: { listingId: string; ref: string; fields: string[]; userId?: string | null };
   /** New photos stored for a listing. */
   photosUploaded: { listingId: string; ref: string; photoIds: string[]; userId: string | null };
-  /** A buyer/tenant sent an enquiry. */
-  enquiryCreated: { enquiryId: string; listingId: string };
-  /** A new message in an enquiry thread. */
-  enquiryMessage: { enquiryId: string; author: 'enquirer' | 'lister' };
+  /**
+   * A buyer/tenant sent an enquiry. senderKey identifies who sent it ('u:<user id>', or an anonymised
+   * visitor network from anonId(ip)), so AI work an enquirer sets off can be capped per sender.
+   */
+  enquiryCreated: { enquiryId: string; listingId: string; senderKey: string };
+  /** A new message in an enquiry thread (senderKey: 'u:<user id>' of whoever wrote it). */
+  enquiryMessage: { enquiryId: string; author: 'enquirer' | 'lister'; senderKey: string };
 }
 type Name = keyof HookPayloads;
 const subs: { [K in Name]?: ((p: HookPayloads[K]) => Promise<unknown> | unknown)[] } = {};
@@ -33,7 +39,11 @@ export async function emit<K extends Name>(name: K, payload: HookPayloads[K]) {
 }
 
 /* ───────── screening (a hook that can stop an action) ───────── */
-export interface EnquiryScreenInput { enquiryId: string; listingId: string; name: string; email: string; message: string; kind: string }
+/**
+ * What the screener sees. For a follow-up message in an existing conversation, message is the new
+ * message and followUp is true. senderKey ('u:<id>' or anonId(ip)) lets the screener cap AI use per sender.
+ */
+export interface EnquiryScreenInput { enquiryId: string; listingId: string; name: string; email: string; message: string; kind: string; senderKey?: string | null; followUp?: boolean }
 export interface ScreenVerdict { filter: boolean; reason?: string }
 let enquiryScreener: ((e: EnquiryScreenInput) => Promise<ScreenVerdict>) | null = null;
 /** Register the spam/scam screen for new enquiries (one screener; the AI inbox feature provides it). */

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { getProperty, photosFor, PROPERTIES } from '../data/properties';
+import { getProperty, photosFor, type Property } from '../data/properties';
 import { dealScore, refurbInputFor } from '../engine/insights';
 import { estimateRefurb } from '../engine/refurb';
 import { rentalScenario, valuationScenario } from '../engine/valuation';
@@ -74,22 +74,42 @@ function FloorPlan({ beds, type, area }: { beds: number; type: string; area: num
   );
 }
 
+/**
+ * A listing page. Demo listings and ones already loaded are in the shared registry; a live Streetkey
+ * listing opened from a link (an email, an alert, a shared URL) is fetched here and kept in this
+ * page's own state, so the page shows it as soon as it arrives.
+ */
 export default function PropertyDetails() {
   const { id = 'wal-001' } = useParams();
   const { online, status, loadListing } = useServer();
-  const [missing, setMissing] = useState(false);
-  const known = getProperty(id);
-  useEffect(() => { setMissing(false); if (!known && isServerRef(id) && online) void loadListing(id).then((r) => { if (!r) setMissing(true); }); }, [id, online, known, loadListing]);
-  if (!known && isServerRef(id)) {
-    if (status === 'checking' || (online && !missing)) return <p className="muted small" style={{ padding: 20 }}>Loading listing…</p>;
-    return <div className="card stack" style={{ maxWidth: 560 }}><h2>Listing not found</h2><p className="muted">It may have been sold, let or withdrawn.</p><Link className="btn" to="/search">Search homes</Link></div>;
+  // Re-render when the store's listings change (they are registered while the store renders).
+  useStore();
+  const [fetched, setFetched] = useState<{ id: string; p: Property | null } | null>(null);
+  const registered = getProperty(id);
+  const loaded = fetched?.id === id ? fetched.p : null;
+  const p = registered ?? loaded ?? undefined;
+  const needsFetch = !registered && isServerRef(id) && online;
+  useEffect(() => {
+    if (!needsFetch) return;
+    let live = true;
+    void loadListing(id).then((r) => { if (live) setFetched({ id, p: r }); }, () => { if (live) setFetched({ id, p: null }); });
+    return () => { live = false; };
+  }, [id, needsFetch, loadListing]);
+  if (!p) {
+    if (isServerRef(id) && (status === 'checking' || (needsFetch && fetched?.id !== id))) return <p className="muted small" role="status" style={{ padding: 20 }}>Loading listing…</p>;
+    return (
+      <div className="card stack" style={{ maxWidth: 560 }}>
+        <h2>Listing not found</h2>
+        <p className="muted">{isServerRef(id) && status === 'offline' ? 'This listing is on the live Streetkey site and can’t be loaded right now. Please try again later.' : 'It may have been sold, let or withdrawn.'}</p>
+        <Link className="btn" to="/search">Search homes</Link>
+      </div>
+    );
   }
-  return <PropertyDetailsInner id={id} />;
+  return <PropertyDetailsInner key={p.id} property={p} />;
 }
 
-function PropertyDetailsInner({ id }: { id: string }) {
+function PropertyDetailsInner({ property: p }: { property: Property }) {
   const { online } = useServer();
-  const p = getProperty(id) ?? PROPERTIES[0];
   const live = online && isServerRef(p.id);
   const { saved, compare, toggleSaved, toggleCompare, requestViewing, viewings } = useStore();
   const [lightbox, setLightbox] = useState<number | null>(null);

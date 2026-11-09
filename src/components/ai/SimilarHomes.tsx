@@ -1,9 +1,10 @@
 /**
  * "Similar homes" on a property page.
  * With Streetkey AI: listings matched by meaning (description and features) within hard limits
- * (same market, ±35% price, ±1 bedroom). Without it (static preview, AI off, or a failure):
- * the same limits ranked by location, price and size in the browser. Each card's reason is
- * written in code from the facts, never by the model.
+ * (same market, ±35% price, ±1 bedroom, the same area or city unless fewer than 3 local homes
+ * qualify). Without it (static preview, AI off, or a failure): the same limits ranked by location,
+ * price and size in the browser. Each card's reason is written in code from the facts, never by
+ * the model, and a home in another city says which city it is in.
  *
  * Cost: the AI is asked only once the section is about to scroll into view, only for listings
  * the server can know (live Streetkey listings and the demo set), and at most once per listing
@@ -13,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { baseListings, PROPERTIES, type Property } from '../../data/properties';
 import { aiGet, useAi } from '../../lib/ai/core';
-import { isLiveRef, ruleSimilar, type SimilarItem, type SimilarResult } from '../../lib/ai/search';
+import { isLiveRef, placeLabel, ruleSimilar, type SimilarItem, type SimilarResult } from '../../lib/ai/search';
 import { mediaUrl } from '../../lib/api';
 import { gbp, HouseArt, Section } from '../ui';
 import { AiLabel, AiThinking } from './Ai';
@@ -85,7 +86,7 @@ export function SimilarHomes({ property }: { property: Property }) {
                   </Link>
                   <Link to={`/property/${it.id}`} className="pcard-body">
                     <span className="num" style={{ fontSize: 19 }}>{price(it)}</span>
-                    <span className="small" style={{ fontWeight: 600 }}>{it.beds ? `${it.beds} bed ` : ''}{TYPE[it.type] ?? it.type} · {it.town.split(',')[0]}</span>
+                    <span className="small" style={{ fontWeight: 600 }}>{it.beds ? `${it.beds} bed ` : ''}{TYPE[it.type] ?? it.type} · {placeLabel(property, it)}</span>
                     <span className="aisr-reason">{it.reason}</span>
                   </Link>
                 </li>
@@ -94,7 +95,7 @@ export function SimilarHomes({ property }: { property: Property }) {
             <p className="xs muted" style={{ marginTop: 6 }}>
               {semantic
                 ? 'Matched by Streetkey AI on each listing’s description and features, within 35% of the price and one bedroom either way.'
-                : 'Matched on location, price (within 35%) and bedrooms (one either way).'}
+                : 'Matched on location, price (within 35%) and bedrooms (one either way). Homes in other cities are shown only when there are few nearby.'}
             </p>
           </>
         )}

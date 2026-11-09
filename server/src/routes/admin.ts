@@ -6,6 +6,16 @@ import { mails } from '../services/email';
 import { audit, HttpError, notFound, parse, requireAdmin } from '../services/http';
 import { checksFor, LISTING_SELECT, photosFor, toDTO, type ListingRow } from '../services/listings';
 import { emit } from '../ai/hooks';
+import { latestReview } from '../ai/trust/store';
+
+/** What the automatic check said when an admin decided (kept in the audit trail, so overrides can be reviewed later). */
+async function reviewContext(listingId: string) {
+  const r = await latestReview(listingId).catch(() => null);
+  return r ? { reviewId: r.id, risk: r.risk, score: r.score, rulesOnly: r.rulesOnly, stale: r.stale, ruleConcerns: r.ruleConcerns } : { reviewId: null };
+}
+
+const RefParams = z.object({ ref: z.string().trim().min(3).max(40).regex(/^[a-z0-9-]+$/i, 'That isn’t a listing reference.') });
+const IdParams = z.object({ id: z.uuid('That isn’t a valid id.') });
 
 export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/summary', async (req) => {
@@ -26,9 +36,11 @@ export async function adminRoutes(app: FastifyInstance) {
     const { status } = parse(z.object({ status: z.enum(['draft', 'pending', 'live', 'under_offer', 'sold', 'let', 'withdrawn', 'rejected']).default('pending') }), req.query);
     const rows = await q<ListingRow>(`${LISTING_SELECT} WHERE l.status = $1 ORDER BY l.updated_at ASC LIMIT 200`, [status]);
     const photos = await photosFor(rows.map((r) => r.id));
+    // Agency feed photos are hosted on the agency's own website: the admin page asks before loading them (it would share the admin's IP address).
+    const external = new Set((await q<{ id: string }>(`SELECT id FROM listing_photos WHERE listing_id = ANY($1) AND storage_key LIKE 'ext:%'`, [rows.map((r) => r.id)])).map((p) => p.id));
     return {
       items: rows.map((r) => ({
-        ...toDTO(r, photos.get(r.id) ?? [], { userId: admin.id, admin: true }),
+        ...toDTO(r, (photos.get(r.id) ?? []).map((p) => (external.has(p.id) ? { ...p, external: true } : p)), { userId: admin.id, admin: true }),
         lister: r.organisation_name ?? r.owner_name ?? null, ownershipDeclared: r.ownership_declared,
         checks: checksFor(r, (photos.get(r.id) ?? []).length),
       })),
@@ -37,36 +49,35 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.post('/api/admin/listings/:ref/approve', async (req) => {
     requireAdmin(req);
-    const { ref } = req.params as { ref: string };
-    const r = await one<{ title: string | null; address_line: string; email: string | null }>(
+    const { ref } = parse(RefParams, req.params);
+    const r = await one<{ id: string; title: string | null; address_line: string; email: string | null }>(
       `WITH up AS (UPDATE listings SET status = 'live', rejection_reason = NULL, published_at = coalesce(published_at, now()), updated_at = now()
-                   WHERE ref = $1 AND status = 'pending' RETURNING title, address_line, owner_user_id)
-       SELECT up.title, up.address_line, u.email FROM up LEFT JOIN users u ON u.id = up.owner_user_id`, [ref]);
-    if (!r) throw new HttpError(409, 'Only pending listings can be approved.', 'bad_status');
+                   WHERE ref = $1 AND status = 'pending' RETURNING id, title, address_line, owner_user_id)
+       SELECT up.id, up.title, up.address_line, u.email FROM up LEFT JOIN users u ON u.id = up.owner_user_id`, [ref]);
+    if (!r) throw new HttpError(409, 'Only pending listings can be approved. Someone may have dealt with it already.', 'bad_status');
     if (r.email) await mails.listingLive(r.email, r.title ?? r.address_line, ref);
-    await audit(req, 'admin.listing_approved', `listing:${ref}`);
-    const live = await one<{ id: string }>('SELECT id FROM listings WHERE ref = $1', [ref]);
-    if (live) await emit('listingsPublished', { listingIds: [live.id] });
+    await audit(req, 'admin.listing_approved', `listing:${ref}`, await reviewContext(r.id));
+    await emit('listingsPublished', { listingIds: [r.id] });
     return { status: 'live' };
   });
 
   app.post('/api/admin/listings/:ref/reject', async (req) => {
     requireAdmin(req);
-    const { ref } = req.params as { ref: string };
+    const { ref } = parse(RefParams, req.params);
     const { reason } = parse(z.object({ reason: z.string().trim().min(5, 'Give the lister a reason they can act on.').max(1000) }), req.body);
-    const r = await one<{ title: string | null; address_line: string; email: string | null }>(
+    const r = await one<{ id: string; title: string | null; address_line: string; email: string | null }>(
       `WITH up AS (UPDATE listings SET status = 'rejected', rejection_reason = $2, updated_at = now()
-                   WHERE ref = $1 AND status IN ('pending', 'live', 'under_offer') RETURNING title, address_line, owner_user_id)
-       SELECT up.title, up.address_line, u.email FROM up LEFT JOIN users u ON u.id = up.owner_user_id`, [ref, reason]);
-    if (!r) throw new HttpError(409, 'That listing can’t be rejected in its current state.', 'bad_status');
+                   WHERE ref = $1 AND status IN ('pending', 'live', 'under_offer') RETURNING id, title, address_line, owner_user_id)
+       SELECT up.id, up.title, up.address_line, u.email FROM up LEFT JOIN users u ON u.id = up.owner_user_id`, [ref, reason]);
+    if (!r) throw new HttpError(409, 'That listing can’t be rejected in its current state. Someone may have dealt with it already.', 'bad_status');
     if (r.email) await mails.listingRejected(r.email, r.title ?? r.address_line, reason);
-    await audit(req, 'admin.listing_rejected', `listing:${ref}`, { reason });
+    await audit(req, 'admin.listing_rejected', `listing:${ref}`, { reason, ...(await reviewContext(r.id)) });
     return { status: 'rejected' };
   });
 
   app.post('/api/admin/listings/:ref/verify-ownership', async (req) => {
     requireAdmin(req);
-    const { ref } = req.params as { ref: string };
+    const { ref } = parse(RefParams, req.params);
     const { verified, note } = parse(z.object({ verified: z.boolean().default(true), note: z.string().max(500).optional() }), req.body ?? {});
     const r = await one(`UPDATE listings SET ownership_verified = $2, updated_at = now() WHERE ref = $1 RETURNING id`, [ref, verified]);
     if (!r) throw notFound('That listing');
@@ -84,7 +95,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.post('/api/admin/orgs/:id/verify', async (req) => {
     requireAdmin(req);
-    const { id } = req.params as { id: string };
+    const { id } = parse(IdParams, req.params);
     const { verified } = parse(z.object({ verified: z.boolean().default(true) }), req.body ?? {});
     const r = await one('UPDATE organisations SET verified = $2 WHERE id = $1 RETURNING id', [id, verified]);
     if (!r) throw notFound('That organisation');
@@ -104,7 +115,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.post('/api/admin/users/:id/role', async (req) => {
     const admin = requireAdmin(req);
-    const { id } = req.params as { id: string };
+    const { id } = parse(IdParams, req.params);
     const { role } = parse(z.object({ role: z.enum(['member', 'admin']) }), req.body);
     if (id === admin.id && role !== 'admin') throw new HttpError(409, 'You can’t remove your own admin role.', 'self');
     const r = await one('UPDATE users SET role = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING id', [id, role]);

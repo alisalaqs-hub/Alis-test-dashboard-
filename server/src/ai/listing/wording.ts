@@ -7,11 +7,12 @@
  *
  * Every rule here removes or flags whole sentences; nothing is rewritten silently.
  */
+import { BIDDING, DISCRIMINATORY, TENANT_FEES } from '../../../../src/engine/listings';
 import { numbersIn, sqft, statedMoney, statedNumbers, type Facts } from './facts';
 
 export type Reason =
   | 'price' | 'figure' | 'schools' | 'transport' | 'area' | 'amenities' | 'planning' | 'investment'
-  | 'superlative' | 'discrimination' | 'bidding' | 'fees' | 'pets' | 'mismatch' | 'unstated';
+  | 'superlative' | 'discrimination' | 'steering' | 'bidding' | 'fees' | 'pets' | 'mismatch' | 'unstated';
 
 /** Friendly explanations shown to the seller (one per reason). */
 export const REASON_TEXT: Record<Reason, string> = {
@@ -24,7 +25,8 @@ export const REASON_TEXT: Record<Reason, string> = {
   planning: 'Removed a planning or extension claim. Only mention planning potential you can evidence.',
   investment: 'Removed an investment claim (yield, demand or returns) that isn’t supported by your details.',
   superlative: 'Removed an unverifiable or pressure claim (such as “best in the area” or “won’t last”). Claims in property adverts must be accurate under consumer protection law.',
-  discrimination: 'Removed wording that could discriminate or steer people (such as “ideal for professionals” or “no DSS”). Describe the home, not who should live there.',
+  discrimination: 'Removed wording that could discriminate against people (such as “no DSS” or “professionals only”). Describe the home, not who should live there.',
+  steering: 'Removed wording that could discriminate or steer people (such as “ideal for professionals” or “perfect for a couple”). Describe the home, not who should live there.',
   bidding: 'Removed bidding language: a rental advert must state one fixed rent.',
   fees: 'Removed a mention of tenant fees: most letting fees are banned under the Tenant Fees Act 2019.',
   pets: 'Removed a blanket “no pets” line: tenants can ask to keep a pet and landlords must not unreasonably refuse.',
@@ -49,15 +51,17 @@ const SUPERLATIVE = [
   /\b(best|cheapest|finest|biggest|largest|nicest|most (sought[- ]after|desirable|popular|exclusive)) (home |house |flat |property )?(in|on|of) (the )?(area|street|road|market|town|city|village|postcode|region|country|uk|london)\b/i,
   /\b(unbeatable|unrivall?ed|unparall?eled|second to none|like no other|nothing else like it|one of a kind|guaranteed (rent|rental|income|returns?|sale|yield|growth)|risk[- ]free|once[- ]in[- ]a[- ]lifetime|won'?t last( long)?|will not last|act (fast|now|quickly)|hurry|don'?t miss (out|this)|priced to sell|bargain|below market value|under[- ]?valued|best value|value for money|rare opportunity|rarely available|must be sold|offers? (are )?invited quickly)\b/i,
 ];
-const DISCRIMINATION = [
-  /\b(no|not suitable for|unsuitable for|sorry,? no|not accepting|we do not accept|cannot accept) (dss|benefits?|housing benefits?|universal credit|children|kids|famil(y|ies)|students|foreigners|immigrants|refugees|asylum seekers|disabled( people)?|pensioners|sharers|couples|smokers or children)\b/i,
-  /\bDSS\b/,
-  /\b(professionals?|working (people|professionals?|tenants?|persons?)|white|black|asian|british|english|christians?|muslims?|jewish|hindus?|sikhs?|single (people|persons?|females?|males?)|females?|males?|ladies|gentlemen|men|women|young (people|professionals?)|mature (people|persons?|professionals?)|non[- ]students?|employed (people|persons?|tenants?)) (only|preferred|wanted|required|sought)\b/i,
+/*
+ * Blanket exclusions ("No DSS", "professionals only") and the rental bidding and tenant-fee rules are the same
+ * patterns the listing form and the server enforce (src/engine/listings.ts), so a "must fix" here always blocks
+ * publishing there. Saying who a home would suit ("ideal for professionals") is steering: flagged and removed
+ * from AI drafts, but not refused.
+ */
+const DISCRIMINATION = DISCRIMINATORY;
+const STEERING = [
   /\b(would (ideally )?suit|ideal for|perfect for|suitable for|suited to|great for|tailor[- ]made for|aimed at) (a |an |the )?(young |single |retired |professional |working |growing |small |large |mature |elderly )*(professionals?|couples?|famil(y|ies)|retirees|pensioners|students|singles?|single (person|people)|bachelors?|newlyweds|men|women|ladies|gentlemen|christians?|muslims?|elderly (people|persons?)|young (people|persons?))\b/i,
-  /\b(english|british) (speakers?|nationals?|citizens?) only\b/i,
 ];
-const BIDDING = /\b(offers? (over|in excess of|above|in the region of)|o\.?i\.?r\.?o\.?|o\.?i\.?e\.?o\.?|best offers?|bids?|bidding|highest (offer|bidder)|sealed bids?|guide price|rent (is )?negotiable|or nearest offer|o\.?n\.?o\.?|open to offers|offers invited)\b/i;
-const FEES = /\b(admin(istration)? fees?|referencing fees?|check[- ](in|out) fees?|inventory fees?|(tenancy )?set[- ]up fees?|renewal fees?|agency fees?|application fees?|credit check fees?)\b/i;
+const FEES = TENANT_FEES;
 const PETS = /\b(no pets|pets not (allowed|permitted|accepted)|strictly no (pets|animals))\b/i;
 
 const WORDS: Record<string, number> = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
@@ -139,6 +143,7 @@ export function sentenceProblem(sentence: string, ctx: RuleContext, allowed = al
   const f = ctx.facts;
   const s = sentence;
   for (const re of DISCRIMINATION) if (re.test(s)) return 'discrimination';
+  for (const re of STEERING) if (re.test(s)) return 'steering';
   if (f.channel === 'rent') {
     if (BIDDING.test(s)) return 'bidding';
     if (FEES.test(s)) return 'fees';
@@ -230,6 +235,7 @@ export function notesProblems(notes: string, facts: Facts): Reason[] {
   const money = statedMoney(facts);
   for (const p of notes.split(/\n+/)) for (const s of sentences(p)) {
     for (const re of DISCRIMINATION) if (re.test(s)) out.add('discrimination');
+    for (const re of STEERING) if (re.test(s)) out.add('steering');
     if (facts.channel === 'rent' && BIDDING.test(s)) out.add('bidding');
     if (facts.channel === 'rent' && FEES.test(s)) out.add('fees');
     if (facts.channel === 'rent' && PETS.test(s)) out.add('pets');

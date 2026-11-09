@@ -1,16 +1,19 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ListingStatus } from '../../../src/lib/apiTypes';
+import { altTextProblem } from '../../../src/engine/listings';
 import { listingRef } from '../auth/crypto';
 import { config } from '../config';
 import { one, q, tx } from '../db';
 import { mails } from '../services/email';
 import { audit, forbidden, HttpError, notFound, parse, requireUser } from '../services/http';
 import { cleanImage, sniffImage } from '../services/images';
-import { checksFor, columnsFrom, geocode, LISTING_SELECT, ListingBody, photosFor, PUBLIC_STATUSES, toDTO, type ListingRow } from '../services/listings';
+import { checksFor, columnsFrom, geocode, LISTING_SELECT, ListingBody, ListingPatch, photosFor, PUBLIC_STATUSES, toDTO, type ListingRow } from '../services/listings';
 import { deleteFile, newKey, putFile } from '../services/storage';
 import { limit } from '../services/ratelimit';
 import { emit } from '../ai/hooks';
+import { bytesHash, readPreview } from '../ai/listing/previewToken';
+import type { PhotoAnalysis } from '../ai/listing/photos';
 
 export async function orgIdsFor(userId?: string | null) {
   if (!userId) return [];
@@ -57,6 +60,44 @@ const TRANSITIONS: Record<string, ListingStatus[]> = {
   under_offer: ['live', 'sold', 'let', 'withdrawn'], sold: ['withdrawn'], let: ['withdrawn'], withdrawn: ['draft'], rejected: ['draft', 'withdrawn'],
 };
 
+/** Listings that have passed the submission checks: in the review queue, or public. Edits must keep passing them. */
+const SUBMITTED: ListingStatus[] = ['pending', 'live', 'under_offer'];
+/** Listings that can't be changed until they're re-listed. */
+const CLOSED: ListingStatus[] = ['sold', 'let', 'withdrawn'];
+
+const checksFailed = (blocking: { id: string; message: string }[], message = 'A few things are needed before this listing can go live.') =>
+  new HttpError(422, message, 'checks_failed', Object.fromEntries(blocking.map((c) => [c.id, c.message])));
+
+/** Same value? (numbers from forms vs the database, null vs undefined, arrays and JSON by content). */
+function same(a: unknown, b: unknown): boolean {
+  if (a == null || b == null) return (a ?? null) === (b ?? null);
+  if (typeof a === 'number' || typeof b === 'number') return Number(a) === Number(b);
+  if (typeof a === 'string' && typeof b === 'object') { try { return JSON.stringify(JSON.parse(a)) === JSON.stringify(b); } catch { return false; } }
+  if (typeof a === 'object' || typeof b === 'object') return JSON.stringify(a) === JSON.stringify(b);
+  return a === b;
+}
+
+/* ---------- photo uploads ---------- */
+/** Files per upload request. The website sends a few at a time so each request stays well under hosting body limits. */
+export const UPLOAD_MAX_FILES = 12;
+const PhotoMeta = z.array(z.object({
+  /** A signed result from the AI photo preview for exactly this file (see ai/listing/previewToken.ts). */
+  token: z.string().max(4000).nullish(),
+  /** Alt text the lister wrote or accepted. */
+  alt: z.string().trim().max(160).nullish(),
+}).nullable()).max(UPLOAD_MAX_FILES);
+type PhotoMetaT = z.infer<typeof PhotoMeta>;
+/** Multipart limit errors, as a message for the person (the photos stored before the limit was hit are kept). */
+function uploadLimitMessage(code: string | undefined, index: number): { code: string; message: string } | null {
+  const mb = Math.round(config.storage.maxPhotoBytes / 1048576);
+  if (code === 'FST_REQ_FILE_TOO_LARGE') return { code: 'too_large', message: `Photo ${index + 1} is larger than ${mb} MB, so it (and any photos after it in this upload) wasn’t added. Use a smaller copy of it.` };
+  if (code === 'FST_FILES_LIMIT') return { code: 'too_many', message: `Send up to ${UPLOAD_MAX_FILES} photos at a time. The rest of this upload wasn’t added: send them again.` };
+  if (code === 'FST_PARTS_LIMIT' || code === 'FST_FIELDS_LIMIT') return { code: 'too_many', message: 'That upload had too many parts. Send fewer photos at a time.' };
+  if (code === 'FST_FIELD_SIZE_LIMIT' || code === 'FST_PROTO_VIOLATION' || code === 'FST_INVALID_MULTIPART_CONTENT_TYPE') return { code: 'bad_upload', message: 'That upload wasn’t valid. Please try again.' };
+  return null;
+}
+const roomAlt = (a: PhotoAnalysis) => a.room.charAt(0).toUpperCase() + a.room.slice(1);
+
 export async function listingRoutes(app: FastifyInstance) {
   /* ---------- public search ---------- */
   app.get('/api/listings', async (req) => {
@@ -100,19 +141,28 @@ export async function listingRoutes(app: FastifyInstance) {
   app.get('/api/me/listings', async (req) => {
     const u = requireUser(req);
     const orgs = await orgIdsFor(u.id);
-    const rows = await q<ListingRow & { enquiries: number; new_enquiries: number; views_30d: number; saves: number }>(
-      `SELECT l2.*, coalesce(e.n, 0)::int AS enquiries, coalesce(e.new_n, 0)::int AS new_enquiries, coalesce(v.n, 0)::int AS views_30d, coalesce(s.n, 0)::int AS saves
-         FROM (${LISTING_SELECT} WHERE l.owner_user_id = $1 OR l.organisation_id = ANY($2)) l2
-         LEFT JOIN (SELECT listing_id, count(*) n, count(*) FILTER (WHERE status = 'new') new_n FROM enquiries GROUP BY listing_id) e ON e.listing_id = l2.id
-         LEFT JOIN (SELECT listing_id, count(*) n FROM engagement_events WHERE name = 'listing_view' AND occurred_at > now() - interval '30 days' GROUP BY listing_id) v ON v.listing_id = l2.id
-         LEFT JOIN (SELECT listing_key, count(*) n FROM saved_listings GROUP BY listing_key) s ON s.listing_key = l2.ref
-        ORDER BY l2.updated_at DESC`, [u.id, orgs]);
+    // Each count is limited to this lister's listings first (indexes from migration 009), so the dashboard doesn't
+    // scan the whole site. Enquiries held back as spam or scams aren't counted, matching the inbox.
+    const rows = await q<ListingRow & { enquiries: number; new_enquiries: number; held_enquiries: number; views_30d: number; saves: number }>(
+      `WITH mine AS (SELECT id, ref FROM listings WHERE owner_user_id = $1 OR organisation_id = ANY($2)),
+            e AS (SELECT listing_id, count(*) FILTER (WHERE NOT filtered) n, count(*) FILTER (WHERE status = 'new' AND NOT filtered) new_n, count(*) FILTER (WHERE filtered) held_n
+                    FROM enquiries WHERE listing_id IN (SELECT id FROM mine) GROUP BY listing_id),
+            v AS (SELECT listing_id, count(*) n FROM engagement_events
+                   WHERE name = 'listing_view' AND occurred_at > now() - interval '30 days' AND listing_id IN (SELECT id FROM mine) GROUP BY listing_id),
+            s AS (SELECT listing_key, count(*) n FROM saved_listings WHERE listing_key IN (SELECT ref FROM mine) GROUP BY listing_key)
+       SELECT l.*, o.name AS organisation_name, o.verified AS organisation_verified, u.display_name AS owner_name,
+              coalesce(e.n, 0)::int AS enquiries, coalesce(e.new_n, 0)::int AS new_enquiries, coalesce(e.held_n, 0)::int AS held_enquiries,
+              coalesce(v.n, 0)::int AS views_30d, coalesce(s.n, 0)::int AS saves
+         FROM mine JOIN listings l ON l.id = mine.id
+         LEFT JOIN organisations o ON o.id = l.organisation_id LEFT JOIN users u ON u.id = l.owner_user_id
+         LEFT JOIN e ON e.listing_id = l.id LEFT JOIN v ON v.listing_id = l.id LEFT JOIN s ON s.listing_key = l.ref
+        ORDER BY l.updated_at DESC`, [u.id, orgs]);
     const photos = await photosFor(rows.map((r) => r.id));
     const viewer = { userId: u.id, orgIds: orgs, admin: u.role === 'admin' };
     return {
       items: rows.map((r) => ({
         ...toDTO(r, photos.get(r.id) ?? [], viewer),
-        stats: { enquiries: r.enquiries, newEnquiries: r.new_enquiries, views30d: r.views_30d, saves: r.saves },
+        stats: { enquiries: r.enquiries, newEnquiries: r.new_enquiries, filtered: r.held_enquiries, views30d: r.views_30d, saves: r.saves },
         checks: checksFor(r, (photos.get(r.id) ?? []).length),
       })),
     };
@@ -136,24 +186,44 @@ export async function listingRoutes(app: FastifyInstance) {
     return reply.code(201).send({ listing: toDTO(full, [], await viewerOf(req)), checks: checksFor(full, 0) });
   });
 
-  app.patch('/api/listings/:ref', async (req) => {
+  /*
+   * Editing. A listing that has passed the submission checks (pending, live or under offer) must keep passing them:
+   * an edit that fails a blocking check is refused (422 'checks_failed', the same shape as submit). Every change is
+   * announced (listingUpdated, with the columns that really changed), so the trust review can re-check edits to live
+   * listings; if it takes the listing back to the review queue, the response says so (held: true).
+   */
+  app.patch('/api/listings/:ref', { preHandler: limit('listing.update', 30, 60, 'user') }, async (req) => {
     const { ref } = req.params as { ref: string };
     const row = await editable(req, ref);
-    if (['sold', 'let', 'withdrawn'].includes(row.status) && req.user!.role !== 'admin') throw new HttpError(409, 'Re-list this property before editing it.', 'not_editable');
-    const b = parse(ListingBody.partial(), req.body);
-    const cols: Record<string, unknown> = columnsFrom(b);
-    if (b.postcode) { const g = await geocode(b.postcode); Object.assign(cols, { postcode: g.postcode, district: g.district, lat: g.lat, lng: g.lng }); }
+    const admin = req.user!.role === 'admin';
+    if (CLOSED.includes(row.status) && !admin) throw new HttpError(409, 'Re-list this property before editing it.', 'not_editable');
+    const b = parse(ListingPatch, req.body);
+    const all: Record<string, unknown> = columnsFrom(b);
+    if (b.postcode) { const g = await geocode(b.postcode); Object.assign(all, { postcode: g.postcode, district: g.district, lat: g.lat, lng: g.lng }); }
+    // Only what actually changed (the form sends every field on each save).
+    const cols: Record<string, unknown> = Object.fromEntries(Object.entries(all).filter(([k, v]) => !same(v, (row as unknown as Record<string, unknown>)[k])));
+    const fields = Object.keys(cols);
+    if (fields.length && SUBMITTED.includes(row.status) && !admin) {
+      const photoCount = (await one<{ n: number }>('SELECT count(*)::int n FROM listing_photos WHERE listing_id = $1', [row.id]))!.n;
+      const blocking = checksFor({ ...row, ...cols } as ListingRow, photoCount).filter((c) => !c.ok && c.severity === 'block');
+      if (blocking.length) throw checksFailed(blocking, 'A few things need fixing before these changes can be saved.');
+    }
     // A rejected listing goes back to draft once it's edited.
-    if (row.status === 'rejected') cols.status = 'draft';
+    if (row.status === 'rejected' && fields.length) cols.status = 'draft';
     const keys = Object.keys(cols);
     if (keys.length) {
       await q(`UPDATE listings SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() WHERE id = $1`, [row.id, ...Object.values(cols)]);
-      await audit(req, 'listing.updated', `listing:${ref}`, { fields: keys, ...(b.price != null && b.price !== row.price ? { priceFrom: row.price, priceTo: b.price } : {}) });
-      await emit('listingUpdated', { listingId: row.id, ref, fields: keys });
+      await audit(req, 'listing.updated', `listing:${ref}`, { fields, ...(b.price != null && Number(b.price) !== Number(row.price) ? { priceFrom: row.price, priceTo: b.price } : {}) });
+      await emit('listingUpdated', { listingId: row.id, ref, fields: keys, userId: req.user!.id });
     }
     const fresh = (await loadByRef(ref))!;
     const photos = (await photosFor([fresh.id])).get(fresh.id) ?? [];
-    return { listing: toDTO(fresh, photos, await viewerOf(req)), checks: checksFor(fresh, photos.length) };
+    // The trust review's automatic rules take a live listing off the site at once if the edit needs a closer look.
+    const held = PUBLIC_STATUSES.includes(row.status) && fresh.status === 'pending';
+    return {
+      listing: toDTO(fresh, photos, await viewerOf(req)), checks: checksFor(fresh, photos.length),
+      ...(held ? { held: true, note: 'Your changes are saved. Some of them need a quick check by our team, so the listing is hidden from search until then. We’ll email you when it’s back.' } : {}),
+    };
   });
 
   /** Send for review (private sellers/landlords) or publish straight away (verified agencies). */
@@ -163,7 +233,7 @@ export async function listingRoutes(app: FastifyInstance) {
     if (!['draft', 'rejected', 'withdrawn'].includes(row.status)) throw new HttpError(409, 'This listing has already been submitted.', 'bad_status');
     const photos = (await photosFor([row.id])).get(row.id) ?? [];
     const blocking = checksFor(row, photos.length).filter((c) => !c.ok && c.severity === 'block');
-    if (blocking.length) throw new HttpError(422, 'A few things are needed before this listing can go live.', 'checks_failed', Object.fromEntries(blocking.map((c) => [c.id, c.message])));
+    if (blocking.length) throw checksFailed(blocking);
     const trustedAgency = row.organisation_id && row.organisation_verified;
     const goLive = !config.moderateOwnerListings || trustedAgency;
     await q(`UPDATE listings SET status = $2, rejection_reason = NULL, published_at = CASE WHEN $2 = 'live' THEN now() ELSE published_at END, updated_at = now() WHERE id = $1`, [row.id, goLive ? 'live' : 'pending']);
@@ -173,7 +243,7 @@ export async function listingRoutes(app: FastifyInstance) {
     // A hook (e.g. an AI trust review with auto-approval) may have changed the status already.
     const now = (await one<{ status: string }>('SELECT status FROM listings WHERE id = $1', [row.id]))?.status ?? (goLive ? 'live' : 'pending');
     if (now === 'pending' && config.adminEmail) {
-      await mails.enquiryToLister(config.adminEmail, row.title ?? row.address_line, ref, 'Streetkey', 'question', 'A new listing is waiting for review in the admin area.').catch(() => {});
+      await mails.listingForReview(config.adminEmail, row.title ?? row.address_line, ref).catch(() => {});
     }
     return { status: now };
   });
@@ -206,41 +276,96 @@ export async function listingRoutes(app: FastifyInstance) {
   });
 
   /* ---------- photos ---------- */
+  /*
+   * Upload photos (multipart, field 'photos', up to 12 per request; the website sends a few at a time). An optional
+   * 'meta' field (JSON array, one entry per file in order) carries the alt text and a signed AI preview result, so
+   * photos already checked in the browser aren't sent to the AI again. If a multipart limit stops the upload part-way,
+   * the photos stored before it are kept and announced, and the response says what to resend.
+   */
   app.post('/api/listings/:ref/photos', { preHandler: limit('listing.photos', 60, 60, 'user-or-ip') }, async (req, reply) => {
     const { ref } = req.params as { ref: string };
     const row = await editable(req, ref);
+    const userId = req.user!.id;
+    if (CLOSED.includes(row.status) && req.user!.role !== 'admin') throw new HttpError(409, 'Re-list this property before adding photos.', 'not_editable');
     if (!req.isMultipart()) throw new HttpError(400, 'Upload photos as a form (multipart).', 'not_multipart');
     const existing = (await one<{ n: number; max: number | null }>('SELECT count(*)::int n, max(position) max FROM listing_photos WHERE listing_id = $1', [row.id]))!;
     let position = (existing.max ?? -1) + 1, count = existing.n;
-    const added: { id: string; url: string; alt: string | null }[] = [];
+    const stored: { id: string; url: string; alt: string | null; index: number; hash: string }[] = [];
     const rejected: string[] = [];
-    for await (const part of req.parts()) {
-      if (part.type !== 'file') continue;
-      const buf = await part.toBuffer();
-      const type = sniffImage(buf);
-      if (!type) { rejected.push(`${part.filename}: not a JPEG, PNG or WebP image`); continue; }
-      if (count >= config.storage.maxPhotosPerListing) { rejected.push(`${part.filename}: limit of ${config.storage.maxPhotosPerListing} photos reached`); continue; }
-      const clean = cleanImage(buf, type);
-      const stored = await putFile(newKey(`listings/${row.ref}`, type), clean, type);
-      // Use the file name as alt text only when it describes something (not "IMG_1234" or "photo-1").
-      const base = (part.filename ?? '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
-      const alt = base && !/^(img|dsc|dscn|pxl|photo|image|picture|pic|screenshot|whatsapp image|untitled|file|scan)?\s*[\d\s()]*$/i.test(base) ? base.slice(0, 120) : null;
-      const p = await one<{ id: string }>('INSERT INTO listing_photos (listing_id, storage_key, url, content_type, bytes, position, alt) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-        [row.id, stored.key, stored.url, type, clean.length, position++, alt]);
-      added.push({ id: p!.id, url: stored.url, alt }); count++;
+    const notes: string[] = [];
+    let metaRaw = '';
+    let index = -1;
+    let stopped: { code: string; message: string } | null = null;
+    let failure: unknown = null;
+    try {
+      for await (const part of req.parts({ limits: { files: UPLOAD_MAX_FILES, fileSize: config.storage.maxPhotoBytes, fields: 4, fieldSize: 64_000, parts: UPLOAD_MAX_FILES + 4 } })) {
+        if (part.type !== 'file') { if (part.fieldname === 'meta') metaRaw = String(part.value ?? ''); continue; }
+        index++;
+        const name = part.filename || `photo ${index + 1}`;
+        const buf = await part.toBuffer();
+        const type = sniffImage(buf);
+        if (!type) { rejected.push(`${name}: not a JPEG, PNG or WebP image`); continue; }
+        if (count >= config.storage.maxPhotosPerListing) { rejected.push(`${name}: limit of ${config.storage.maxPhotosPerListing} photos reached`); continue; }
+        const hash = bytesHash(buf); // of the file as sent, so an AI preview of exactly this file can be matched
+        const clean = cleanImage(buf, type);
+        const file = await putFile(newKey(`listings/${row.ref}`, type), clean, type);
+        // Use the file name as alt text only when it describes something (not "IMG_1234" or "photo-1") and is safe to show.
+        const base = (part.filename ?? '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
+        const named = base && !/^(img|dsc|dscn|pxl|photo|image|picture|pic|screenshot|whatsapp image|untitled|file|scan)?\s*[\d\s()]*$/i.test(base) ? base.slice(0, 120) : null;
+        const alt = named && !altTextProblem(named) ? named : null;
+        const p = await one<{ id: string }>('INSERT INTO listing_photos (listing_id, storage_key, url, content_type, bytes, position, alt) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+          [row.id, file.key, file.url, type, clean.length, position++, alt]);
+        stored.push({ id: p!.id, url: file.url, alt, index, hash }); count++;
+      }
+    } catch (e) {
+      stopped = uploadLimitMessage((e as { code?: string }).code, Math.max(index, 0));
+      if (!stopped) failure = e; // unexpected (e.g. storage): finish what was stored, then report it
     }
-    await q('UPDATE listings SET updated_at = now() WHERE id = $1', [row.id]);
-    await audit(req, 'listing.photos_added', `listing:${ref}`, { added: added.length, rejected: rejected.length });
-    if (added.length) await emit('photosUploaded', { listingId: row.id, ref: row.ref, photoIds: added.map((a) => a.id), userId: req.user!.id });
-    return reply.code(added.length ? 201 : 400).send({ added, rejected, ...(added.length ? {} : { error: { code: 'no_photos', message: rejected[0] ?? 'No photos were uploaded.' } }) });
+
+    // Alt text and AI preview results for the stored photos (entries line up with the files in this request).
+    let meta: PhotoMetaT = [];
+    if (metaRaw) { try { meta = PhotoMeta.parse(JSON.parse(metaRaw)); } catch { notes.push('Alt text and photo check results weren’t in a form we could read, so they weren’t saved.'); } }
+    let prefilled = 0;
+    for (const s of stored) {
+      const m = meta[s.index];
+      if (!m) continue;
+      const analysis = m.token ? await readPreview(m.token, userId, s.hash) : null;
+      let alt = s.alt;
+      if (m.alt) {
+        const problem = altTextProblem(m.alt);
+        if (problem) notes.push(`Photo ${s.index + 1}: alt text not saved. ${problem}`);
+        else alt = m.alt;
+      }
+      // The AI's alt text is used only when the lister gave none (and never with contact details or links in it).
+      const aiAlt = analysis ? (altTextProblem(analysis.alt) ? roomAlt(analysis) : analysis.alt) : null;
+      if (!m.alt && aiAlt) alt = aiAlt;
+      if (analysis) {
+        await q(`UPDATE listing_photos SET alt = $2, ai_room = $3, ai_alt = $4, ai_quality = $5, ai_features = $6, ai_flags = $7, ai_checked_at = now() WHERE id = $1`,
+          [s.id, alt, analysis.room, aiAlt, JSON.stringify(analysis.quality), analysis.features, analysis.flags]);
+        prefilled++;
+      } else if (alt !== s.alt) await q('UPDATE listing_photos SET alt = $2 WHERE id = $1', [s.id, alt]);
+      s.alt = alt;
+    }
+
+    if (stored.length) {
+      await q('UPDATE listings SET updated_at = now() WHERE id = $1', [row.id]);
+      await emit('photosUploaded', { listingId: row.id, ref: row.ref, photoIds: stored.map((a) => a.id), userId });
+    }
+    await audit(req, 'listing.photos_added', `listing:${ref}`, { added: stored.length, rejected: rejected.length, prefilled, ...(stopped ? { stopped: stopped.code } : {}) });
+    if (failure) throw failure;
+    const added = stored.map(({ id, url, alt, index: i }) => ({ id, url, alt, index: i }));
+    const error = stopped ?? (stored.length ? null : { code: 'no_photos', message: rejected[0] ?? 'No photos were uploaded.' });
+    return reply.code(stored.length ? 201 : stopped?.code === 'too_large' || stopped?.code === 'too_many' ? 413 : 400).send({ added, rejected, notes, ...(error ? { error } : {}) });
   });
 
   app.patch('/api/listings/:ref/photos/:id', async (req) => {
     const { ref, id } = req.params as { ref: string; id: string };
     const row = await editable(req, ref);
-    const b = parse(z.object({ alt: z.string().trim().max(160).optional() }), req.body);
-    const r = await one('UPDATE listing_photos SET alt = $3 WHERE id = $1 AND listing_id = $2 RETURNING id', [id, row.id, b.alt ?? null]);
+    // Alt text is public (and read out by screen readers), so it can't carry contact details, links or payment details.
+    const b = parse(z.object({ alt: z.string().trim().max(160).superRefine((v, ctx) => { const p = altTextProblem(v); if (p) ctx.addIssue({ code: 'custom', message: p }); }).optional() }), req.body);
+    const r = await one<{ id: string }>('UPDATE listing_photos SET alt = $3 WHERE id = $1 AND listing_id = $2 RETURNING id', [id, row.id, b.alt || null]);
     if (!r) throw notFound('That photo');
+    if (PUBLIC_STATUSES.includes(row.status)) await emit('listingUpdated', { listingId: row.id, ref: row.ref, fields: ['photo_alt'], userId: req.user!.id });
     return { ok: true };
   });
 
@@ -249,15 +374,23 @@ export async function listingRoutes(app: FastifyInstance) {
     const row = await editable(req, ref);
     const { ids } = parse(z.object({ ids: z.array(z.uuid()).max(100) }), req.body);
     await tx(async (c) => { for (const [i, id] of ids.entries()) await q('UPDATE listing_photos SET position = $3 WHERE id = $1 AND listing_id = $2', [id, row.id, i], c); });
+    if (PUBLIC_STATUSES.includes(row.status)) await emit('listingUpdated', { listingId: row.id, ref: row.ref, fields: ['photos'], userId: req.user!.id });
     return { ok: true };
   });
 
   app.delete('/api/listings/:ref/photos/:id', async (req) => {
     const { ref, id } = req.params as { ref: string; id: string };
     const row = await editable(req, ref);
+    // A submitted listing needs at least one photo (the same rule as submitting it).
+    if (SUBMITTED.includes(row.status) && req.user!.role !== 'admin') {
+      const n = (await one<{ n: number }>('SELECT count(*)::int n FROM listing_photos WHERE listing_id = $1', [row.id]))!.n;
+      const mine = await one('SELECT 1 FROM listing_photos WHERE id = $1 AND listing_id = $2', [id, row.id]);
+      if (mine && n <= 1) throw checksFailed([{ id: 'photo-min', message: 'Your listing needs at least one photo. Add another photo before removing this one.' }], 'This is the only photo on your listing.');
+    }
     const p = await one<{ storage_key: string }>('DELETE FROM listing_photos WHERE id = $1 AND listing_id = $2 RETURNING storage_key', [id, row.id]);
     if (!p) throw notFound('That photo');
     await deleteFile(p.storage_key);
+    if (PUBLIC_STATUSES.includes(row.status)) await emit('listingUpdated', { listingId: row.id, ref: row.ref, fields: ['photos'], userId: req.user!.id });
     return { ok: true };
   });
 
@@ -272,7 +405,8 @@ export async function listingRoutes(app: FastifyInstance) {
         GROUP BY d ORDER BY d`, [row.id]);
     const totals = await q<{ name: string; n: number }>(`SELECT name, count(*)::int n FROM engagement_events WHERE listing_id = $1 AND occurred_at > now() - interval '30 days' GROUP BY name`, [row.id]);
     const saves = (await one<{ n: number }>('SELECT count(*)::int n FROM saved_listings WHERE listing_key = $1', [row.ref]))!.n;
-    const enquiries = (await one<{ n: number }>('SELECT count(*)::int n FROM enquiries WHERE listing_id = $1', [row.id]))!.n;
-    return { days, totals: Object.fromEntries(totals.map((t) => [t.name, t.n])), saves, enquiries, note: 'Counts come only from visitors who allowed analytics; no personal data is stored.' };
+    // Enquiries held back as spam or scams are counted separately, as in the inbox.
+    const enq = (await one<{ n: number; held: number }>('SELECT count(*) FILTER (WHERE NOT filtered)::int n, count(*) FILTER (WHERE filtered)::int held FROM enquiries WHERE listing_id = $1', [row.id]))!;
+    return { days, totals: Object.fromEntries(totals.map((t) => [t.name, t.n])), saves, enquiries: enq.n, filteredEnquiries: enq.held, note: 'Counts come only from visitors who allowed analytics; no personal data is stored.' };
   });
 }

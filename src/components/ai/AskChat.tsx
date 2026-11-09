@@ -1,26 +1,31 @@
 /**
  * "Ask Streetkey": the AI chat inside the Ask sheet, plus the sheet's contents
  * (Ask AI / Search homes tabs) and the ways to open it. When AI isn't available the sheet is
- * the plain SmartSearch.
+ * the plain SmartSearch, and says so.
+ *
+ * The conversation lives in a small store outside React (src/lib/ai/assistant.ts), so closing the
+ * sheet while an answer is on its way loses nothing: reopening it shows the thinking state and
+ * then the reply.
  */
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { ApiError } from '../../lib/api';
-import { useAi } from '../../lib/ai/core';
+import type { ApiError } from '../../lib/api';
+import { describeAiError, useAi } from '../../lib/ai/core';
 import {
-  askStreetkey, cardFor, CHAT_KEY, isInternal, loadChat, MAX_CHARS, PROPERTY_STARTS, QUICK_STARTS, saveChat, tidyReply, toTurns, uid,
+  cardFor, CHAT_KEY, chatAlternative, clearChat, isInternal, MAX_CHARS, PROPERTY_STARTS, QUICK_STARTS, retryChat, sendChat, tidyReply, useChat,
   type ChatContext, type ChatMsg, type HomeCard,
 } from '../../lib/ai/assistant';
 import { Icon } from '../Icons';
-import { destination, SmartSearch } from '../SmartSearch';
+import { SmartSearch } from '../SmartSearch';
 import { gbp, Tag } from '../ui';
-import { AiDisclaimer, AiErrorNote, AiLabel, AiText, AiThinking } from './Ai';
+import { AiDisclaimer, AiErrorNote, AiLabel, AiText, AiThinking, AiUnavailable } from './Ai';
 import './assistant.css';
 
 const priceLabel = (h: HomeCard) => (h.listing === 'rent' ? `${gbp(h.price)} pcm` : h.listing === 'auction' ? `Guide ${gbp(h.price)}` : gbp(h.price));
 
-export function HomeCards({ ids, homes }: { ids: string[]; homes: HomeCard[] }) {
-  const cards = ids.map((id) => cardFor(id, homes)).filter((h): h is HomeCard => !!h);
+/** Cards for homes an answer mentions. `exclude`: the home the person is already looking at (no link to the same page). */
+export function HomeCards({ ids, homes, exclude }: { ids: string[]; homes: HomeCard[]; exclude?: string }) {
+  const cards = ids.filter((id) => id !== exclude).map((id) => cardFor(id, homes)).filter((h): h is HomeCard => !!h);
   if (!cards.length) return null;
   return (
     <ul className="ask-homes" aria-label="Homes mentioned">
@@ -42,13 +47,13 @@ export function SourcesLine({ sources, grounding }: { sources: string[]; groundi
   return <p className="ask-sources">{sources.length > 0 && <>Based on: {sources.join(' · ')}.</>}{grounding === 'trimmed' && ' A figure that couldn’t be checked was left out.'}</p>;
 }
 
-function AssistantMessage({ m, latest, busy, onAsk }: { m: ChatMsg; latest: boolean; busy: boolean; onAsk: (q: string) => void }) {
+function AssistantMessage({ m, latest, busy, onAsk, exclude }: { m: ChatMsg; latest: boolean; busy: boolean; onAsk: (q: string) => void; exclude?: string }) {
   const x = m.extras;
   return (
     <div className="ask-msg ai">
       <div className="ask-who"><AiLabel>Streetkey AI</AiLabel></div>
       <AiText text={tidyReply(m.content)} />
-      {x && <HomeCards ids={x.propertyIds} homes={x.homes} />}
+      {x && <HomeCards ids={x.propertyIds} homes={x.homes} exclude={exclude} />}
       {x && x.actions.length > 0 && (
         <div className="ask-actions">{x.actions.filter((a) => isInternal(a.to)).map((a) => <Link key={a.to} to={a.to} className="btn sm ghost">{a.label}<Icon name="arrow" size={14} /></Link>)}</div>
       )}
@@ -62,58 +67,78 @@ function AssistantMessage({ m, latest, busy, onAsk }: { m: ChatMsg; latest: bool
   );
 }
 
+/** Where to go instead when the AI can't answer: a home search only for questions that look like one, else the right calculator. */
+function Alternative({ question }: { question: string }) {
+  const alt = chatAlternative(question);
+  if (!alt) return null;
+  return <Link className="btn sm ghost" to={alt.to}><Icon name={alt.icon} size={14} />{alt.label}</Link>;
+}
+
 /**
- * The chat. Conversation is kept for this browser session; replies that arrive after the
- * sheet is closed are still saved, so they're there when it's opened again.
+ * Whether asking an earlier, unanswered question again could work now. Not while something stops
+ * every question: a limit (until it resets, or during a short wait), AI being paused or switched
+ * off, or a sign-in or email-confirmation step. A problem with the latest question itself (too
+ * long, say) doesn't stop the earlier ones. The latest error's note says why and when it resets.
+ */
+function useCanAskAgain(error: ApiError | null): boolean {
+  const { signedIn } = useAi();
+  const at = useMemo(() => Date.now(), [error]); // eslint-disable-line react-hooks/exhaustive-deps
+  const advice = useMemo(() => (error ? describeAiError(error, { signedIn, now: at }) : null), [error, signedIn, at]);
+  const waitUntil = advice?.kind === 'limit' && advice.retry ? at + advice.waitSec * 1000 : 0;
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    setWaited(false);
+    if (!waitUntil) return;
+    const t = setTimeout(() => setWaited(true), Math.max(0, waitUntil - Date.now()) + 50);
+    return () => clearTimeout(t);
+  }, [waitUntil]);
+  if (!advice) return true;
+  if (advice.kind === 'unavailable' || advice.kind === 'verify_email' || advice.kind === 'sign_in') return false;
+  if (advice.kind === 'limit') return advice.retry && (waited || Date.now() >= waitUntil);
+  return true;
+}
+
+/**
+ * The chat. The conversation is kept for this browser session (and forgotten when someone signs
+ * out or another account signs in); an answer that arrives while the sheet is closed is there
+ * when it opens again.
  */
 export function AskChat({ context, onNavigate, autoFocus, storageKey = CHAT_KEY }: { context?: ChatContext; onNavigate?: () => void; autoFocus?: boolean; storageKey?: string }) {
-  const [msgs, setMsgs] = useState<ChatMsg[]>(() => loadChat(storageKey));
+  const { msgs, busy, error } = useChat(storageKey);
+  const again = useCanAskAgain(error);
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<ApiError | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const mounted = useRef(true);
   const inputId = useId();
   const hintId = useId();
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { saveChat(msgs, storageKey); }, [msgs, storageKey]);
   useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus]);
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   }, [msgs.length, busy, error]);
+  // The box grows with what's typed, wrapped lines included (up to the CSS max-height, then it scrolls).
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight + (el.offsetHeight - el.clientHeight), 140)}px`;
+  }, [text]);
 
-  const request = async (convo: ChatMsg[]) => {
-    setBusy(true); setError(null);
-    const lastId = convo[convo.length - 1]?.id;
-    try {
-      const r = await askStreetkey(toTurns(convo), context);
-      const { reply, ...extras } = r;
-      const msg: ChatMsg = { id: uid(), role: 'assistant', content: reply, at: Date.now(), extras };
-      if (mounted.current) setMsgs((m) => [...m, msg]);
-      else { const stored = loadChat(storageKey); if (stored[stored.length - 1]?.id === lastId) saveChat([...stored, msg], storageKey); }
-    } catch (e) {
-      if (mounted.current) setError(e instanceof ApiError ? e : new ApiError(0, 'Something went wrong. Please try again.'));
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
-  };
   const send = (raw: string) => {
-    const q = raw.trim().slice(0, MAX_CHARS);
-    if (!q || busy) return;
-    const next: ChatMsg[] = [...msgs, { id: uid(), role: 'user', content: q, at: Date.now() }];
-    setMsgs(next); setText('');
-    void request(next);
+    if (!sendChat(raw, context, storageKey)) return;
+    // A suggested question never wipes a half-typed draft: only the box's own text is cleared.
+    if (raw === text) setText('');
     inputRef.current?.focus();
   };
-  const retry = () => { if (msgs[msgs.length - 1]?.role === 'user') void request(msgs); };
-  const clear = () => { setMsgs([]); setError(null); setText(''); inputRef.current?.focus(); };
+  // Focus stays in the composer while the question is asked again (the error note it came from goes away).
+  const retry = () => { inputRef.current?.focus(); retryChat(context, storageKey); };
+  const clear = () => { clearChat(storageKey); setText(''); inputRef.current?.focus(); };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); }
   };
 
-  const lastQuestion = [...msgs].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const last = msgs[msgs.length - 1];
+  const waiting = last?.role === 'user' && !busy; // the last question has no answer (failed, or lost when the page reloaded)
   const lastAi = msgs.length - 1 - [...msgs].reverse().findIndex((m) => m.role === 'assistant');
   const starts = context?.propertyId ? [...PROPERTY_STARTS.slice(0, 3), QUICK_STARTS[1]] : QUICK_STARTS;
 
@@ -131,14 +156,33 @@ export function AskChat({ context, onNavigate, autoFocus, storageKey = CHAT_KEY 
         )}
         <div className="ask-log" role="log" aria-label="Conversation with Streetkey AI" aria-relevant="additions">
           {msgs.map((m, i) => m.role === 'user'
-            ? <div key={m.id} className="ask-msg user"><span className="ask-who">You</span><p className="ask-bubble-u">{m.content}</p></div>
-            : <AssistantMessage key={m.id} m={m} latest={i === lastAi && i === msgs.length - 1} busy={busy} onAsk={send} />)}
+            ? (
+              <div key={m.id} className="ask-msg user">
+                <span className="ask-who">You</span>
+                <p className="ask-bubble-u">{m.content}</p>
+                {/* An earlier question that was never answered (the latest one gets the full note below). */}
+                {/* No "Ask again" while a limit, a pause or a sign-in step would stop it too (the note below says when). */}
+                {m.failed && i < msgs.length - 1 && (
+                  again
+                    ? <span className="ask-unanswered">Not answered · <button type="button" className="linkish" disabled={busy} onClick={() => send(m.content)}>Ask again</button></span>
+                    : <span className="ask-unanswered">Not answered</span>
+                )}
+              </div>
+            )
+            : <AssistantMessage key={m.id} m={m} latest={i === lastAi && i === msgs.length - 1} busy={busy} onAsk={send} exclude={context?.propertyId} />)}
         </div>
         {busy && <AiThinking label="Streetkey AI is working on it" />}
-        {error && !busy && (
+        {waiting && (
           <div className="ask-fail">
-            <AiErrorNote error={error} onRetry={msgs[msgs.length - 1]?.role === 'user' ? retry : undefined} />
-            {lastQuestion && <Link className="btn sm ghost" to={destination('buy', lastQuestion)}><Icon name="search" size={14} />Search homes for this instead</Link>}
+            {error
+              ? <AiErrorNote error={error} onRetry={retry} />
+              : (
+                <p className="ask-unanswered" role="status">
+                  {last.failed ? 'Not answered.' : 'No answer received.'}{' '}
+                  <button type="button" className="linkish" onClick={retry}>Try again</button>
+                </p>
+              )}
+            <Alternative question={last.content} />
           </div>
         )}
       </div>
@@ -147,10 +191,10 @@ export function AskChat({ context, onNavigate, autoFocus, storageKey = CHAT_KEY 
         <label htmlFor={inputId} className="sr-only">Message Streetkey AI</label>
         <textarea
           id={inputId} ref={inputRef} className="input ask-input" value={text} maxLength={MAX_CHARS} enterKeyHint="send" aria-describedby={hintId}
-          rows={Math.min(4, Math.max(1, text.split('\n').length))} placeholder="Ask about homes, costs or an area…"
+          rows={1} placeholder="Ask about homes, costs or an area…"
           onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
         />
-        <button type="submit" className="btn accent ask-send" disabled={busy || !text.trim()} aria-label="Send message"><Icon name="arrow" size={18} /></button>
+        <button type="submit" className="btn accent ask-send" disabled={busy || !text.trim()} aria-label={busy ? 'Send message (waiting for the answer)' : 'Send message'}><Icon name="arrow" size={18} /></button>
       </form>
       <div className="ask-foot">
         <span id={hintId} className="sr-only">Press Enter to send, Shift and Enter for a new line.</span>
@@ -162,18 +206,29 @@ export function AskChat({ context, onNavigate, autoFocus, storageKey = CHAT_KEY 
 }
 
 type Tab = 'ask' | 'search';
+/** Starts with 'streetkey-ask' so it is forgotten with the conversation when the account in this tab changes (src/lib/server.tsx). */
 const TAB_KEY = 'streetkey-ask-tab';
 const readTab = (): Tab => { try { return sessionStorage.getItem(TAB_KEY) === 'search' ? 'search' : 'ask'; } catch { return 'ask'; } };
 
-/** Contents of the Ask sheet: header, then AI chat and search tabs (or just search without AI). */
+/** Contents of the Ask sheet: header, then AI chat and search tabs (or just search, saying why, without AI). */
 export function AskSheet({ onClose, page }: { onClose: () => void; page: string }) {
-  const { available } = useAi();
+  const { available, reason } = useAi();
   const [tab, setTab] = useState<Tab>(readTab);
-  const switched = useRef(false);
+  // Only the first panel shown when the sheet opens takes focus: switching tabs, or AI becoming
+  // available while the sheet is open, never pulls focus away from where the person is.
+  const settled = useRef(false);
+  useEffect(() => { settled.current = true; }, []);
+  // If AI becomes available (or is paused) while the sheet is open, the panel that had focus is
+  // replaced: put focus in the new panel's box rather than leaving it on the page behind.
+  useEffect(() => {
+    const a = document.activeElement;
+    if (a && a !== document.body) return;
+    document.getElementById('ask-sheet-title')?.closest('[role="dialog"]')?.querySelector<HTMLElement>('textarea, input')?.focus();
+  }, [available]);
   const tabsRef = useRef<HTMLDivElement>(null);
   const propertyId = page.match(/^\/property\/([^/]+)/)?.[1];
   const context: ChatContext = { page, ...(propertyId ? { propertyId: decodeURIComponentSafe(propertyId) } : {}) };
-  const choose = (t: Tab) => { switched.current = true; setTab(t); try { sessionStorage.setItem(TAB_KEY, t); } catch { /* storage unavailable */ } };
+  const choose = (t: Tab) => { settled.current = true; setTab(t); try { sessionStorage.setItem(TAB_KEY, t); } catch { /* storage unavailable */ } };
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Home' && e.key !== 'End') return;
     e.preventDefault();
@@ -182,10 +237,11 @@ export function AskSheet({ onClose, page }: { onClose: () => void; page: string 
     requestAnimationFrame(() => tabsRef.current?.querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)?.focus());
   };
   const intro = <p className="small muted" style={{ margin: '4px 0 12px' }}>A place, a postcode, or what you want in your own words.</p>;
+  const focusNow = !settled.current;
 
   return (
     <>
-      <div className="row between"><h2 className="sheet-h" id="ask-sheet-title">Ask Streetkey</h2><button className="icon-btn" aria-label="Close" onClick={onClose}><Icon name="x" /></button></div>
+      <div className="row between"><h2 className="sheet-h" id="ask-sheet-title">{available ? 'Ask Streetkey' : 'Search Streetkey'}</h2><button type="button" className="icon-btn" aria-label="Close" onClick={onClose}><Icon name="x" /></button></div>
       {available ? (
         <>
           <div className="seg ask-tabs" role="tablist" aria-label="Ask or search" ref={tabsRef} onKeyDown={onTabKey}>
@@ -195,11 +251,15 @@ export function AskSheet({ onClose, page }: { onClose: () => void; page: string 
             ))}
           </div>
           {tab === 'ask'
-            ? <div role="tabpanel" id="ask-panel-ask" aria-labelledby="ask-tab-ask"><AskChat context={context} onNavigate={onClose} autoFocus={!switched.current} /></div>
-            : <div role="tabpanel" id="ask-panel-search" aria-labelledby="ask-tab-search">{intro}<SmartSearch autoFocus={!switched.current} onDone={onClose} /></div>}
+            ? <div role="tabpanel" id="ask-panel-ask" className="ask-panel" aria-labelledby="ask-tab-ask"><AskChat context={context} onNavigate={onClose} autoFocus={focusNow} /></div>
+            : <div role="tabpanel" id="ask-panel-search" aria-labelledby="ask-tab-search">{intro}<SmartSearch autoFocus={focusNow} onDone={onClose} inlineList /></div>}
         </>
       ) : (
-        <>{intro}<SmartSearch autoFocus onDone={onClose} /></>
+        <>
+          <AiUnavailable reason={reason} feature="Ask Streetkey AI" fallback="You can still search homes here." />
+          {intro}
+          <SmartSearch autoFocus={focusNow} onDone={onClose} inlineList />
+        </>
       )}
     </>
   );
@@ -211,11 +271,13 @@ function decodeURIComponentSafe(s: string) { try { return decodeURIComponent(s);
 export const ASK_EVENT = 'streetkey:ask';
 
 /**
- * Opens the Ask sheet: listens for ASK_EVENT, and shows an "Ask Streetkey AI" button on wide
- * screens (phones have Ask in the tab bar). It stays mounted while the sheet is open (under the
- * scrim) so focus can return to it when the sheet closes.
+ * Opens the Ask sheet: listens for ASK_EVENT, and shows a launcher button on wide screens (phones
+ * have Ask in the tab bar). It says "Ask Streetkey AI" only when AI can answer, otherwise "Search
+ * Streetkey". It stays mounted while the sheet is open (under the scrim) so focus can return to it
+ * when the sheet closes.
  */
 export function AskLauncher({ onOpen }: { onOpen: () => void }) {
+  const { available } = useAi();
   const latest = useRef(onOpen);
   useEffect(() => { latest.current = onOpen; });
   useEffect(() => {
@@ -225,7 +287,7 @@ export function AskLauncher({ onOpen }: { onOpen: () => void }) {
   }, []);
   return (
     <button type="button" className="ask-launch desktop-only" aria-haspopup="dialog" onClick={onOpen}>
-      <Icon name="spark" size={18} /><span>Ask Streetkey AI</span>
+      <Icon name={available ? 'spark' : 'search'} size={18} /><span>{available ? 'Ask Streetkey AI' : 'Search Streetkey'}</span>
     </button>
   );
 }

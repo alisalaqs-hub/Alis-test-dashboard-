@@ -28,7 +28,7 @@ import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { enquiryRoutes } from './routes/enquiries';
 import { eventRoutes } from './routes/events';
-import { feedRoutes } from './routes/feeds';
+import { FEED_MAX_BYTES, feedRoutes } from './routes/feeds';
 import { healthRoutes } from './routes/health';
 import { listingRoutes } from './routes/listings';
 import { meRoutes } from './routes/me';
@@ -51,8 +51,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   // A coarse in-memory limit helps a single long-lived server; per-action limits live in the database (services/ratelimit).
   if (config.memoryRateLimit) await app.register(rateLimit, { global: true, max: 600, timeWindow: '1 minute' });
 
-  // Agent feeds may arrive as raw bytes; BLM files are commonly Windows-1252 text.
-  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: 25 * 1024 * 1024 }, (_req, body, done) => done(null, body));
+  // Agent feeds may arrive as raw bytes; BLM files are commonly Windows-1252 text. (The feed route sets the same limit.)
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: FEED_MAX_BYTES }, (_req, body, done) => done(null, body));
 
   app.decorateRequest('user', null);
   app.decorateRequest('sessionHash', null);
@@ -62,9 +62,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.addHook('onRequest', async (req, reply) => {
     const url = req.url;
     if (url.startsWith('/api/')) {
-      // CORS for any extra origins you allow (same-origin needs nothing).
+      // CORS for allowed origins other than this server's own address (same-origin needs nothing). The site's public
+      // address can be another origin than the API's (e.g. the website dev server talking to a local API).
       const origin = req.headers.origin;
-      if (origin && origin !== config.publicUrl && config.allowedOrigins.includes(origin)) {
+      if (origin && config.allowedOrigins.includes(origin) && !sameHost(origin, req.headers.host)) {
         reply.header('Access-Control-Allow-Origin', origin).header('Access-Control-Allow-Credentials', 'true').header('Vary', 'Origin');
         if (req.method === 'OPTIONS') {
           reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE').header('Access-Control-Allow-Headers', 'Content-Type').header('Access-Control-Max-Age', '600');
@@ -103,8 +104,18 @@ export async function buildApp(): Promise<FastifyInstance> {
       return reply.code(err.status).send({ error: { code: err.code, message: err.userMessage } });
     }
     const status = (err as FastifyError).statusCode ?? 500;
-    if (status === 413 || (err as FastifyError).code === 'FST_REQ_FILE_TOO_LARGE') {
+    const code = (err as FastifyError).code;
+    // Upload limits: say which limit was hit (routes that read uploads part by part handle these themselves).
+    if (code === 'FST_REQ_FILE_TOO_LARGE') {
       return reply.code(413).send({ error: { code: 'too_large', message: `That file is too large. The limit is ${Math.round(config.storage.maxPhotoBytes / 1048576)} MB per photo.` } });
+    }
+    if (code === 'FST_FILES_LIMIT') return reply.code(413).send({ error: { code: 'too_many_files', message: 'That upload has too many files. Send fewer at a time.' } });
+    if (code === 'FST_PARTS_LIMIT' || code === 'FST_FIELDS_LIMIT') return reply.code(413).send({ error: { code: 'too_many_parts', message: 'That upload has too many parts. Send fewer files at a time.' } });
+    if (status === 413) {
+      if (req.url.startsWith('/api/feeds/')) {
+        return reply.code(413).send({ error: { code: 'feed_too_large', message: `That feed file is too large: the limit is ${(FEED_MAX_BYTES / 1048576).toFixed(1).replace(/\.0$/, '')} MB per upload. Send each branch’s stock with its own feed key (one key per branch) so each file stays under the limit.` } });
+      }
+      return reply.code(413).send({ error: { code: 'too_large', message: 'That request is too large.' } });
     }
     if (status === 429) return reply.code(429).send({ error: { code: 'rate_limited', message: 'Too many attempts. Please wait a minute and try again.' } });
     if (status >= 400 && status < 500) return reply.code(status).send({ error: { code: 'bad_request', message: 'That request wasn’t valid.' } });

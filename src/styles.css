@@ -140,9 +140,14 @@ footer.site > div { max-width: 1320px; margin: 0 auto; display: flex; gap: 16px;
 .seg { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 3px; gap: 2px; flex-wrap: wrap; }
 .seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--ink-2); }
 .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
-label.field { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
+label.field, div.field, fieldset.field { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
+/* A field holding a group of options (Seg) or an input with its own <label>: same look as label.field. */
+fieldset.field { border: 0; margin: 0; padding: 0; min-width: 0; }
+fieldset.field > legend { padding: 0; margin-bottom: 5px; }
 .input, select.input, textarea.input { width: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 9px 11px; font-size: 14px; color: var(--ink); }
 .input:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
+/* A box holding something that can't be used is marked by its border too, not only by the message under it. */
+.input[aria-invalid='true'] { border-color: var(--danger); }
 .input-prefix { position: relative; }
 .input-prefix span { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; }
 .input-prefix .input { padding-left: 24px; }
@@ -170,6 +175,8 @@ table.t tfoot td { font-weight: 600; border-top: 1px solid var(--ink); }
 .hero h1 em { font-style: normal; color: var(--accent-ink); }
 .ask { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 8px; box-shadow: var(--shadow); display: flex; gap: 8px; align-items: flex-end; }
 .ask textarea { flex: 1; min-width: 0; border: 0; background: transparent; resize: none; padding: 12px 12px; font-size: 16.5px; min-height: 56px; outline: none; }
+/* Phones: the brief box stacks, with the text area across the full width (this must follow the base .ask rule). */
+@media (max-width: 520px) { .ask { align-items: stretch; } .ask textarea { width: 100%; align-self: stretch; } }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 12px; font-size: 13px; cursor: pointer; text-align: left; }
 .chip:hover { border-color: var(--ink); }
@@ -213,10 +220,17 @@ pre.code { font-family: var(--mono); font-size: 12.5px; background: #0d1014; col
 .kcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 13px; }
 .dropzone { border: 1.5px dashed var(--line); border-radius: var(--radius); padding: 18px; text-align: center; color: var(--muted); cursor: pointer; font-size: 13.5px; }
 .dropzone:hover { border-color: var(--accent); color: var(--ink); }
-.ba { position: relative; border-radius: var(--radius); overflow: hidden; user-select: none; aspect-ratio: 16 / 10; }
+.ba { position: relative; border-radius: var(--radius); overflow: hidden; user-select: none; aspect-ratio: 16 / 10; touch-action: pan-y; /* sideways drags compare; up and down still scroll */ }
 .ba > div { position: absolute; inset: 0; }
 .ba .handle { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.2); }
 .ba .handle::after { content: '⟷'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; color: #111; border-radius: 99px; width: 34px; height: 34px; display: grid; place-items: center; font-size: 15px; box-shadow: var(--shadow); }
+.ba .handle { cursor: ew-resize; }
+.ba .handle:focus { outline: none; }
+.ba .handle:focus-visible::after { outline: 3px solid var(--focus); outline-offset: 2px; }
+@media (forced-colors: active) { .ba .handle::after { border: 2px solid CanvasText; } }
+/* Design studio: the postcode that prices the work when no listing is linked. */
+.sk-postcode { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; }
+.sk-postcode .input { width: 9.5em; min-height: 36px; }
 .swatch { width: 100%; aspect-ratio: 1; border-radius: 10px; border: 1px solid var(--line); }
 .feature-num { font-family: var(--mono); font-size: 0.8rem; color: var(--accent-ink); line-height: 1; letter-spacing: 0; }
 .marquee-logos { display: flex; gap: 28px; flex-wrap: wrap; opacity: .7; font-family: var(--serif); font-size: 1.1rem; }
@@ -254,7 +268,7 @@ pre.code { font-family: var(--mono); font-size: 12.5px; background: #0d1014; col
 .save-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .save-btn.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
-.filters label.field { min-width: 120px; }
+.filters label.field, .filters div.field { min-width: 120px; }
 @media (max-width: 720px) { .tag { white-space: normal; max-width: 100%; } }
 
 /* ===== v0.3 mobile-first shell & home ===== */
@@ -319,6 +333,16 @@ pre.code { font-family: var(--mono); font-size: 12.5px; background: #0d1014; col
 .suggest-txt { min-width: 0; }
 .suggest-txt b { display: block; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .suggest-txt small { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Suggestions: the heading sits above the listbox, so the listbox holds only options. */
+.suggest-list { list-style: none; margin: 0; padding: 0; }
+p.suggest-head { margin: 0; }
+/* In the Ask sheet: in the page flow, so the sheet grows to show them instead of cutting them off. */
+.suggest.suggest-inline { position: static; margin-top: -6px; box-shadow: none; max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
+/* Narrow phones: every search mode stays visible (the row wraps instead of hiding Invest off-screen). */
+@media (max-width: 480px) {
+  .mode-tabs { flex-wrap: wrap; overflow-x: visible; }
+  .mode-tabs button { padding: 8px 11px; font-size: 14px; }
+}
 .quick-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
 .quick-chips::-webkit-scrollbar { display: none; }
 .quick-chips .chip { flex: none; white-space: nowrap; background: color-mix(in srgb, var(--surface) 12%, transparent); color: inherit; border-color: color-mix(in srgb, currentColor 30%, transparent); min-height: 36px; }
@@ -397,7 +421,13 @@ main.home-main { max-width: none; padding: 0 0 80px; }
 .photo-item img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
 .photo-actions { padding: 6px; gap: 4px; }
 .cap-lead { position: absolute; left: 6px; top: 6px; background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
-.btn:disabled { cursor: not-allowed; }
+/* Unavailable buttons look it. Buttons kept focusable while they work (aria-disabled) keep full strength,
+   so their "Please wait…" or "Moving…" label stays readable, whether or not they also set aria-busy. */
+.btn:disabled { cursor: not-allowed; opacity: 0.55; }
+.btn[aria-disabled='true'] { cursor: not-allowed; }
+.btn[aria-busy='true'] { cursor: progress; }
+/* Suggestion chips stay focusable while an answer is on its way (clicks are ignored): they look unavailable. */
+.chip[aria-disabled='true'] { opacity: 0.55; cursor: not-allowed; }
 .src-badge { display: inline-flex; gap: 4px; align-items: center; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); }
 input[type='file'].input { min-width: 0; max-width: 100%; overflow: hidden; font-size: 13px; padding: 7px; }
 html { scroll-padding-top: 80px; }
@@ -607,6 +637,17 @@ h1, h2, h3, h4 { font-family: var(--display); font-weight: 800; letter-spacing: 
 /* Homepage journey (street background, callouts, journey bar): see src/styles/journey.css, imported by JourneyScene. */
 @media (prefers-reduced-motion: reduce) { .sk-mark, .logo:hover .sk-mark { transform: none !important; } }
 .wordmark-lockup .wordmark { position: relative; top: 1px; }
+/* Narrow phones (320–400px): the header fits without sideways scrolling (WCAG 1.4.10). The link keeps
+   its "Streetkey home" name; below 341px only the key mark shows. */
+.topbar .logo { min-width: 0; flex-shrink: 1; }
+@media (max-width: 400px) {
+  .topbar .topbar-inner { gap: 8px; padding-left: 12px; padding-right: 12px; }
+  .topbar .logo .wordmark-lockup { gap: 6px; }
+  .topbar .logo .sk-mark { height: 22px; width: auto; }
+  .topbar .logo .wordmark-lockup .wordmark { font-size: 21px; }
+  .topbar .signin-btn { padding: 8px 12px; }
+}
+@media (max-width: 340px) { .topbar .logo .wordmark-lockup .wordmark { display: none; } }
 
 /* ===== v0.8 · Accounts, listings management, inbox, admin, AI designs ===== */
 .signin-btn { min-height: 40px; padding: 8px 14px; }
@@ -616,7 +657,8 @@ h1, h2, h3, h4 { font-family: var(--display); font-weight: 800; letter-spacing: 
 .auth-card .seg { align-self: flex-start; }
 .field-error { color: var(--danger); font-weight: 600; }
 .ok-text { color: var(--sage); font-weight: 600; }
-.linkish { background: none; border: 0; padding: 0; color: var(--accent-ink); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+/* Mixed a touch towards ink so link text clears 4.5:1 on --surface-2 panels too (5.3:1 light; lighter, 6.1:1, in dark). */
+.linkish { background: none; border: 0; padding: 0; color: color-mix(in srgb, var(--accent-ink) 88%, var(--ink)); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .acct-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
 .acct-tabs::-webkit-scrollbar { display: none; }
 .acct-tabs a { flex: none; padding: 8px 14px; border-radius: 999px; text-decoration: none; font-weight: 600; font-size: 14px; color: var(--ink-2); border: 1px solid var(--line); background: var(--surface); min-height: 40px; display: inline-flex; align-items: center; }
@@ -644,7 +686,48 @@ h1, h2, h3, h4 { font-family: var(--display); font-weight: 800; letter-spacing: 
 .ai-design figcaption { padding: 12px 14px; }
 .ai-gen { gap: 8px; }
 .admin-thumb { width: 96px; height: 72px; object-fit: cover; border-radius: 8px; }
+/* Admin: agency photos not loaded yet, failures (never styled as success), and "publish anyway?" */
+.admin-thumb-ext { display: inline-flex; align-items: center; justify-content: center; text-align: center; padding: 4px; font-size: 11.5px; color: var(--ink-2); background: var(--surface-2); border: 1px dashed var(--line); }
+.callout.error { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); color: var(--ink); }
+.admin-load-failed .linkish { min-height: 24px; }
+.admin-confirm { border: 1px solid var(--gold); border-left-width: 4px; border-radius: 0 10px 10px 0; background: var(--gold-soft); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.admin-confirm h5 { margin: 0; font-size: 15px; font-family: var(--display); }
+.admin-confirm p { margin: 0; }
+.admin-confirm-flags { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; overflow-wrap: anywhere; }
+.admin-checks .tag { white-space: normal; text-align: left; max-width: 100%; }
 .btn.danger { color: var(--danger); border-color: var(--danger); }
 .hp { position: absolute !important; left: -10000px !important; width: 1px; height: 1px; opacity: 0; }
 .topbar .signin-btn { white-space: nowrap; min-height: 40px; }
 @media (max-width: 420px) { .topbar .signin-btn { padding: 8px 10px; font-size: 13px; } }
+
+/* Search page (search team): Streetkey's own code-written summary (not AI), must-have preferences, limits. */
+.msg.sk-summary { background: var(--surface-2); color: var(--ink); border-radius: 14px; }
+.aisr-prefs { margin-top: 8px; }
+.aisr-pref { border-style: dashed; }
+.aisr-pref-n { color: var(--muted); font-weight: 400; }
+.aisr-prefs-d { flex-basis: 100%; margin: 0; }
+.aisr-count { margin: 6px 0 0; }
+.aisr-limit { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.aisr-limit p { margin: 0; }
+
+/* ===== Property tools: estimator, investment analyser, My Home ===== */
+/* Row headers in data tables read like the other cells (column headers stay small caps). */
+table.t tbody th[scope='row'] { text-transform: none; letter-spacing: normal; font-size: inherit; font-weight: 500; color: var(--ink); white-space: normal; vertical-align: top; padding: 9px 6px; }
+table.t tr:last-child th[scope='row'] { border-bottom: 0; }
+/* Sensitivity grid: a minus sign never wraps onto its own line. */
+.t.heat td, .t.heat tbody th[scope='row'] { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Subheadings in AI results are real headings but keep the small-caps label look. */
+h4.ai-prop-h, h5.ai-prop-h, h3.sk-list-h, h4.sk-list-h { font-family: inherit; line-height: 1.3; text-wrap: wrap; }
+.dropzone.is-over { border-color: var(--accent); border-style: solid; color: var(--ink); background: var(--accent-soft); }
+/* The estimate total, kept in view on phones and tablets while editing the steps above it. */
+.est-sticky { display: none; }
+@media (max-width: 1080px) {
+  .est-sticky { display: flex; position: sticky; bottom: 12px; z-index: 5; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; padding: 10px 14px; border-radius: 14px; background: #0E1424; color: #F7F5F0; box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
+  .est-sticky .linkish { color: inherit; min-height: 24px; }
+  /* Fields reached with Tab scroll clear of the bar instead of hiding behind it (WCAG 2.4.11). */
+  html:has(.est-sticky) { scroll-padding-bottom: 110px; }
+}
+@media (max-width: 900px) {
+  .est-sticky { bottom: calc(80px + env(safe-area-inset-bottom)); }
+  html:has(.est-sticky) { scroll-padding-bottom: calc(190px + env(safe-area-inset-bottom)); }
+}

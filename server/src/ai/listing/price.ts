@@ -114,8 +114,11 @@ const BIDDING = /\b(offers? (over|above|in excess)|bids?|bidding|highest offer|b
  */
 export const PRICE_TIMING = { budgetMs: 22_000, minRetryMs: 8_000 };
 
-/** The AI explanation, validated: only low, high and asking may appear as £ figures. Regenerates once (time allowing), then drops figures. */
-export async function priceNarrative(i: PriceGuideIn, range: PriceRange, meta: { userId?: string | null; deadline?: number }): Promise<{ narrative: NarrativeT; regenerated: boolean; dropped: boolean }> {
+/**
+ * The AI explanation, validated: only low, high and asking may appear as £ figures. Regenerates once (time allowing), then drops figures.
+ * meta.charge is called only when the model is about to be asked (not for a cached explanation), to charge the AI allowance.
+ */
+export async function priceNarrative(i: PriceGuideIn, range: PriceRange, meta: { userId?: string | null; deadline?: number; charge?: () => Promise<unknown> }): Promise<{ narrative: NarrativeT; regenerated: boolean; dropped: boolean }> {
   const rent = i.channel === 'rent';
   const deadline = meta.deadline ?? Date.now() + PRICE_TIMING.budgetMs;
   const allowedMoney = [range.low, range.high, ...(i.askingPrice ? [i.askingPrice] : [])];
@@ -142,6 +145,7 @@ export async function priceNarrative(i: PriceGuideIn, range: PriceRange, meta: {
 
   const key = `listing.price:${createHash('sha256').update(JSON.stringify([i.channel, i.type, i.beds, Math.round(i.floorArea), i.condition, range.low, range.high, i.askingPrice ?? null, range.basis.method])).digest('hex')}`;
   return cached(key, 6 * 3600, async () => {
+    await meta.charge?.();
     let narrative = tidy(await ask());
     let regenerated = false, dropped = false;
     let bad = strayFigures(narrative, allowedMoney, allowedPct);

@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import type { CheckDTO, ListingDTO, ListingStatus, PhotoDTO } from '../../../src/lib/apiTypes';
-import { complianceChecks, locate, normalisePostcode, POSTCODE_RE, type ListingInput } from '../../../src/engine/listings';
+import { complianceChecks, locate, normalisePostcode, placeFieldProblem, POSTCODE_RE, streetOnly, type ListingInput } from '../../../src/engine/listings';
 import type { PropertyType } from '../../../src/engine/refurb';
 import { q, type Q } from '../db';
 
@@ -16,8 +16,11 @@ const money = z.coerce.number().positive().max(100_000_000);
 export const ListingBody = z.object({
   channel: z.enum(['sale', 'rent']),
   title: z.string().trim().max(120).optional().nullable(),
-  addressLine: z.string().trim().min(3, 'Enter the first line of the address.').max(160),
-  town: z.string().trim().min(2, 'Enter the town or city.').max(80),
+  // Both are shown publicly (the street part of the address for private sellers), so no contact details, links or payment wording.
+  addressLine: z.string().trim().min(3, 'Enter the first line of the address.').max(160)
+    .superRefine((v, ctx) => { const p = placeFieldProblem(v, 'addressLine'); if (p) ctx.addIssue({ code: 'custom', message: p }); }),
+  town: z.string().trim().min(2, 'Enter the town or city.').max(80)
+    .superRefine((v, ctx) => { const p = placeFieldProblem(v, 'town'); if (p) ctx.addIssue({ code: 'custom', message: p }); }),
   postcode: z.string().trim().regex(POSTCODE_RE, 'Enter a full UK postcode, e.g. E17 4QH.'),
   type: z.enum(PROPERTY_TYPES),
   tenure: z.enum(['freehold', 'leasehold', 'share-of-freehold']),
@@ -39,6 +42,8 @@ export const ListingBody = z.object({
   ownershipDeclared: z.boolean().optional(),
 });
 export type ListingBodyT = z.infer<typeof ListingBody>;
+/** Edits: every field optional, and nothing defaulted (a missing field is left as it is, never cleared). */
+export const ListingPatch = ListingBody.partial().extend({ features: z.array(z.string().trim().min(1).max(60)).max(30).optional() });
 
 export interface ListingRow {
   id: string; ref: string; owner_user_id: string | null; organisation_id: string | null; organisation_name?: string | null; organisation_verified?: boolean | null;
@@ -56,12 +61,8 @@ export interface ListingRow {
 export const LISTING_SELECT = `SELECT l.*, o.name AS organisation_name, o.verified AS organisation_verified, u.display_name AS owner_name
   FROM listings l LEFT JOIN organisations o ON o.id = l.organisation_id LEFT JOIN users u ON u.id = l.owner_user_id`;
 
-/** Hide the house number for private sellers, e.g. "Flat 2, 14 Elm Road" → "Elm Road". */
-export function streetOnly(addressLine: string) {
-  const parts = addressLine.split(',').map((s) => s.trim()).filter(Boolean);
-  const street = parts.find((p) => /[a-z]{3,}/i.test(p.replace(/^(flat|apartment|apt|unit|house)\b/i, '')) && !/^(flat|apartment|apt|unit)\b/i.test(p)) ?? parts[parts.length - 1] ?? addressLine;
-  return street.replace(/^\s*\d+[a-z]?(\s*[-–/]\s*\d+[a-z]?)?\s+/i, '').trim();
-}
+/** Hide the house number for private sellers, e.g. "Flat 2, 14 Elm Road" → "Elm Road" (shared with the website's preview). */
+export { streetOnly };
 
 export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: string | null; orgIds?: string[]; admin?: boolean }): ListingDTO {
   const mine = !!(viewer.userId && r.owner_user_id === viewer.userId) || !!(r.organisation_id && viewer.orgIds?.includes(r.organisation_id));
@@ -103,9 +104,8 @@ export function checksFor(r: ListingRow, photoCount: number): CheckDTO[] {
     features: r.features ?? [], description: r.description ?? undefined, photos: Array.from({ length: photoCount }, () => ''),
     source: { kind: r.source_kind === 'landlord' ? 'landlord' : 'owner', name: '', licence: '', verified: false },
   };
-  const checks: CheckDTO[] = complianceChecks(input);
+  const checks: CheckDTO[] = complianceChecks(input, { minPhotos: 1 });
   checks.push({ id: 'ownership', ok: r.ownership_declared || r.source_kind === 'agent-feed' || r.source_kind === 'agent', severity: 'block', message: 'Confirm you own the property or are authorised to market it.' });
-  checks.push({ id: 'photo-min', ok: photoCount >= 1, severity: 'block', message: 'Add at least one photo.' });
   return checks;
 }
 

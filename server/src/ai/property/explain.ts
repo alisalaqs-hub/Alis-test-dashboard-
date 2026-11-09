@@ -8,7 +8,7 @@ import { money } from '../../../../src/lib/ai/property';
 import { estimateRefurb, hiddenDefectRisks, REGIONS, scenarios, VAT_RATES, type RefurbInput } from '../../../../src/engine/refurb';
 import { cached, chatJSON, HOUSE_RULES } from '../core';
 import { S, type Infer } from '../schema';
-import { figuresInText, hashOf, scrubList, scrubText } from './figures';
+import { figuresInText, hashOf, percentsIn, scrubList, scrubText, type AiMeta } from './figures';
 
 const Out = S.obj({
   summary: S.str('2 to 4 plain sentences'),
@@ -23,6 +23,7 @@ const SYSTEM = [
   HOUSE_RULES,
   'You explain a renovation cost estimate produced by Streetkey’s cost engine, for a homeowner or investor in plain, friendly British English.',
   'Use only the figures in the ESTIMATE data, as given (you may round to the nearest £100 or £1,000). Never add, subtract or combine figures, and never introduce any other cost, saving, value, grant or price.',
+  'Quote percentages only as they appear in the data (for example the VAT rate or the contingency); never work out new ones.',
   'summary: what the total covers and the likely range, in 2 to 4 sentences, saying once that it is a budget estimate, not a quote or a survey.',
   'biggestCosts: the 3 to 4 largest trades or items and why they cost what they do. waysToSave: up to 4 options, using the savings listed in the data where relevant. risks: up to 4 things that could push the cost up (hidden defects, condition, era). nextSteps: up to 4 practical actions (surveys, quotes, approvals).',
   'Each list item is one sentence. No headings, no markdown.',
@@ -74,18 +75,22 @@ export function explainPack(input: RefurbInput) {
     ...specs.flatMap((x) => [x.total, x.differenceFromCurrent]), ...savings.map((x) => x.saving),
     ...figuresInText([...risks.map((r) => r.allowance), ...e.exclusions, ...e.compliance, ...e.assumptions, ...savings.map((x) => x.option)]),
   ];
-  return { e, pack, allowed };
+  // Percentages the model may quote: only those written in the data (VAT rate, prelims, contingency…).
+  const allowedPct = percentsIn(pack);
+  return { e, pack, allowed, allowedPct };
 }
 
-export async function explainEstimate(input: RefurbInput, meta: { userId: string | null }): Promise<RefurbExplainResult> {
-  const { e, pack, allowed } = explainPack(input);
-  return cached(`prop:refurb-explain:v2:${hashOf(pack)}`, 7 * 86_400, async () => {
+/** `meta.charge` runs only when the AI is actually called (not for a cached answer), so cache hits never use up anyone's allowance. */
+export async function explainEstimate(input: RefurbInput, meta: AiMeta): Promise<RefurbExplainResult> {
+  const { e, pack, allowed, allowedPct } = explainPack(input);
+  return cached(`prop:refurb-explain:v3:${hashOf(pack)}`, 7 * 86_400, async () => {
+    await meta.charge?.();
     const out = await chatJSON<OutT>([
       { role: 'system', content: SYSTEM },
       { role: 'user', content: `ESTIMATE (computed by Streetkey’s cost engine; amounts in £, including VAT unless stated):\n${JSON.stringify(pack)}` },
     ], Out, 'refurb_explanation', { purpose: 'property.refurb_explain', userId: meta.userId, role: 'fast', maxTokens: 1600 });
-    const summary = scrubText(out.summary, allowed, 700);
-    const lists = (['biggestCosts', 'waysToSave', 'risks', 'nextSteps'] as const).map((k) => scrubList(out[k], allowed, { max: 5 }));
+    const summary = scrubText(out.summary, allowed, 700, allowedPct);
+    const lists = (['biggestCosts', 'waysToSave', 'risks', 'nextSteps'] as const).map((k) => scrubList(out[k], allowed, { max: 5, pct: allowedPct }));
     const fallback = `The estimate is ${money(e.total)} including VAT, with a likely range of ${money(e.low)} to ${money(e.high)} (${e.confidence} confidence). It’s a budget estimate from Streetkey’s cost engine, not a quote or a survey.`;
     return {
       summary: summary.text || fallback,

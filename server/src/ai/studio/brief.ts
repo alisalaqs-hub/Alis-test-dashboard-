@@ -7,7 +7,7 @@
  * budget and recomputes the costs itself. Falls back to the rule-based brief parser.
  */
 import { createHash } from 'node:crypto';
-import { designCost, fitBudget, parseDesignBrief, STYLES, TIERS, type DesignCost, type Dims, type RoomType, type Tier } from '../../../../src/engine/design';
+import { briefMentions, designCost, fitBudget, parseDesignBrief, STYLES, TIERS, type DesignCost, type Dims, type RoomType, type Tier } from '../../../../src/engine/design';
 import { regionFromPostcode, REGIONS } from '../../../../src/engine/refurb';
 import { AiError, cached, chatJSON, HOUSE_RULES, untrusted } from '../core';
 import { S, type Infer } from '../schema';
@@ -131,20 +131,33 @@ export async function designBrief(i: BriefInput, o: { userId: string | null }): 
   }
 }
 
-/** Validate the model's plan and attach engine figures. Exported for tests. */
+/**
+ * Validate the model's plan and attach engine figures. Exported for tests.
+ *
+ * A room or style the brief names in so many words wins over the model's reading: the model's room
+ * or style is used only when it is one of those the brief names, or when the brief names none.
+ */
 export function groundBrief(ai: Brief, i: BriefInput): BriefResult {
   const dims = i.dims ?? DEFAULT_DIMS;
   const postcode = i.postcode ?? '';
   const parsed = parseDesignBrief(i.text);
-  const room: RoomType = (ROOMS as readonly string[]).includes(ai.room) ? ai.room : parsed.room ?? i.room ?? 'living';
-  const style = STYLES.find((s) => s.id === ai.styleId) ?? STYLES.find((s) => s.id === parsed.style) ?? null;
+  const named = briefMentions(i.text);
+  const aiRoom = (ROOMS as readonly string[]).includes(ai.room) ? ai.room : null;
+  const room: RoomType = named.rooms.length ? (aiRoom && named.rooms.includes(aiRoom) ? aiRoom : named.rooms[0]) : aiRoom ?? i.room ?? 'living';
+  const aiStyle = STYLES.find((s) => s.id === ai.styleId) ?? null;
+  const style = named.styles.length
+    ? (aiStyle && named.styles.includes(aiStyle.id) ? aiStyle : STYLES.find((s) => s.id === named.styles[0]) ?? null)
+    : aiStyle ?? STYLES.find((s) => s.id === parsed.style) ?? null;
   if (!style) return rulesBrief(i);
+  const roomOverridden = !!aiRoom && aiRoom !== room;
+  const styleOverridden = !!aiStyle && aiStyle.id !== style.id;
   const furniture = furnished(room, i.staged ?? true);
   // Budget: what the page sent, else what the brief itself says (checked against the text).
   const nums = numbersIn(i.text);
   const aiBudget = ai.budget != null && ai.budget >= 300 && ai.budget <= 1_000_000 && numberIn(ai.budget, nums) ? Math.round(ai.budget) : null;
   const budget = i.budget ?? aiBudget ?? (parsed.budget && parsed.budget >= 300 && parsed.budget <= 1_000_000 ? parsed.budget : null);
-  let tier: Tier = TIERS.includes(ai.tier) ? ai.tier : style.tier;
+  // The model's tier belongs to its own style choice; when the brief's style replaced it, start from that style's usual tier.
+  let tier: Tier = !styleOverridden && TIERS.includes(ai.tier) ? ai.tier : style.tier;
   let fits: boolean | null = null;
   let adjustedFrom: Tier | null = null;
   if (budget != null) {
@@ -155,11 +168,18 @@ export function groundBrief(ai: Brief, i: BriefInput): BriefResult {
   const cost = designCost(room, tier, dims, postcode, { furniture });
   const words = (s: string, max: number) => noMoney(clean(s, max * 2)).slice(0, max).trim();
   const list = (xs: string[], n: number, max: number) => [...new Set(xs.map((x) => words(x, max)).filter((x) => x.length >= 2))].slice(0, n);
+  // The model's materials and advice were written for the room and style it chose: when the brief overrode them, use the catalogue instead.
+  const overridden = roomOverridden || styleOverridden;
+  const materials = overridden
+    ? cost.lines.filter((l) => l.code !== 'STAGE').slice(0, 6).map((l) => ({ item: l.name, spec: l.spec, why: 'From Streetkey’s cost catalogue for this specification.' }))
+    : ai.materials.slice(0, 6).map((m) => ({ item: words(m.item, 60), spec: words(m.spec, 90), why: words(m.why, 180) })).filter((m) => m.item && m.spec);
+  const read = [roomOverridden && aiRoom ? `a ${ROOM_LABEL[aiRoom]}` : null, styleOverridden && aiStyle ? aiStyle.name : null].filter(Boolean).join(', ');
+  const asked = [roomOverridden ? `a ${ROOM_LABEL[room]}` : null, styleOverridden ? style.name : null].filter(Boolean).join(', ');
   return {
     engine: 'ai', room, styleId: style.id, styleName: style.name, tier, budget,
     priorities: list(ai.priorities, 4, 80), keep: list(ai.keep, 5, 80),
-    materials: ai.materials.slice(0, 6).map((m) => ({ item: words(m.item, 60), spec: words(m.spec, 90), why: words(m.why, 180) })).filter((m) => m.item && m.spec),
-    notes: words(ai.notes, 400),
-    cost: summary(cost), fitsBudget: fits, tierAdjusted: !!adjustedFrom, message: message(room, style.name, tier, cost, budget, fits, adjustedFrom), note: null,
+    materials, notes: overridden ? '' : words(ai.notes, 400),
+    cost: summary(cost), fitsBudget: fits, tierAdjusted: !!adjustedFrom, message: message(room, style.name, tier, cost, budget, fits, adjustedFrom),
+    note: overridden ? `Streetkey AI suggested ${read}, but your brief asks for ${asked}, so the plan follows your brief.` : null,
   };
 }

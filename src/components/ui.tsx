@@ -1,9 +1,23 @@
-import type { ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
-export const gbp = (n: number, dp = 0) =>
-  Number.isFinite(n) ? n.toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: dp, minimumFractionDigits: dp }) : '—';
-export const gbpK = (n: number) => (Math.abs(n) >= 1_000_000 ? `£${(n / 1_000_000).toFixed(2)}m` : Math.abs(n) >= 10_000 ? `£${Math.round(n / 1_000)}k` : Math.abs(n) >= 1_000 ? `£${(n / 1_000).toFixed(1)}k` : gbp(n));
-export const pct = (n: number, dp = 1) => (Number.isFinite(n) ? `${(n * 100).toFixed(dp)}%` : '∞');
+/** £ amount; negatives as "−£1,250" (a true minus sign, matching money()); "—" when there is no real figure. */
+export const gbp = (n: number, dp = 0) => {
+  if (!Number.isFinite(n)) return '—';
+  const s = Math.abs(n).toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: dp, minimumFractionDigits: dp });
+  return n < 0 && /[1-9]/.test(s) ? `−${s}` : s;
+};
+/** Short £ amount: £950, £1.3k, £182k, £1.25m; negatives as "−£182k"; "—" when there is no real figure. */
+export const gbpK = (n: number) => {
+  if (!Number.isFinite(n)) return '—';
+  const a = Math.abs(n);
+  const sign = n < 0 ? '−' : '';
+  if (a >= 999_500) return `${sign}£${(a / 1_000_000).toFixed(2)}m`;
+  if (a >= 10_000) return `${sign}£${Math.round(a / 1_000)}k`;
+  if (a >= 1_000) return `${sign}£${(a / 1_000).toFixed(1)}k`;
+  return gbp(n);
+};
+/** Fraction as a percentage (0.052 → "5.2%"); "—" for a division by zero or other non-figure. */
+export const pct = (n: number, dp = 1) => (Number.isFinite(n) ? `${(n * 100).toFixed(dp)}%` : '—');
 
 type TagKind = 'demo' | 'est' | 'ai' | 'ok' | 'live' | 'neutral' | 'warn' | 'obs' | 'inf' | 'rec';
 const TAG_TEXT: Partial<Record<TagKind, string>> = { demo: 'Demo data', est: 'Estimate', ai: 'AI-generated', ok: 'Verified', live: 'Needs live integration', obs: 'Observed', inf: 'Inferred', rec: 'Recommendation' };
@@ -21,32 +35,186 @@ export function Stat({ label, value, sub, big, tone }: { label: ReactNode; value
   );
 }
 
-export function Seg<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+export interface SegOption<T extends string> { value: T; label: string; /** Fuller name for screen readers when the visible label is short (e.g. 'B' → 'Budget'). */ ariaLabel?: string; disabled?: boolean }
+
+/**
+ * A row of options that behaves like a radio group (WAI-ARIA pattern): one Tab stop (the chosen option),
+ * Arrow keys / Home / End move and choose, and the group has a name.
+ * Name it with aria-labelledby (the id of the visible heading, preferred) or aria-label. Placed inside a
+ * <label className="field">, the label's own text names the group and clicking that text no longer
+ * changes the choice; a <div className="field"> with a <span id> heading is the better markup.
+ */
+export function Seg<T extends string>({ value, options, onChange, 'aria-label': ariaLabel, 'aria-labelledby': labelledBy, 'aria-describedby': describedBy, id, className, disabled }: {
+  value: T; options: SegOption<T>[]; onChange: (v: T) => void;
+  'aria-label'?: string; 'aria-labelledby'?: string; 'aria-describedby'?: string; id?: string; className?: string; disabled?: boolean;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const btns = useRef<(HTMLButtonElement | null)[]>([]);
+  const named = !!(ariaLabel || labelledBy);
+  // Inside a <label>: name the group from the label's own text, and stop clicks on that text "pressing" the first option.
+  useLayoutEffect(() => {
+    const el = root.current;
+    const lab = el?.parentElement?.closest('label');
+    if (!el || !lab) return;
+    if (!named) {
+      const text = Array.from(lab.childNodes).filter((n) => !n.contains(el)).map((n) => n.textContent ?? '').join(' ').replace(/\s+/g, ' ').trim();
+      if (text) el.setAttribute('aria-label', text); else el.removeAttribute('aria-label');
+    }
+    const stop = (e: MouseEvent) => { if (!el.contains(e.target as Node)) e.preventDefault(); };
+    lab.addEventListener('click', stop);
+    return () => lab.removeEventListener('click', stop);
+  }, [named]);
+
+  const usable = (i: number) => !disabled && !options[i]?.disabled;
+  const checked = options.findIndex((o) => o.value === value);
+  const tabStop = checked >= 0 && usable(checked) ? checked : options.findIndex((_, i) => usable(i));
+  const pick = (i: number) => {
+    if (!usable(i)) return;
+    btns.current[i]?.focus();
+    if (options[i].value !== value) onChange(options[i].value);
+  };
+  const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
+    const n = options.length;
+    const step = (from: number, dir: 1 | -1) => { for (let k = 1; k <= n; k++) { const j = (from + dir * k + n) % n; if (usable(j)) return j; } return from; };
+    let to: number | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') to = step(i, 1);
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') to = step(i, -1);
+    else if (e.key === 'Home') to = step(-1 + n, 1) % n;
+    else if (e.key === 'End') to = step(n, -1);
+    if (to == null) return;
+    e.preventDefault();
+    pick(to);
+  };
   return (
-    <div className="seg" role="radiogroup">
-      {options.map((o) => (
-        <button key={o.value} role="radio" aria-checked={o.value === value} className={o.value === value ? 'on' : ''} onClick={() => onChange(o.value)} type="button">{o.label}</button>
+    <div ref={root} id={id} className={`seg${className ? ` ${className}` : ''}`} role="radiogroup"
+      aria-label={ariaLabel} aria-labelledby={labelledBy} aria-describedby={describedBy} aria-disabled={disabled || undefined}>
+      {options.map((o, i) => (
+        <button key={o.value} ref={(el) => { btns.current[i] = el; }} type="button" role="radio"
+          aria-checked={o.value === value} aria-label={o.ariaLabel ?? o.label} className={o.value === value ? 'on' : ''}
+          tabIndex={i === tabStop ? 0 : -1} disabled={disabled || o.disabled}
+          onClick={() => { if (o.value !== value) onChange(o.value); }} onKeyDown={(e) => onKey(e, i)}>{o.label}</button>
       ))}
     </div>
   );
 }
 
-export function Money({ label, value, onChange, step = 1000 }: { label: string; value: number; onChange: (n: number) => void; step?: number }) {
+/* ───────────── Number fields ───────────── */
+
+interface NumberRules {
+  min?: number; max?: number; integer?: boolean;
+  /** Unit for messages, e.g. 'm²' ("Enter a number from 20 m² to 20,000 m²") or '%'. */
+  unit?: string;
+  /** Shown before the figure in messages and inside the box, e.g. '£'. */
+  prefix?: string;
+  /** The box shows value × scale (Pct: 0.055 shows as 5.5); min/max are in what the person types. */
+  scale?: number;
+  /** Decimal places shown for the current value (Money 0, Pct 2). */
+  dp?: number;
+}
+
+const fmtRule = (n: number, r: NumberRules) => `${r.prefix ?? ''}${n.toLocaleString('en-GB', { maximumFractionDigits: 2 })}${r.unit ? (r.unit === '%' ? '%' : ` ${r.unit}`) : ''}`;
+
+/** What's wrong with what the person typed (null: fine, or not finished yet). */
+export function numberProblem(raw: string, r: NumberRules): string | null {
+  const t = raw.trim();
+  if (t === '') return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return 'Enter a number.';
+  if (r.integer && !Number.isInteger(n)) return 'Enter a whole number.';
+  const lo = r.min != null && n < r.min, hi = r.max != null && n > r.max;
+  if (!lo && !hi) return null;
+  if (r.min != null && r.max != null) return `Enter ${r.integer ? 'a whole number' : 'a number'} from ${fmtRule(r.min, r)} to ${fmtRule(r.max, r)}.`;
+  return lo ? `Enter ${fmtRule(r.min!, r)} or more.` : `Enter ${fmtRule(r.max!, r)} or less.`;
+}
+
+/**
+ * Typing state for a number box. What the person types is kept as typed (an empty box or a part-typed
+ * number is fine mid-edit); a value is passed on only once it's a valid number within the limits, so
+ * figures never jump to a clamped or half-typed number. On leaving the box (or Enter) an empty box goes
+ * back to the last value and an out-of-range one shows why, instead of being rewritten.
+ */
+export function useNumberDraft(value: number, onChange: (n: number) => void, r: NumberRules, onValidityChange?: (valid: boolean) => void) {
+  const scale = r.scale ?? 1;
+  const toText = (v: number) => (Number.isFinite(v) ? String(r.dp != null ? +(v * scale).toFixed(r.dp) : +(v * scale).toPrecision(12)) : '');
+  const [text, setText] = useState(() => toText(value));
+  const [shown, setShown] = useState<string | null>(null);
+  const committed = useRef(value);
+  // A change from outside (reset, prefill, an AI suggestion applied) replaces what's in the box.
+  useEffect(() => {
+    if (Object.is(value, committed.current)) return;
+    committed.current = value;
+    setText(toText(value));
+    setShown(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const problem = numberProblem(text, r);
+  const valid = problem == null;
+  const report = useRef(onValidityChange);
+  useLayoutEffect(() => { report.current = onValidityChange; });
+  const reported = useRef(true);
+  useEffect(() => { if (reported.current !== valid) { reported.current = valid; report.current?.(valid); } }, [valid]);
+
+  const change = (raw: string) => {
+    setText(raw);
+    const p = numberProblem(raw, r);
+    if (p == null) {
+      setShown(null);
+      if (raw.trim() !== '') {
+        const v = Number(raw) / scale;
+        if (!Object.is(v, committed.current)) { committed.current = v; onChange(v); }
+      }
+    } else if (shown) setShown(p); // already explaining a problem: keep it up to date while they fix it
+  };
+  const finish = () => {
+    if (text.trim() === '') { setText(toText(committed.current)); setShown(null); return; }
+    if (problem) setShown(problem);
+    else setText(toText(committed.current)); // tidy, e.g. "085" → "85"
+  };
+  return { text, error: shown, valid, change, finish };
+}
+
+export interface NumberFieldProps extends NumberRules {
+  label: ReactNode; value: number; onChange: (n: number) => void;
+  step?: number | 'any'; hint?: ReactNode; id?: string; name?: string; className?: string; inputClassName?: string;
+  disabled?: boolean; required?: boolean; placeholder?: string;
+  /** Told when the box holds something that can't be used (so a page can hold back an action until it's fixed). */
+  onValidityChange?: (valid: boolean) => void;
+  'aria-describedby'?: string;
+}
+
+/**
+ * A labelled number box (see useNumberDraft): typing is never rewritten, limits are explained next to the
+ * box (and announced), and min/max are also set on the input for the browser's own steppers.
+ */
+export function NumberField({ label, value, onChange, min, max, integer, unit, prefix, scale, dp, step, hint, id, name, className, inputClassName = 'input num', disabled, required, placeholder, onValidityChange, 'aria-describedby': describedBy }: NumberFieldProps) {
+  const auto = useId();
+  const inputId = id ?? `nf${auto}`;
+  const hintId = `${inputId}-hint`, errId = `${inputId}-err`;
+  const d = useNumberDraft(value, onChange, { min, max, integer, unit, prefix, scale, dp }, onValidityChange);
+  const input = (
+    <input id={inputId} name={name} className={inputClassName} type="number" inputMode={integer ? 'numeric' : 'decimal'}
+      min={min} max={max} step={step ?? (integer ? 1 : 'any')} value={d.text} disabled={disabled} required={required} placeholder={placeholder}
+      aria-invalid={d.error ? true : undefined}
+      aria-describedby={[hint ? hintId : '', d.error ? errId : '', describedBy ?? ''].filter(Boolean).join(' ') || undefined}
+      onChange={(e) => d.change(e.target.value)} onBlur={d.finish} onKeyDown={(e) => { if (e.key === 'Enter') d.finish(); }} />
+  );
   return (
-    <label className="field">{label}
-      <div className="input-prefix"><span>£</span>
-        <input className="input num" type="number" step={step} value={Math.round(value)} onChange={(e) => onChange(Number(e.target.value) || 0)} />
-      </div>
-    </label>
+    <div className={`field${className ? ` ${className}` : ''}`}>
+      <label htmlFor={inputId}>{label}</label>
+      {prefix ? <div className="input-prefix"><span aria-hidden="true">{prefix}</span>{input}</div> : input}
+      {hint && <span id={hintId} className="xs muted">{hint}</span>}
+      {/* Always present (empty until needed) so the message is announced when it appears. */}
+      <span id={errId} className="field-error xs" aria-live="polite" style={d.error ? undefined : { position: 'absolute' }}>{d.error ?? ''}</span>
+    </div>
   );
 }
 
-export function Pct({ label, value, onChange, step = 0.1 }: { label: string; value: number; onChange: (n: number) => void; step?: number }) {
-  return (
-    <label className="field">{label}
-      <input className="input num" type="number" step={step} value={+(value * 100).toFixed(2)} onChange={(e) => onChange((Number(e.target.value) || 0) / 100)} />
-    </label>
-  );
+export function Money({ label, value, onChange, step = 1000, min, max, hint, onValidityChange, id }: { label: string; value: number; onChange: (n: number) => void; step?: number; min?: number; max?: number; hint?: ReactNode; onValidityChange?: (valid: boolean) => void; id?: string }) {
+  return <NumberField label={label} value={value} onChange={onChange} prefix="£" dp={0} step={step} min={min} max={max} hint={hint} onValidityChange={onValidityChange} id={id} />;
+}
+
+export function Pct({ label, value, onChange, step = 0.1, min, max, hint, onValidityChange, id }: { label: string; value: number; onChange: (n: number) => void; step?: number; min?: number; max?: number; hint?: ReactNode; onValidityChange?: (valid: boolean) => void; id?: string }) {
+  return <NumberField label={label} value={value} onChange={onChange} unit="%" scale={100} dp={2} step={step} min={min} max={max} hint={hint} onValidityChange={onValidityChange} id={id} />;
 }
 
 export function Meter({ label, value, max, display, color }: { label: ReactNode; value: number; max: number; display?: ReactNode; color?: string }) {

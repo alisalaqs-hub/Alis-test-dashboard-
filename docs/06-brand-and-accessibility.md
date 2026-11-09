@@ -26,6 +26,8 @@
 
 Fixed during the audit: low-contrast buttons/labels on navy panels, keyboard access to scrollable tables and code blocks, unlabelled selects and inputs in tables, a low-contrast widget caption.
 
+Fixed after the AI features were added (Nov 2026): text links in AI panels (`.linkish`) now mix 88% `--accent-ink` with ink (5.3:1 on `--surface-2`, 5.6:1 on paper); the "High" risk pill (`.ai-risk.high`) mixes 85% danger with ink (was 4.47:1); AI buttons stay focusable while working so focus never drops to the page; results are announced in a live region; signed-out prompts return people to where they were after signing in, with what they typed kept. The homepage street animation has a pause button (WCAG 2.2.2) and starts paused for people who prefer reduced motion.
+
 **Built-in measures**
 * All text pairings ≥ 4.5:1 (large text ≥ 3:1) in both themes; focus ring 3px purple (`#5E3BF6`, 5.7:1 on paper) / cyan in Blueprint.
 * Skip link ("Skip to main content"), landmarks (`header`, `nav` with labels, `main#main`, `footer`), one `h1` per page.

@@ -8,7 +8,7 @@ import { homeModel, money, planOptions, type HomeFacts, type HomeGoal, type Home
 import { cached, chatJSON, HOUSE_RULES } from '../core';
 import { ensureLiveRegistry } from '../registry';
 import { S } from '../schema';
-import { figuresInText, hashOf, scrubList, scrubText } from './figures';
+import { figuresInText, hashOf, percentsIn, scrubList, scrubText, type AiMeta } from './figures';
 
 const schemaFor = (optionIds: string[]) => S.obj({
   summary: S.str('2 to 3 sentences'),
@@ -28,6 +28,8 @@ const SYSTEM = [
   HOUSE_RULES,
   'You are helping a UK homeowner plan improvements. Streetkey’s engines have already costed the OPTIONS for their goals. Choose the options that best fit the goals and budget, put them in a sensible order, and explain why in plain, friendly British English.',
   'Use only figures in the DATA, as given (you may round to the nearest £100 or £1,000). Never add, subtract or combine figures, and never introduce other costs, values, savings, rents or grants. Step titles contain no figures.',
+  'Never state percentages (for example how much a step adds to the value or cuts from bills) unless that percentage is written in the DATA.',
+  'Each step’s title must describe the option its optionId points to.',
   'steps: 3 to 6, each linked to an option by optionId where one applies (optionId null for advice such as getting quotes). Respect the budget: if an option costs more than the budget, say so rather than recommending it as affordable.',
   'quickWins: up to 3 small, low-cost actions. avoid: up to 3 things that commonly waste money for these goals.',
   'Development options are screening only, not planning advice; energy figures are indicative. Do not make claims about the neighbourhood or the people who live there.',
@@ -35,7 +37,8 @@ const SYSTEM = [
 
 const optionForAi = (o: PlanOption) => ({ id: o.id, title: o.title, detail: o.detail, cost: o.cost, valueImpact: o.valueImpact, annualBillSaving: o.billsSaving, rentPcm: o.rentPcm, effort: o.effort, withinBudget: o.withinBudget, goals: o.goals });
 
-export async function homePlan(body: { home: HomeFacts; goals: HomeGoal[]; budget: number | null }, meta: { userId: string | null }): Promise<HomePlanResult> {
+/** `meta.charge` runs only when the AI is actually called (not for a cached answer or when there is nothing to plan). */
+export async function homePlan(body: { home: HomeFacts; goals: HomeGoal[]; budget: number | null }, meta: AiMeta): Promise<HomePlanResult> {
   await ensureLiveRegistry().catch(() => {});
   const m = homeModel(body.home);
   const options = planOptions(m, body.goals, body.budget).slice(0, 10);
@@ -60,8 +63,11 @@ export async function homePlan(body: { home: HomeFacts; goals: HomeGoal[]; budge
     m.energyNow, m.full.low, m.full.high, ...(body.budget != null ? [body.budget] : []),
     ...figuresInText(options.flatMap((o) => [o.title, o.detail])),
   ];
+  // Percentages the model may quote: only those written in the DATA.
+  const allowedPct = percentsIn(pack);
 
-  return cached(`prop:home-plan:v2:${hashOf(pack)}`, 86_400, async () => {
+  return cached(`prop:home-plan:v3:${hashOf(pack)}`, 86_400, async () => {
+    await meta.charge?.();
     const out = await chatJSON<Out>([
       { role: 'system', content: SYSTEM },
       { role: 'user', content: `DATA (computed by Streetkey’s engines; amounts in £):\n${JSON.stringify(pack)}` },
@@ -74,8 +80,8 @@ export async function homePlan(body: { home: HomeFacts; goals: HomeGoal[]; budge
       const opt = s.optionId ? byId.get(s.optionId) ?? null : null;
       if (opt && used.has(opt.id)) continue;
       if (opt) used.add(opt.id);
-      const title = scrubText(s.title, [], 120); // titles carry no figures
-      const why = scrubText(s.why, allowed, 400);
+      const title = scrubText(s.title, [], 120, []); // titles carry no figures or percentages
+      const why = scrubText(s.why, allowed, 400, allowedPct);
       removed += title.removed + why.removed;
       const t = title.text || opt?.title || '';
       if (!t) continue;
@@ -83,17 +89,19 @@ export async function homePlan(body: { home: HomeFacts; goals: HomeGoal[]; budge
         order: steps.length + 1, title: t, why: why.text || opt?.detail || '',
         cost: opt?.cost ?? null, valueImpact: opt?.valueImpact ?? null, billsSaving: opt?.billsSaving ?? null,
         effort: opt?.effort ?? s.effort, optionId: opt?.id ?? null, withinBudget: opt?.withinBudget ?? null,
+        // The figures are the option's: say which option they are for, whatever the AI called the step.
+        optionTitle: opt?.title ?? null,
       });
       if (steps.length === 6) break;
     }
-    const summary = scrubText(out.summary, allowed, 600);
-    const quick = scrubList(out.quickWins, allowed, { max: 3 });
-    const avoid = scrubList(out.avoid, allowed, { max: 3 });
+    const summary = scrubText(out.summary, allowed, 600, allowedPct);
+    const quick = scrubList(out.quickWins, allowed, { max: 3, pct: allowedPct });
+    const avoid = scrubList(out.avoid, allowed, { max: 3, pct: allowedPct });
     removed += summary.removed + quick.removed + avoid.removed;
     const top = options[0];
     return {
       summary: summary.text || `For your goals, Streetkey’s engines suggest starting with: ${top.title.toLowerCase()}${top.cost != null ? ` (about ${money(top.cost)})` : ''}.`,
-      steps: steps.length ? steps : options.slice(0, 4).map((o, k) => ({ order: k + 1, title: o.title, why: o.detail, cost: o.cost, valueImpact: o.valueImpact, billsSaving: o.billsSaving, effort: o.effort, optionId: o.id, withinBudget: o.withinBudget })),
+      steps: steps.length ? steps : options.slice(0, 4).map((o, k) => ({ order: k + 1, title: o.title, why: o.detail, cost: o.cost, valueImpact: o.valueImpact, billsSaving: o.billsSaving, effort: o.effort, optionId: o.id, withinBudget: o.withinBudget, optionTitle: o.title })),
       quickWins: quick.items, avoid: avoid.items, figures, goals: body.goals, budget: body.budget, removedClaims: removed, disclaimer,
     };
   });

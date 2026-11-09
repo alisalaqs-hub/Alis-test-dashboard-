@@ -104,6 +104,9 @@ function LiveOwner({ listings, onDemo }: { listings: MyListing[]; onDemo: () => 
   const rent = l.channel === 'rent';
   const price = (n: number) => (rent ? `${gbp(n)} pcm` : gbp(n));
   const views = stats?.totals.listing_view ?? l.stats.views30d;
+  const saves = stats?.saves ?? l.stats.saves;
+  // Messages the inbox held back as likely spam or scams aren't enquiries (the inbox doesn't count them either).
+  const heldBack = l.stats.filtered ?? 0;
   const days = l.publishedAt ? Math.max(0, Math.floor((Date.now() - new Date(l.publishedAt).getTime()) / 86_400_000)) : null;
   const ev = useMemo(() => priceEvidence(l), [l]);
   const issues = l.checks.filter((c) => !c.ok);
@@ -122,8 +125,11 @@ function LiveOwner({ listings, onDemo }: { listings: MyListing[]; onDemo: () => 
 
       <div className="grid g4 keep2">
         <div className="card"><Stat label="Listing views (30 days)" value={views.toLocaleString('en-GB')} sub="Visitors who allowed analytics" /></div>
-        <div className="card"><Stat label="Saved by" value={(stats?.saves ?? l.stats.saves).toLocaleString('en-GB')} sub={`${l.stats.saves === 1 ? 'person' : 'people'} with a Streetkey account`} /></div>
-        <div className="card"><Stat label="Enquiries" value={(stats?.enquiries ?? l.stats.enquiries).toLocaleString('en-GB')} sub={l.stats.newEnquiries ? <Link to="/account/inbox">{l.stats.newEnquiries} new in your inbox</Link> : 'All caught up'} /></div>
+        <div className="card"><Stat label="Saved by" value={saves.toLocaleString('en-GB')} sub={`${saves === 1 ? 'person' : 'people'} with a Streetkey account`} /></div>
+        <div className="card"><Stat label="Enquiries" value={(stats?.enquiries ?? l.stats.enquiries).toLocaleString('en-GB')} sub={<>
+          {l.stats.newEnquiries ? <Link to="/account/inbox">{l.stats.newEnquiries} new in your inbox</Link> : 'All caught up'}
+          {heldBack > 0 && <><br /><Link to="/account/inbox">{heldBack} held back as possible spam</Link> (not counted)</>}
+        </>} /></div>
         <div className="card"><Stat label="Days on market" value={days ?? '—'} sub={STATUS_LABEL[l.status] ?? l.status} /></div>
       </div>
 
@@ -197,7 +203,7 @@ function DemoOwner({ onBack }: { onBack?: () => void }) {
 
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
-          <Section title="What the evidence says" kicker="AI property behaviour analysis" right={<Tag kind="ai">Evidence-based</Tag>}><InsightList items={ins} /></Section>
+          <Section title="What the evidence says" kicker="Property behaviour analysis · built-in rules" right={<Tag kind="neutral">Evidence-based</Tag>}><InsightList items={ins} /></Section>
 
           <Section title="Engagement over time" kicker="Daily, last 28 days"><TrendChart days={e.days} /></Section>
 
@@ -248,7 +254,7 @@ function DemoOwner({ onBack }: { onBack?: () => void }) {
         </div>
 
         <div className="stack" style={{ gap: 16 }}>
-          <AssistantPanel title="Ask about your listing" kicker="Owner AI assistant" skills={ownerSkills} ctx={p} />
+          <AssistantPanel title="Ask about your listing" kicker="Owner assistant" skills={ownerSkills} ctx={p} />
           <Section title="Weekly performance report" kicker="Automated">
             <p className="small muted">A plain-English report with evidence, caveats and recommended actions.</p>
             <button className="btn" style={{ marginTop: 10 }} onClick={() => download(`streetkey-report-${p.id}.md`, weeklyOwnerReport(p), 'text/markdown')}>Download this week’s report</button>

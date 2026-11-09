@@ -19,7 +19,11 @@ export interface TriageResponse { status: 'ready' | 'pending' | 'unavailable' | 
 
 export type ReplyIntent = 'answer' | 'confirm_viewing' | 'offer_times' | 'decline' | 'request_info';
 export type ReplyTone = 'friendly' | 'formal' | 'brief';
-export interface SuggestedReply { reply: string; placeholders: string[]; warnings: string[] }
+/**
+ * A suggested reply. warnings: Streetkey's own checks on the draft. aiNotes: the model's suggestions for
+ * the lister, kept apart (and labelled as AI where shown) so they never read as a Streetkey statement.
+ */
+export interface SuggestedReply { reply: string; placeholders: string[]; warnings: string[]; aiNotes?: string[] }
 
 export interface Improvement { action: string; why: string; impact: 'high' | 'medium' | 'low' }
 export interface PriceEvidence { low: number; high: number; position: 'below' | 'within' | 'above'; diffPct: number; scope: string; comparables: number }
@@ -36,8 +40,8 @@ export interface ListingStats { days: { day: string; views: number; visitors: nu
 /* ───────── calls ───────── */
 const enc = encodeURIComponent;
 export const inboxAi = {
-  /** Triage for all the conversations you handle as lister (inbox chips). */
-  triageAll: () => aiGet<{ items: Record<string, Triage> }>('/api/ai/inbox'),
+  /** Triage for all the conversations you handle as lister (inbox chips). pending: ones still being read (older servers omit it). */
+  triageAll: () => aiGet<{ items: Record<string, Triage>; pending?: string[] }>('/api/ai/inbox'),
   triage: (id: string) => aiGet<TriageResponse>(`/api/ai/inbox/${enc(id)}`),
   suggestReply: (id: string, b: { intent: ReplyIntent; tone: ReplyTone; notes?: string }) => aiPost<SuggestedReply>(`/api/ai/inbox/${enc(id)}/suggest-reply`, b, 45_000),
   /** "Not spam": not an AI call, so it works even when AI is switched off. */
@@ -103,18 +107,21 @@ export function ruleInsights(l: MyListing): ListingInsights {
   if (views < 20 && (days ?? 0) >= 14) improve.push({ action: 'Share the listing link', why: `${views} views in the last 30 days. Sharing it on social media and with local groups helps.`, impact: 'medium' });
   if (l.features.length < 4) improve.push({ action: 'List more key features', why: 'Buyers filter by features such as parking, a garden or a new kitchen.', impact: 'low' });
 
+  const enquiriesSoFar = `${enquiries} enquir${enquiries === 1 ? 'y' : 'ies'} so far.`;
+  const headline = missing.length ? 'Some required details are missing, which can hold buyers back.'
+    : views >= 50 && enquiries === 0 ? 'Plenty of people are looking, but nobody has enquired yet.'
+    : enquiries > 0 ? enquiriesSoFar
+    : views === 0 ? 'No tracked views yet in the last 30 days.' : `${views} views in the last 30 days.`;
+
+  // What's working never repeats the headline.
   const working: string[] = [];
   if (saves >= 3) working.push(`${saves} people have saved it.`);
-  if (enquiries > 0) working.push(`${enquiries} enquir${enquiries === 1 ? 'y' : 'ies'} so far.`);
+  if (enquiries > 0 && headline !== enquiriesSoFar) working.push(enquiriesSoFar);
   if (photos >= 8) working.push(`A good set of ${photos} photos.`);
   if (words >= 150) working.push('A detailed description.');
   if (!missing.length) working.push('All the required material information is there.');
   if (ev?.position === 'within') working.push('The price sits within the indicative range for similar homes.');
 
-  const headline = missing.length ? 'Some required details are missing, which can hold buyers back.'
-    : views >= 50 && enquiries === 0 ? 'Plenty of people are looking, but nobody has enquired yet.'
-    : enquiries > 0 ? `${enquiries} enquir${enquiries === 1 ? 'y' : 'ies'} so far.`
-    : views === 0 ? 'No tracked views yet in the last 30 days.' : `${views} views in the last 30 days.`;
   const priceNote = ev ? `Your ${rent ? 'rent' : 'asking price'} of ${money(l.price, rent)} is ${ev.position} the indicative ${money(ev.low, rent)}–${money(ev.high, rent)} range from ${ev.scope} evidence (${ev.comparables} comparable${ev.comparables === 1 ? '' : 's'}). This is a guide from Streetkey’s demo evidence, not a valuation.` : null;
   return { headline, whatsWorking: working.slice(0, 4), whatToImprove: improve.slice(0, 5), priceNote };
 }

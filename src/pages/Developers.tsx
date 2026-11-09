@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { DEFAULT_INPUT, estimateRefurb, type Spec } from '../engine/refurb';
-import { gbp, gbpK, Section, Seg, Stat, Tag } from '../components/ui';
+import { gbp, gbpK, NumberField, Section, Seg, Stat, Tag } from '../components/ui';
 
 const ENDPOINTS = [
   { m: 'POST', p: '/v1/search', d: 'AI property search: natural language → structured query → ranked, explained results', unit: '£0.02', status: 'Phase 2' },
@@ -31,6 +31,7 @@ export default function Developers() {
   const [area, setArea] = useState(92);
   const [spec, setSpec] = useState<Spec>('standard');
   const [pc, setPc] = useState('E17 4QH');
+  const specId = useId();
   const est = useMemo(() => estimateRefurb({ ...DEFAULT_INPUT, postcode: pc, floorArea: area, spec }), [area, spec, pc]);
   const req = { postcode: pc, property_type: 'terraced', floor_area_m2: area, era: 'pre-1919', condition: 'poor', spec, scope: { preset: 'full_refurbishment' } };
   const res = { id: 'est_01JDEMO8Q', pricing_basis: est.basis, region: est.region, total_inc_vat: est.total, range: { low: est.low, high: est.high }, confidence: est.confidence, cost_per_m2_ex_vat: est.costPerM2, by_trade: est.byTrade.slice(0, 3).map((t) => ({ trade: t.trade, total: t.total })), '…': '', disclaimer: 'Indicative budget estimate; not a quotation.' };
@@ -55,8 +56,9 @@ export default function Developers() {
         <Section title="Try it: refurbishment estimate" kicker="Runs the real engine in your browser">
           <div className="grid g3" style={{ gap: 10 }}>
             <label className="field">Postcode<input className="input mono" value={pc} onChange={(e) => setPc(e.target.value)} /></label>
-            <label className="field">Floor area m²<input className="input num" type="number" value={area} onChange={(e) => setArea(Math.max(20, Number(e.target.value) || 20))} /></label>
-            <label className="field">Spec<Seg value={spec} onChange={setSpec} options={[{ value: 'budget', label: 'B' }, { value: 'standard', label: 'S' }, { value: 'premium', label: 'P' }]} /></label>
+            {/* Typing is never rewritten mid-number; the estimate uses the last figure within the engine's limits. */}
+            <NumberField label="Floor area m²" value={area} onChange={setArea} min={20} max={20_000} unit="m²" />
+            <div className="field"><span id={specId}>Spec</span><Seg aria-labelledby={specId} value={spec} onChange={setSpec} options={[{ value: 'budget', label: 'B', ariaLabel: 'Budget' }, { value: 'standard', label: 'S', ariaLabel: 'Standard' }, { value: 'premium', label: 'P', ariaLabel: 'Premium' }]} /></div>
           </div>
           <pre tabIndex={0} className="code" style={{ marginTop: 12 }}>{`curl https://api.streetkey.example/v1/estimates/refurbishment \\\n  -H "Authorization: Bearer sk_test_…" \\\n  -H "Idempotency-Key: 8c1e…" \\\n  -d '${JSON.stringify(req)}'`}</pre>
           <pre tabIndex={0} className="code" style={{ marginTop: 8, maxHeight: 260 }}>{JSON.stringify(res, null, 2)}</pre>

@@ -39,7 +39,67 @@ export interface SearchQuery {
   unsupported: string[];
 }
 
-const WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
+const WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+const BED_N = '(\\d|one|two|three|four|five|six|seven|eight|nine|ten)';
+const BED_WORD = '(?:\\+\\s*)?(?:bed(?:room)?s?|br)\\b';
+const BED_RANGE = new RegExp(`\\b${BED_N}\\s*(?:-|–|to|or|and)\\s*${BED_N}[- ]?${BED_WORD}`);
+const BED_ANY = new RegExp(`\\b${BED_N}[- ]?${BED_WORD}`, 'g');
+/** "up to 4 beds": 4 is a ceiling, not a minimum. */
+const BED_CEILING = /\b(?:up to|max(?:imum)?(?:\s+of)?|no more than|not more than|at most)\s*$/;
+/** "fewer than 4 bedrooms": at most 3. */
+const BED_BELOW = /\b(?:fewer than|less than|under|below)\s*$/;
+const bedNumber = (s: string) => WORD_NUM[s] ?? parseInt(s, 10);
+
+/**
+ * The bedrooms someone asked for, read from their words:
+ * "3 bed" → min 3 · "2 to 3 beds" / "2-3 bed" → min 2, max 3 · "up to 4 beds" → max 4 (not "4+") · "fewer than 4 bedrooms" → max 3.
+ */
+export function bedroomRange(text: string): { min?: number; max?: number } {
+  const t = ` ${text.toLowerCase()} `;
+  const range = t.match(BED_RANGE);
+  if (range) {
+    const a = bedNumber(range[1]); const b = bedNumber(range[2]);
+    if (a > 0 && b >= a) return { min: a, max: b };
+  }
+  const out: { min?: number; max?: number } = {};
+  for (const m of t.matchAll(BED_ANY)) {
+    const before = t.slice(0, m.index);
+    const v = bedNumber(m[1]);
+    if (BED_CEILING.test(before)) { if (out.max == null) out.max = v; }
+    else if (BED_BELOW.test(before)) { if (out.max == null && v > 1) out.max = v - 1; }
+    else if (out.min == null) out.min = v;
+  }
+  if (out.min != null && out.max != null && out.max < out.min) delete out.max;
+  return out;
+}
+
+/**
+ * Phrases that contain rent words but mean buying or investing: "buy to let", a "sitting tenant",
+ * "tenants in place", "a flat with tenants". Removed before the rent words are tested.
+ * (Plain replaces rather than lookbehind: Safari before 16.4 can't parse lookbehind and the site wouldn't start.)
+ */
+const NOT_RENTING = [
+  /\bbuy[- ]to[- ]let\b/g, /\bsitting tenants?\b/g, /\btenants?\s+in\s+(?:situ|place)\b/g,
+  // "with tenants" / "with a long-term tenant" (but not "with other tenants", someone renting a room).
+  /\bwith\s+(?:(?:an?|the|its|existing|current|long[- ]term|good|reliable|paying)\s+){0,2}tenants?\b/g,
+];
+/**
+ * Words that say the person wants to rent: "to rent", "for rent", "to let", "rental(s)", "pcm", "per month",
+ * "tenant", "£300 a week". Not "to rent out" (investing), "rental demand / yield / income" (investment measures)
+ * or a "rental property / investment" (something to buy). Test with {@link rentCue}, which removes NOT_RENTING first.
+ */
+export const RENT_WORDS = /\b(?:to rent(?!\s+(?:it\s+|them\s+)?out)|for rent|renting(?!\s+(?:it\s+|them\s+)?out)|per month|pcm|p\/m|to[- ]let|tenants?)\b|\brentals?\b(?!\s+(?:demand|yields?|income|returns?|potential|market|values?|growth|property|properties|flats?|houses?|homes?|investments?|portfolios?|business(?:es)?|units?|opportunit\w*))|(?:£\s?\d[\d,.]*|\b\d{2,}[\d,.]*)\s*(?:a week|per week|pw|p\/w|weekly)\b/;
+/** Words that say the person is buying ("rental property to buy", "buy a rental flat"): rent words then don't decide. */
+export const PURCHASE_WORDS = /\b(?:buy|buying|purchas\w*|for sale)\b/;
+/** Words that say the person is investing. */
+export const INVEST_WORDS = /\b(invest\w*|yield|btl|buy[- ]to[- ]let|brrr+|flip\w*|hmo|portfolio|profit|rent(?:ing)? (?:it |them )?out|rentals? (?:property|properties|investments?|portfolios?|business(?:es)?|units?))\b/;
+const withoutNotRenting = (text: string) => NOT_RENTING.reduce((s, re) => s.replace(re, ' '), ` ${text.toLowerCase()} `);
+/** The text has an explicit rent word (whether or not it also says buy). */
+export const rentCue = (text: string) => RENT_WORDS.test(withoutNotRenting(text));
+/** The text has an explicit purchase word (not "buy to let", which is investing). */
+export const purchaseCue = (text: string) => PURCHASE_WORDS.test(withoutNotRenting(text));
+/** The person is renting: an explicit rent word and no purchase word ("rental property to buy" is buying). */
+export const saysRent = (text: string) => rentCue(text) && !purchaseCue(text);
 
 const PLACE_ALIASES: Record<string, string[]> = {
   london: ['London'], manchester: ['Manchester'], leeds: ['Leeds'], bristol: ['Bristol'], birmingham: ['Birmingham'],
@@ -61,15 +121,21 @@ export function parseQuery(text: string): SearchQuery {
   const t = ` ${text.toLowerCase()} `;
   const q: SearchQuery = { intent: 'buy', locations: [], districts: [], types: [], unsupported: [] };
 
-  if (/\b(to rent|to let|renting|tenant|per month|pcm)\b/.test(t)) q.intent = 'rent';
-  else if (/\b(invest|yield|btl|buy[- ]to[- ]let|brrr|flip|hmo|portfolio|profit)\b/.test(t)) q.intent = 'invest';
+  // "Buy to let flat, tenants pay £1,100 pcm" is an investment: the rent words describe the tenants.
+  if (saysRent(t) && !/\b(?:buy[- ]to[- ]let|btl)\b/.test(t)) q.intent = 'rent';
+  else if (INVEST_WORDS.test(t)) q.intent = 'invest';
 
-  const beds = t.match(/\b(\d|one|two|three|four|five|six|seven)[- ]?(?:\+\s*)?(?:bed(?:room)?s?|br)\b/);
-  if (beds) q.minBeds = WORD_NUM[beds[1]] ?? parseInt(beds[1], 10);
+  const beds = bedroomRange(text);
+  if (beds.min) q.minBeds = beds.min;
 
-  // A price needs £, a k/m suffix or at least 4 digits ("up to 4 beds" is not £4).
-  const price = t.match(/\b(?:under|below|less than|max(?:imum)?|up to|budget(?: of)?)\s*(£\s?[\d,.]+\s?[km]?|[\d,.]+\s?[km]\b|\d[\d,]{3,}(?:\.\d+)?)(?!\s*(?:-|\s)?(?:bed|bath|br\b|min|mile|year|week|storey|floor))/);
-  if (price) { const v = money(price[1]); if (Number.isFinite(v) && v >= 100) q.maxPrice = v; }
+  // A price needs £, a k/m suffix, at least 4 digits or a weekly marker ("up to 4 beds" is not £4; "under 250pw" is a rent).
+  const price = t.match(/\b(?:under|below|less than|max(?:imum)?|up to|budget(?: of)?)\s*(£\s?[\d,.]+\s?[km]?|[\d,.]+\s?[km]\b|\d[\d,]{3,}(?:\.\d+)?|\d{2,}(?=\s*(?:(?:a|per)\s+week|pw|p\/w|weekly)\b))(?!\s*(?:-|\s)?(?:bed|bath|br\b|min|mile|year|week|storey|floor))/);
+  if (price) {
+    const v = money(price[1]);
+    // Rents are compared per calendar month: "under £300 a week" is £1,300 pcm.
+    const weekly = /^\s*(?:(?:a|per)\s+week|pw|p\/w|weekly)\b/.test(t.slice((price.index ?? 0) + price[0].length));
+    if (Number.isFinite(v) && v >= 100) q.maxPrice = weekly ? Math.round(v * 52 / 12) : v;
+  }
 
   const commute = t.match(/within\s+(\d+)\s*(?:min(?:ute)?s?)\s+(?:of|from|to)\s+([a-z\s]+?)(?:,|\.|\bunder\b|\bwith\b|\band\b|\bfor\b|\bthat\b|$)/);
   if (commute) { q.maxCommuteMins = parseInt(commute[1], 10); q.commuteTo = commute[2].trim(); }

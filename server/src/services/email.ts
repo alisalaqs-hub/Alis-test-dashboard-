@@ -58,6 +58,9 @@ export const mails = {
     subject: `New message about ${listingTitle}`, text: `You have a new message about ${listingTitle}:\n\n“${body}”\n\nReply from your inbox: ${link('/account/inbox')}` }),
   listingLive: (to: string, title: string, ref: string) => sendMail({ to, template: 'listing_live', subject: 'Your listing is live',
     text: `Good news: ${title} is now live on Streetkey.\n${link(`/property/${ref}`)}\n\nYou’ll get an email whenever someone asks for a viewing.` }),
+  /** To the site admin (ADMIN_EMAIL): a submitted listing is waiting in the review queue. */
+  listingForReview: (to: string, title: string, ref: string) => sendMail({ to, template: 'listing_review_admin', subject: `A new listing is waiting for review (${ref})`,
+    text: `${title} (${ref}) was submitted and is waiting for review.\n\nReview it in the admin area:\n${link('/admin')}` }),
   listingRejected: (to: string, title: string, reason: string) => sendMail({ to, template: 'listing_rejected', subject: 'Your listing needs changes',
     text: `We couldn’t publish ${title} yet.\n\nReason: ${reason}\n\nYou can edit it and submit it again from ${link('/account/listings')}.` }),
   searchAlert: (to: string, query: string, items: { title: string; ref: string; price: string }[]) => sendMail({ to, template: 'search_alert',

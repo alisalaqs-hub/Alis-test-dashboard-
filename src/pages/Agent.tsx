@@ -1,17 +1,24 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PROPERTIES, photosFor, type Property } from '../data/properties';
+import { baseListings, photosFor, type Property } from '../data/properties';
 import { benchmark, engagementFor, insightsFor, PERIOD_DAYS, PERIOD_END, totals } from '../engine/engagement';
 import { dealScore } from '../engine/insights';
 import { weeklyOwnerReport } from '../engine/reports';
+import { AGENTS } from '../ai/agents';
 import { agentSkills } from '../ai/skills';
 import { AssistantPanel } from '../components/Assistant';
 import { AiBriefing, BriefingFallback } from '../components/ai/AiBriefing';
 import { gbp, gbpK, pct, Section, Stat, Tag } from '../components/ui';
 import type { BriefingSnapshot } from '../lib/ai/briefing';
-import { useStore } from '../store';
+import { useStore, type EnqueueResult } from '../store';
 
-const BRANCH = PROPERTIES.filter((p) => p.listing !== 'rent' && p.type !== 'commercial');
+/**
+ * The demonstration branch: Streetkey's fictional sale listings only. The shared listing registry also
+ * holds real listings once the site has loaded them (including private sellers' homes); those must
+ * never get simulated engagement, alerts, drafts or a place in the briefing. Real listings are briefed
+ * on only through "My agency (live)", which uses their real figures.
+ */
+const BRANCH = baseListings().filter((p) => p.listing !== 'rent' && p.type !== 'commercial');
 const street = (p: Property) => p.street.replace(' (fictional)', '');
 
 /** Listing quality: completeness of information buyers need (deterministic checklist). */
@@ -30,6 +37,14 @@ export function listingQuality(p: Property) {
 
 const signed = (n: number, dp = 1) => `${n >= 0 ? '+' : ''}${n.toFixed(dp)}`;
 const propertyLink = (id: string) => `/property/${encodeURIComponent(id)}`;
+const agentName = (id: string) => AGENTS.find((a) => a.id === id)?.name ?? id;
+/** What happened when something was sent to the approval queue, in words. */
+function queueMessage(r: EnqueueResult, what: string) {
+  if (r.added.length) return `${what}: added to the approval queue.`;
+  if (r.duplicates.length) return `${what} is already waiting in the approval queue.`;
+  if (r.full.length) return 'The approval queue is full. Approve or reject some waiting items first.';
+  return '';
+}
 
 const FEEDBACK: Record<string, string[]> = {
   'wal-001': ['Loved the period features and garden (4 of 6 viewings)', 'Worried about the cost of works and damp in the rear reception (5 of 6)', 'Felt price high relative to work needed (3 of 6)'],
@@ -40,6 +55,7 @@ const FEEDBACK: Record<string, string[]> = {
 export default function Agent() {
   const { queue, enqueue, decide, audit } = useStore();
   const [preview, setPreview] = useState<string | null>(null);
+  const [queueNote, setQueueNote] = useState('');
   const [sortBy, setSortBy] = useState<'gap' | 'views' | 'quality'>('gap');
   const rows = useMemo(() => BRANCH.map((p) => {
     const t = totals(engagementFor(p)); const wk = totals(engagementFor(p), 21, 28); const prev = totals(engagementFor(p), 14, 21);
@@ -97,19 +113,20 @@ export default function Agent() {
     ))} />
   );
 
-  const proposeReport = (p: Property) => enqueue([{ id: `rep-${p.id}-${Date.now()}`, agent: 'estate-agent', title: `Email weekly report to owner of ${street(p)}`, detail: 'AI-drafted seller report; requires your review before sending.', consequential: true, payload: weeklyOwnerReport(p, 'agent-draft') }]);
+  // Both drafts come from Streetkey's own templates and figures (not AI), and wait for approval.
+  const proposeReport = (p: Property) => setQueueNote(queueMessage(enqueue([{ id: `rep-${p.id}-${Date.now()}`, agent: 'estate-agent', title: `Email weekly report to owner of ${street(p)}`, detail: 'Seller report drafted from this listing’s engagement figures; requires your review before sending.', consequential: true, payload: weeklyOwnerReport(p, 'agent-draft') }]), `Seller report for ${street(p)}`));
   const proposeCopy = (p: Property) => {
     const ds = dealScore(p);
     const top = [...engagementFor(p).photos].sort((a, b) => b.enlargements / b.impressions - a.enlargements / a.impressions)[0];
     const copy = `${p.title}. A ${p.beds}-bedroom ${p.type} of ${p.floorArea}m², ${p.station.walkMins} minutes’ walk from ${p.station.name} (${p.commute.minutes} min to ${p.commute.to}). Highlights: ${p.features.slice(0, 3).join(', ').toLowerCase()}.\n\nStreetkey Intelligence: indicative refurbishment budget ${gbpK(ds.refurbEstimate)}; ${p.loftPotential !== 'none' ? 'loft conversion potential; ' : ''}EPC ${p.epc.current} with a costed route to ${p.epc.potential}.\n\nSuggested lead photo: “${top.label}” (highest engagement).\n\nMaterial information (inserted from verified fields, not generated): ${p.tenure}; council tax ${p.councilTax}; flood risk ${p.risks.flood}.`;
-    enqueue([{ id: `copy-${p.id}-${Date.now()}`, agent: 'estate-agent', title: `Publish revised description & lead photo for ${street(p)}`, detail: 'AI draft — edits to a live listing need approval.', consequential: true, payload: copy }]);
+    setQueueNote(queueMessage(enqueue([{ id: `copy-${p.id}-${Date.now()}`, agent: 'estate-agent', title: `Publish revised description & lead photo for ${street(p)}`, detail: 'Draft from Streetkey’s listing template and verified fields; edits to a live listing need approval.', consequential: true, payload: copy }]), `Draft copy for ${street(p)}`));
   };
 
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
         <div><div className="eyebrow">Estate agent command centre</div><h2 style={{ marginTop: 6 }}>Northbank Estates · portfolio intelligence</h2>
-          <p className="muted" style={{ marginTop: 6 }}>Every listing’s engagement, conversion, quality and pricing evidence in one place. AI drafts reports and listing changes; nothing is published or sent without your approval.</p></div>
+          <p className="muted" style={{ marginTop: 6 }}>Every listing’s engagement, conversion, quality and pricing evidence in one place. Streetkey drafts reports and listing changes; nothing is published or sent without your approval.</p></div>
         <div className="row"><Tag kind="demo">Simulated engagement</Tag><Tag kind="live">CRM sync: Reapit · Alto · Street · Jupix</Tag></div>
       </div>
 
@@ -117,11 +134,11 @@ export default function Agent() {
         <div className="card"><Stat label="Active listings" value={rows.length} sub={`${attention.length} need attention`} /></div>
         <div className="card"><Stat label="Views (28d)" value={tot.v.toLocaleString('en-GB')} sub={`${tot.u.toLocaleString('en-GB')} unique`} /></div>
         <div className="card"><Stat label="Enquiries + viewing requests" value={tot.e} sub={`Portfolio conversion ${pct(tot.e / tot.u)}`} /></div>
-        <div className="card"><Stat label="Awaiting your approval" value={queue.length} tone={queue.length ? 'neg' : undefined} sub="AI drafts & agent proposals" /></div>
+        <div className="card"><Stat label="Awaiting your approval" value={queue.length} tone={queue.length ? 'neg' : undefined} sub="Drafts & agent proposals" /></div>
       </div>
 
       <AiBriefing kind="agent" title="Branch briefing" snapshot={briefing} allowMyAgency linkFor={propertyLink} fallback={briefingFallback}
-        intro="A prioritised read of this branch: what needs attention first, why, and the next step. Agency members can switch to their live Streetkey listings." />
+        intro="A prioritised read of this branch: what needs attention first, why, and the next step." />
 
       <Section title="Listing performance" kicker="Portfolio overview" right={<select className="input" aria-label="Sort listings" style={{ width: 'auto' }} value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}><option value="gap">Sort: weakest conversion</option><option value="views">Sort: most viewed</option><option value="quality">Sort: lowest quality score</option></select>}>
         <div className="table-wrap" tabIndex={0}><table className="t">
@@ -135,28 +152,29 @@ export default function Agent() {
               <td className={`r num ${r.gap < 0 ? 'neg' : 'pos'}`}>{r.gap >= 0 ? '+' : ''}{(r.gap * 100).toFixed(1)}pt</td>
               <td className="r num">{r.q.score}</td>
               <td>{r.flag && <Tag kind={r.flag === 'Strong' ? 'ok' : 'warn'}>{r.flag}</Tag>}</td>
-              <td><div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}><button className="btn ghost sm" onClick={() => proposeReport(r.p)}>Seller report</button><button className="btn ghost sm" onClick={() => proposeCopy(r.p)}>AI copy</button></div></td>
+              <td><div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}><button className="btn ghost sm" aria-label={`Seller report: ${street(r.p)}`} onClick={() => proposeReport(r.p)}>Seller report</button><button className="btn ghost sm" aria-label={`Draft copy: ${street(r.p)}`} onClick={() => proposeCopy(r.p)}>Draft copy</button></div></td>
             </tr>
           ))}</tbody>
         </table></div>
-        <p className="xs muted" style={{ marginTop: 8 }}>“vs comps” = difference in enquiry + viewing conversion from comparable listings; flagged only when 95% intervals don’t overlap.</p>
+        <p className="xs muted" style={{ marginTop: 8 }}>“vs comps” = difference in enquiry + viewing conversion from comparable listings; flagged only when 95% intervals don’t overlap. “Seller report” and “Draft copy” prepare drafts from Streetkey’s templates and figures for the approval queue.</p>
+        <p className="small" role="status" style={{ margin: queueNote ? '6px 0 0' : 0 }}>{queueNote}</p>
       </Section>
 
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
-          <AssistantPanel title="Ask about your portfolio" kicker="AI estate agency assistant" skills={agentSkills} ctx={{ listings: BRANCH }} />
+          <AssistantPanel title="Ask about your portfolio" kicker="Estate agency assistant" skills={agentSkills} ctx={{ listings: BRANCH }} />
 
           <section className="card" id="approvals">
             <div className="card-head"><div><div className="eyebrow">Human in the loop</div><h3>Approval queue</h3></div><Tag kind="neutral">{queue.length} pending</Tag></div>
-            {queue.length === 0 && <p className="small muted">Nothing awaiting approval. Use “Seller report” or “AI copy” above, or run the agents on the <Link to="/automation">AI agents</Link> page.</p>}
+            {queue.length === 0 && <p className="small muted">Nothing awaiting approval. Use “Seller report” or “Draft copy” above, or run the agents on the <Link to="/automation">AI agents</Link> page.</p>}
             <ul className="clean">{queue.map((q) => (
               <li key={q.id} className="card flat" style={{ padding: 12 }}>
-                <div className="row between"><b className="small">{q.title}</b><Tag kind="ai">{q.agent}</Tag></div>
+                <div className="row between"><b className="small">{q.title}</b><Tag kind="neutral">{agentName(q.agent)}</Tag></div>
                 <div className="xs muted" style={{ marginTop: 4 }}>{q.detail}</div>
                 <div className="row" style={{ marginTop: 8 }}>
-                  {q.payload && <button className="btn ghost sm" onClick={() => setPreview(preview === q.id ? null : q.id)}>{preview === q.id ? 'Hide' : 'Review draft'}</button>}
-                  <button className="btn sm" onClick={() => decide(q.id, true)}>Approve</button>
-                  <button className="btn ghost sm" onClick={() => decide(q.id, false)}>Reject</button>
+                  {q.payload && <button className="btn ghost sm" aria-expanded={preview === q.id} aria-label={`${preview === q.id ? 'Hide draft' : 'Review draft'}: ${q.title}`} onClick={() => setPreview(preview === q.id ? null : q.id)}>{preview === q.id ? 'Hide' : 'Review draft'}</button>}
+                  <button className="btn sm" aria-label={`Approve: ${q.title}`} onClick={() => decide(q.id, true)}>Approve</button>
+                  <button className="btn ghost sm" aria-label={`Reject: ${q.title}`} onClick={() => decide(q.id, false)}>Reject</button>
                 </div>
                 {preview === q.id && <pre tabIndex={0} className="code" style={{ marginTop: 8, whiteSpace: 'pre-wrap', maxHeight: 320 }}>{q.payload}</pre>}
               </li>
@@ -166,7 +184,7 @@ export default function Agent() {
 
           <div className="grid g2">
             <Section title="Buyer feedback summaries" kicker="From viewing feedback" right={<Tag kind="demo" />}>
-              {Object.entries(FEEDBACK).map(([pid, items]) => <div key={pid} style={{ marginBottom: 10 }}><b className="small">{street(PROPERTIES.find((x) => x.id === pid)!)}</b><ul className="ticks xs">{items.map((i) => <li key={i}>{i}</li>)}</ul></div>)}
+              {Object.entries(FEEDBACK).map(([pid, items]) => <div key={pid} style={{ marginBottom: 10 }}><b className="small">{street(BRANCH.find((x) => x.id === pid) ?? baseListings().find((x) => x.id === pid)!)}</b><ul className="ticks xs">{items.map((i) => <li key={i}>{i}</li>)}</ul></div>)}
             </Section>
             <Section title="Photography recommendations" kicker="From photo engagement">
               <ul className="clean small">{rows.slice(0, 5).map((r) => { const ph = [...engagementFor(r.p).photos].sort((a, b) => b.enlargements / b.impressions - a.enlargements / a.impressions); return <li key={r.p.id}><b>{street(r.p)}</b>: strongest “{ph[0].label}”, weakest “{ph[ph.length - 1].label}”{ph[0].photoId !== engagementFor(r.p).photos[0].photoId ? ' — consider testing as lead' : ''}</li>; })}</ul>
@@ -185,7 +203,12 @@ export default function Agent() {
             {(() => { const ch = new Map<string, { c: number; e: number }>(); rows.forEach((r) => engagementFor(r.p).campaigns.forEach((x) => { const v = ch.get(x.channel) ?? { c: 0, e: 0 }; ch.set(x.channel, { c: v.c + x.clicks, e: v.e + x.enquiries }); })); return <ul className="clean small">{[...ch].map(([k, v]) => <li key={k} className="row between"><span>{k}</span><span className="num">{pct(v.e / Math.max(1, v.c))}</span></li>)}</ul>; })()}
           </Section>
           <Section title="Audit log" kicker="Approvals & agent actions">
-            {audit.length === 0 ? <p className="small muted">No actions yet.</p> : <ul className="clean xs mono" style={{ maxHeight: 220, overflow: 'auto' }}>{audit.slice(0, 15).map((a, i) => <li key={i}>{a.at.slice(11, 19)} {a.actor} · {a.action} · {a.detail}</li>)}</ul>}
+            {audit.length === 0 ? <p className="small muted">No actions yet.</p> : (
+              // Focusable, so keyboard users can scroll it in every browser.
+              <div tabIndex={0} role="region" aria-label="Audit log" style={{ maxHeight: 220, overflow: 'auto' }}>
+                <ul className="clean xs mono">{audit.slice(0, 15).map((a, i) => <li key={i}>{a.at.slice(11, 19)} {a.actor} · {a.action} · {a.detail}</li>)}</ul>
+              </div>
+            )}
           </Section>
         </div>
       </div>

@@ -5,6 +5,7 @@
  * and supplies the material information itself.
  */
 import { z } from 'zod';
+import { repeatsStructuredFact } from '../../../../src/engine/listings';
 import { chatJSON, HOUSE_RULES, untrusted } from '../core';
 import { S, type Infer } from '../schema';
 import { factLines, FactsSchema, gbpText, materialInfo, missingFacts, outwardCode, sqft, typeWord, type Facts } from './facts';
@@ -39,6 +40,11 @@ type DescribeOutT = Infer<typeof DescribeOut>;
 
 export interface DescribeResult {
   headline: string; description: string; keyFeatures: string[]; materialInfo: string[];
+  /**
+   * The key features that only repeat a structured field (bedrooms, bathrooms, floor area, tenure, EPC,
+   * council tax). The listing already shows those from the facts, so they aren't added to the saved features.
+   */
+  structuredFeatures: string[];
   wordingWarnings: string[]; missingInfo: string[]; wordCount: number; tone: Tone;
 }
 
@@ -73,16 +79,16 @@ export function factualHeadline(f: Facts): string {
   return [`${kind}${extra ? ` with ${extra.toLowerCase()}` : ''}${where}`, `${kind}${where}`, kind].find((h) => h.length <= 70) ?? clip(kind, 70);
 }
 
-/** Short factual bullets from the facts (to top up key features). */
+/** Short factual bullets (to top up key features): the seller's own features first, as the listing shows the structured facts anyway. */
 function factBullets(f: Facts): string[] {
   const b = [
+    ...f.features.map((x) => cap(x)),
     f.beds === 0 ? 'Studio' : `${f.beds} bedroom${f.beds === 1 ? '' : 's'}`,
     `${f.baths} bathroom${f.baths === 1 ? '' : 's'}`,
     f.floorArea ? `Approx. ${Math.round(f.floorArea)} m² (${sqft(f.floorArea)} sq ft)` : '',
     f.tenure ? cap(f.tenure.replace(/-/g, ' ')) + (f.tenure !== 'freehold' && f.leaseYears ? `, ${f.leaseYears} years remaining` : '') : '',
     f.epc ? `EPC rating ${f.epc}` : '',
     f.councilTax && f.councilTax !== 'EXEMPT' ? `Council tax band ${f.councilTax}` : '',
-    ...f.features.map((x) => cap(x)),
   ];
   return b.filter(Boolean);
 }
@@ -100,6 +106,7 @@ function factSentences(f: Facts, intro: boolean): string[] {
 /** Wording found in the seller's own notes and deliberately left out. */
 const NOTE_TEXT: Partial<Record<Reason, string>> = {
   discrimination: 'Your notes include wording that could discriminate or steer people (such as “no DSS” or “professionals only”), so it was left out.',
+  steering: 'Your notes say who the home would suit (such as “ideal for professionals”), so that was left out: describe the home, not who should live there.',
   bidding: 'Your notes mention offers or bidding, so that was left out: a rental advert must state one fixed rent.',
   fees: 'Your notes mention tenant fees, so they were left out: most letting fees are banned under the Tenant Fees Act 2019.',
   pets: 'Your notes include a blanket “no pets” line, which was left out: tenants can ask to keep a pet and landlords must not unreasonably refuse.',
@@ -167,7 +174,7 @@ export function finalise(out: DescribeOutT, input: DescribeIn): DescribeResult {
   const missing = dedupe([...missingFacts(f), ...out.missingInfo.map((m) => clip(m, 100))]).slice(0, 8);
 
   return {
-    headline, description, keyFeatures, materialInfo: materialInfo(f),
+    headline, description, keyFeatures, materialInfo: materialInfo(f), structuredFeatures: keyFeatures.filter(repeatsStructuredFact),
     wordingWarnings: dedupe(warnings).slice(0, 10), missingInfo: missing, wordCount: wordCount(description), tone: input.tone,
   };
 }

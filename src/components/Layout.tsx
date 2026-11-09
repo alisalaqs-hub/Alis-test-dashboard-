@@ -4,6 +4,7 @@ import { StreetkeyBow, StreetkeyWordmark } from './Brand';
 import { Icon } from './Icons';
 import { AskLauncher, AskSheet } from './ai/AskChat';
 import { useStore } from '../store';
+import { useAi } from '../lib/ai/core';
 import { useServer } from '../lib/server';
 
 const PRIMARY = [
@@ -20,6 +21,7 @@ export default function Layout() {
   const { pathname } = useLocation();
   const { saved } = useStore();
   const { online, user } = useServer();
+  const { available: aiOn } = useAi();
   const [sheet, setSheet] = useState<null | 'ask' | 'more'>(null);
   const [theme, setTheme] = useState<string | null>(() => { try { return localStorage.getItem('streetkey-theme'); } catch { return null; } });
   useEffect(() => { window.scrollTo(0, 0); setSheet(null); }, [pathname]);
@@ -29,16 +31,38 @@ export default function Layout() {
   }, [theme]);
   const sheetRef = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const shown = useRef<null | 'ask' | 'more'>(null);
+  /**
+   * Opens a sheet, remembering what had focus first. This must happen before the sheet renders:
+   * the Ask sheet's box takes focus as it mounts (child effects run before this component's).
+   */
+  const openSheet = (s: 'ask' | 'more') => {
+    const a = document.activeElement as HTMLElement | null;
+    if (!a || !sheetRef.current?.contains(a)) opener.current = a;
+    setSheet(s);
+  };
   // Modal sheet a11y: lock scroll, move focus in, trap Tab, close on Escape, restore focus.
   useEffect(() => {
     document.body.style.overflow = sheet ? 'hidden' : '';
-    if (!sheet) { opener.current?.focus?.(); return; }
-    opener.current = document.activeElement as HTMLElement;
+    if (!sheet) {
+      const was = shown.current;
+      shown.current = null;
+      if (!was) return; // nothing was open (first render)
+      // Back to what opened it; if that's gone (it was inside the page that changed, or hidden),
+      // to the visible Ask launcher (desktop) or Ask tab (phone), or the Menu button.
+      const usable = (x: HTMLElement | null | undefined): x is HTMLElement => !!x && x.isConnected && x !== document.body && x.getClientRects().length > 0;
+      const back = [opener.current, ...document.querySelectorAll<HTMLElement>(was === 'ask' ? '.ask-launch, .tab-ask' : '.topbar [aria-label="Menu"], .tabbar [data-more]')].find(usable);
+      opener.current = null;
+      back?.focus();
+      return;
+    }
+    shown.current = sheet;
     const el = sheetRef.current;
     const focusables = () => [...(el?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input,select,textarea,[tabindex]:not([tabindex="-1"])') ?? [])];
     if (sheet === 'more') focusables()[0]?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); setSheet(null); }
+      // A control inside the sheet that used Escape itself (e.g. closing search suggestions) has the last word.
+      if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setSheet(null); }
       if (e.key === 'Tab') { const f = focusables(); if (!f.length) return; const first = f[0], last = f[f.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); } }
     };
@@ -64,7 +88,7 @@ export default function Layout() {
             {online && (user
               ? (() => { const ini = user.name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase(); return <Link to="/account" className="icon-btn acct-btn" aria-label={`${ini}: your account`} title={`${user.name}: your account`}>{ini}</Link>; })()
               : <Link to="/account" className="btn sm ghost signin-btn">Sign in</Link>)}
-            <button className="icon-btn" aria-label="Menu" aria-haspopup="dialog" onClick={() => setSheet('more')}><Icon name="menu" /></button>
+            <button type="button" className="icon-btn" aria-label="Menu" aria-haspopup="dialog" onClick={() => openSheet('more')}><Icon name="menu" /></button>
           </div>
         </div>
       </header>
@@ -79,13 +103,14 @@ export default function Layout() {
       <nav className="tabbar" aria-label="App">
         <NavLink to="/" end className={({ isActive }) => (isActive || pathname.startsWith('/search') || pathname.startsWith('/property') ? 'on' : '')}><Icon name="search" /><span>Search</span></NavLink>
         <NavLink to="/saved" className={({ isActive }) => (isActive ? 'on' : '')}><span className="tab-ic"><Icon name="heart" />{saved.length > 0 && <span className="dot-badge">{saved.length}</span>}</span><span>Saved</span></NavLink>
-        <button className="tab-ask" onClick={() => setSheet('ask')} aria-label="Ask Streetkey AI" aria-haspopup="dialog"><span className="ask-bubble"><Icon name="spark" size={26} /></span><span>Ask</span></button>
+        {/* Says "AI" only when AI can answer; without it the sheet is Streetkey's search. */}
+        <button type="button" className="tab-ask" onClick={() => openSheet('ask')} aria-label={aiOn ? 'Ask Streetkey AI' : 'Ask Streetkey'} aria-haspopup="dialog"><span className="ask-bubble"><Icon name={aiOn ? 'spark' : 'search'} size={26} /></span><span>Ask</span></button>
         <NavLink to="/my-home" className={({ isActive }) => (isActive ? 'on' : '')}><Icon name="home" /><span>My Home</span></NavLink>
-        <button className={sheet === 'more' ? 'on' : ''} onClick={() => setSheet('more')} aria-haspopup="dialog"><Icon name="menu" /><span>More</span></button>
+        <button type="button" data-more className={sheet === 'more' ? 'on' : ''} onClick={() => openSheet('more')} aria-haspopup="dialog"><Icon name="menu" /><span>More</span></button>
       </nav>
 
       {sheet && <div className="scrim" onClick={() => setSheet(null)} />}
-      <AskLauncher onOpen={() => setSheet('ask')} />
+      <AskLauncher onOpen={() => openSheet('ask')} />
       {sheet === 'ask' && (
         <div ref={sheetRef} className="sheet" role="dialog" aria-modal="true" aria-labelledby="ask-sheet-title">
           <div className="sheet-grab" />

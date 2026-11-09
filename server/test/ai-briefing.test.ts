@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { PROPERTIES } from '../../src/data/properties';
+import { AGENTS, mergeQueue, normTitle, QUEUE_CAP, type ProposedAction } from '../../src/ai/agents';
+import { baseListings, PROPERTIES, setDynamicListings } from '../../src/data/properties';
+import { developmentOptions } from '../../src/engine/development';
 import { benchmark, engagementFor, PERIOD_DAYS, PERIOD_END, totals } from '../../src/engine/engagement';
-import { figuresIn, Grounding, sentences } from '../src/ai/briefing/grounding';
-import { groundBriefing, groundProposals, needsApproval, type AgentContext } from '../src/ai/briefing/generate';
+import { aboutProtectedGroups, breaksContentRules, figuresIn, Grounding, namesIn, sentences } from '../src/ai/briefing/grounding';
+import { groundBriefing, groundProposals, needsApproval, selectsPeople, withoutWaiting, type AgentContext } from '../src/ai/briefing/generate';
 import { Snapshot } from '../src/ai/briefing/snapshot';
+import { config } from '../src/config';
 import { q } from '../src/db';
 import { limits } from '../src/services/ratelimit';
 import { client, LISTING, signUp } from './helpers';
@@ -147,6 +150,197 @@ describe('figure grounding', () => {
     ] });
     expect(out.proposals.map((p) => p.consequential)).toEqual([true, true, false, true]);
   });
+
+  it('needs approval for deductions, distribution, going live, choosing and legal possession steps, however they are worded', () => {
+    const risky: [string, string][] = [
+      ['Prepare listing go-live for U4', 'Make the listing live on Rightmove and Zoopla.'],
+      ['Prepare listing go-live for U4', 'Go live on Rightmove.'],
+      ['Prepare the U4 listing', 'Make it live on two portals.'],
+      ['Generate a deposit deduction for U3', 'Deduct £300 for cleaning.'],
+      ['Generate a deposit deduction for U3', 'Withhold £300.'],
+      ['Prepare the deposit return for U3', 'Withholding part of it for cleaning.'],
+      ['Generate a press release', 'Distribute it to local media.'],
+      ['Generate a press release', 'Circulate it to the mailing list.'],
+      ['Draft an eviction plan for U2', 'Steps for the arrears case.'],
+      ['Prepare a possession claim for U2', 'For the court.'],
+      ['Draft a section 8 notice for U2', 'Arrears ground.'],
+      ['Prepare a section 21 notice', ''],
+      ['Review the contractor quotes', 'Then choose the cheaper one.'],
+      ['Compare the two engineers', 'Pick one for U3.'],
+    ];
+    for (const [t, d] of risky) expect(needsApproval(t, d), `${t} | ${d}`).toBe(true);
+    // Still read-only: nothing in them reaches outside Streetkey.
+    expect(needsApproval('Summarise compliance dates for review', '')).toBe(false);
+    expect(needsApproval('Prepare a compliance summary for U2 and U3', 'A one-page list of upcoming dates for your review.')).toBe(false);
+  });
+
+  it('withholds proposals that choose, rank, accept or reject applicants or tenants (agents never make eligibility decisions)', () => {
+    const picks: [string, string][] = [
+      ['Review tenant applications and pick Applicant A', ''], ['Prepare a tenancy offer', 'Choose Applicant A as the tenant.'],
+      ['Shortlist the strongest applicants for U4', ''], ['Reject the weakest application', ''], ['Rank the prospective tenants', ''],
+      ['Offer U4 to the applicant with the higher income', ''], ['Decide which applicant to accept', ''],
+      ['Accept the applicant’s offer for U4', ''], ['Reject both applicants’ applications', ''], ['Reject both applications for U4', ''],
+      ['Approve the tenant referencing for U4', ''],
+    ];
+    for (const [t, d] of picks) expect(selectsPeople(t, d), t).toBe(true);
+    const fine: [string, string][] = [
+      ['Approve the tenant’s repair request', 'Book a plumber.'], ['Book a Gas Safe engineer for U3', 'Tenant access notice drafted (24h minimum).'],
+      ['Reply to the applicant’s question about parking', ''], ['Prepare a referencing checklist for U4 applicants', 'Lists the documents to request.'],
+      ['Submit the planning application', ''], ['Accept the contractor quote', ''],
+      // Ordinary landlord tasks about a tenant's request, or a check on applicants, not a choice between people.
+      ['Decline the tenants\' request for a pet', 'Reply with the reasons in writing.'], ['Decline the tenants’ request for a pet', ''],
+      ['Run referencing to vet tenant references', 'For the U4 application.'], ['Approve the tenant repair request', 'Book a plumber.'],
+      ['Accept all tenants’ repair requests for U2', ''], ['Accept the tenant’s offer of an arrears payment plan', 'A supportive plan, recorded in writing.'],
+    ];
+    for (const [t, d] of fine) expect(selectsPeople(t, d), t).toBe(false);
+
+    const agent: AgentContext = { id: 'landlord', name: 'Landlord agent', serves: 'Landlords', permissions: ['portfolio:read'], findings: ['U4 void for 18 days', 'Two applicants for U4'], toolsCalled: ['compliance.calendar'], ruleProposals: [] };
+    const out = groundProposals(agent, null, { proposals: [
+      { title: 'Shortlist the strongest applicants for U4', detail: 'Rank the two applicants.', consequential: true, rationale: 'Two applicants for U4.' },
+      { title: 'Advertise the U4 room for £2,000 pcm', detail: 'A higher rent.', consequential: false, rationale: 'Void for 18 days.' },
+      { title: 'Advertise the U4 room', detail: 'Two portals.', consequential: false, rationale: 'U4 has been void for 18 days.' },
+      { title: 'advertise the U4 room!', detail: 'The same again.', consequential: false, rationale: 'Void.' },
+      { title: 'Prepare a deposit deduction for U3', detail: 'Withhold part of the deposit for cleaning.', consequential: false, rationale: 'End of tenancy.' },
+      { title: 'Prepare listing go-live for U4', detail: 'Make the listing live on Rightmove.', consequential: false, rationale: 'Void for 18 days.' },
+    ] });
+    expect(out.proposals.map((p) => p.title)).toEqual(['Advertise the U4 room', 'Prepare a deposit deduction for U3', 'Prepare listing go-live for U4']);
+    expect(out.proposals.every((p) => p.consequential)).toBe(true);
+    expect(out.grounding).toMatchObject({ dropped: 1, withheld: 1 });
+  });
+
+  it('leaves out proposals already waiting for approval, whatever their case or punctuation', () => {
+    const { kept, repeats } = withoutWaiting([{ title: 'Advertise the U4 room' }, { title: 'Book a Gas Safe engineer for U3' }], ['ADVERTISE the U4 room!', 'Something else']);
+    expect(kept.map((p) => p.title)).toEqual(['Book a Gas Safe engineer for U3']);
+    expect(repeats).toBe(1);
+    expect(normTitle('Book a “Gas-Safe” engineer for U3.')).toBe(normTitle('book gas safe engineer for U3'));
+  });
+
+  it('withholds statements about people’s protected characteristics, without catching ordinary property wording', () => {
+    const bad = [
+      'Market to young families rather than older residents.', 'Mostly Muslim families live nearby, so target them.', 'Avoid marketing to immigrants.',
+      'The area has a large Polish community.', 'Elderly tenants may struggle with the stairs, so prefer younger renters.', 'Promote it to white British households.',
+      'The ethnic mix of the street is changing.',
+    ];
+    for (const s of bad) expect(aboutProtectedGroups(s), s).toBe(true);
+    const ok = [
+      'Complete the right to rent checks for the new U4 tenant, including immigration status.', 'Polish the description and lead photo for Ashcombe Grove.',
+      'The scheme supports a mixed community of tenures.', 'Benefits to the wider community include a new pocket park.',
+      'Engage with the surrounding community before submitting the application.', 'The old boiler in U2 needs replacing soon.',
+      'Disabled access is limited at the rear entrance.', 'A white kitchen photographs well; test it as the lead image.', 'Black mould in the U2 bathroom must be treated urgently.',
+      'Check the Community Infrastructure Levy liability.', 'A student population nearby supports HMO demand.', 'Families were put off by the condition.',
+      'Foreign buyers pay a 2% stamp duty surcharge.', 'Overseas buyers face an extra 2% SDLT surcharge on the flats.', 'Allow for the non-UK resident buyers’ surcharge.',
+    ];
+    for (const s of ok) expect(breaksContentRules(s), s).toBe(false);
+    // The surcharge wording doesn't open a gap for marketing by nationality.
+    for (const s of ['Market the flats to foreign buyers.', 'Target foreign buyers, who pay the surcharge.', 'Foreign buyers love this street.']) expect(aboutProtectedGroups(s), s).toBe(true);
+
+    const s = Snapshot.parse(SNAP);
+    const b = groundBriefing('agent', s, {
+      headline: 'Ashcombe Grove needs attention.',
+      summary: 'Ashcombe Grove converts at 0.45% against 1.2% for comparables. The street is popular with young families, so market it to them rather than older buyers.',
+      priorities: [
+        { title: 'Review Ashcombe Grove pricing with the vendor', why: 'Conversion is 0.45%.', action: 'Share the comparable evidence with the vendor.', impact: 'high', relatedIds: ['wal-001'] },
+        { title: 'Target Muslim families near the mosque', why: 'Mostly Muslim families live nearby.', action: 'Advertise in community groups.', impact: 'medium', relatedIds: ['cro-002'] },
+      ],
+      risks: ['Interest is falling at Ashcombe Grove.', 'The ethnic mix of the street is changing.'],
+      opportunities: ['Engage the wider community about the shared garden.'],
+      questions: ['Has the vendor seen the latest viewing feedback?'],
+    }, 'dashboard');
+    expect(b.summary).toBe('Ashcombe Grove converts at 0.45% against 1.2% for comparables.');
+    expect(b.priorities.map((p) => p.title)).toEqual(['Review Ashcombe Grove pricing with the vendor']);
+    expect(b.risks).toEqual(['Interest is falling at Ashcombe Grove.']);
+    expect(b.opportunities).toHaveLength(1);
+    expect(b.grounding).toMatchObject({ dropped: 0, withheld: 3 });
+    expect(JSON.stringify(b)).not.toMatch(/Muslim|young families|ethnic/i);
+  });
+
+  it('reads names from Streetkey’s own data (item labels, streets, towns) as places, never as talk about people', () => {
+    // Without the labels, these name real streets and towns but trip the check.
+    const plain = new Grounding({});
+    for (const t of ['Gay Street, Bath has strong views.', 'Christian Street: 0 enquiries in 28 days.', 'Mosque Road listing needs photos.']) expect(plain.verdict(t), t).toBe('policy');
+
+    const snap = Snapshot.parse({
+      title: 'Lea Valley Homes: live listings',
+      items: [
+        { id: 'sk-1', label: 'Georgian townhouse, Gay Street, Bath', fields: { views30d: 40, enquiries30d: 0, photos: 4 } },
+        { id: 'sk-2', label: '2-bed flat, Christian Street, London', fields: { views30d: 12, enquiries30d: 0, photos: 2 } },
+        { id: 'sk-3', label: 'Mosque Road, Bradford', fields: { views30d: 8, photos: 1 } },
+        { id: 'sk-4', label: 'Cottage, Church Lane, Church Stretton', fields: { views30d: 5 } },
+        // Labels a lister could write to try to switch the check off: never read as places.
+        { id: 'sk-5', label: 'Muslim, Elm Road, Leeds', fields: { views30d: 3 } },
+        { id: 'sk-6', label: 'Ideal for Christian families, Oak Road, York', fields: { views30d: 3 } },
+      ],
+    });
+    const b = groundBriefing('my-agency', snap, {
+      headline: 'Gay Street, Bath has strong views but no enquiries.',
+      summary: 'Christian Street: 0 enquiries in 28 days. The Gay Street listing is the most viewed. Market Gay Street to gay couples.',
+      priorities: [
+        { title: 'Add photos to the Mosque Road listing', why: 'Mosque Road listing needs photos: it has 1.', action: 'Upload more photos of Mosque Road, Bradford.', impact: 'high', relatedIds: ['sk-3'] },
+        { title: 'Follow up interest at Georgian townhouse, Gay Street, Bath', why: 'Gay Street’s 40 views have brought no enquiries.', action: 'Check the description of the Gay Street home.', impact: 'medium', relatedIds: ['sk-1'] },
+        { title: 'Refresh the Church Stretton listing', why: 'Close to Church Stretton station, but few views.', action: 'Test a new lead photo for Church Lane, Church Stretton.', impact: 'low', relatedIds: ['sk-4'] },
+        // Still about people, whatever the names around it.
+        { title: 'Target Muslim families near Mosque Road', why: 'Mostly Muslim households nearby.', action: 'Advertise in community groups.', impact: 'medium', relatedIds: ['sk-3'] },
+        { title: 'Promote Elm Road to Muslim buyers', why: 'Muslim buyers like it.', action: 'Advertise.', impact: 'low', relatedIds: ['sk-5'] },
+        { title: 'Market Oak Road to Christian families', why: 'Ideal for Christian families, Oak Road, York.', action: 'Advertise.', impact: 'low', relatedIds: ['sk-6'] },
+      ],
+      risks: ['Christian Street, London has had no enquiries.', 'Gay Street residents may object to the works.'],
+      opportunities: ['Mosque Road, Bradford is close to the station.'],
+      questions: [],
+    }, 'live');
+    expect(b.headline).toBe('Gay Street, Bath has strong views but no enquiries.');
+    expect(b.summary).toBe('Christian Street: 0 enquiries in 28 days. The Gay Street listing is the most viewed.');
+    expect(b.priorities.map((p) => p.relatedIds[0])).toEqual(['sk-3', 'sk-1', 'sk-4']);
+    expect(b.risks).toEqual(['Christian Street, London has had no enquiries.', 'Gay Street residents may object to the works.']);
+    expect(b.opportunities).toHaveLength(1);
+    expect(b.grounding.withheld).toBe(4);
+
+    // Which names qualify: whole labels and their parts of two or more words, never one about people or an audience.
+    const names = namesIn(snap.items.map((i) => i.label));
+    expect(names).toEqual(expect.arrayContaining(['Georgian townhouse, Gay Street, Bath', 'Gay Street', 'Christian Street', 'Mosque Road', 'Mosque Road, Bradford', 'Church Stretton']));
+    expect(names).not.toContain('Muslim'); // one word: it would let the word itself pass
+    expect(names.some((n) => /famil|ideal for/i.test(n))).toBe(false);
+    // Whole names only: "Gay Streets" or a name inside a longer word isn't replaced.
+    const g = new Grounding({}, { names: ['Gay Street'] });
+    expect(g.neutral('Gay Street, Bath and gay street')).toBe('local, Bath and local');
+    expect(g.neutral('Gay Streetwise couples')).toBe('Gay Streetwise couples');
+  });
+});
+
+/* ───────────── unit: agents and the approval queue (shared with the website) ───────────── */
+describe('automation agents and the approval queue', () => {
+  it('runs the agents over Streetkey’s demonstration homes only, never real listings in the shared registry', () => {
+    // A copy of the demo home that has development options: if the agents read the whole registry, the developer agent would list it.
+    const src = baseListings().find((p) => p.id === 'wat-015')!;
+    expect(developmentOptions(src).some((o) => (o.id === 'subdivide' || o.id === 'classma') && (o.valueUplift ?? 0) > 0)).toBe(true);
+    const real = [
+      { ...src, id: 'sk-real001', street: 'Privateseller Road', visibility: 'private' as const },
+      { ...baseListings()[0], id: 'sk-real002', street: 'Liveagency Street', price: 450_000 },
+    ];
+    try {
+      setDynamicListings(real);
+      expect(PROPERTIES.length).toBe(baseListings().length + 2);
+      for (const a of AGENTS) expect(JSON.stringify(a.run()), a.id).not.toMatch(/Privateseller|Liveagency|sk-real/);
+    } finally { setDynamicListings([]); }
+  });
+
+  it('queues each consequential proposal once, and never drops pending ones when the queue is full', () => {
+    const pa = (id: string, title: string, consequential = true, agent = 'landlord'): ProposedAction => ({ id, agent, title, detail: '', consequential });
+    const m1 = mergeQueue([], [pa('a', 'Book a Gas Safe engineer for U3'), pa('b', 'book a gas-safe engineer for U3!'), pa('c', 'Summarise the U4 void', false)]);
+    expect(m1.added.map((x) => x.id)).toEqual(['a']);
+    expect(m1.duplicates.map((x) => x.id)).toEqual(['b']);
+    expect(m1.other.map((x) => x.id)).toEqual(['c']);
+    expect(m1.queue.map((x) => x.id)).toEqual(['a']);
+    // Already waiting: not queued again. The same title from another agent is a different proposal.
+    const m2 = mergeQueue(m1.queue, [pa('d', 'Book a Gas Safe engineer for U3'), pa('e', 'Book a Gas Safe engineer for U3', true, 'manager')]);
+    expect(m2.duplicates.map((x) => x.id)).toEqual(['d']);
+    expect(m2.queue.map((x) => x.id)).toEqual(['e', 'a']);
+    // Full: new ones are turned away; nothing pending disappears without a decision.
+    const full = Array.from({ length: QUEUE_CAP }, (_, i) => pa(`q${i}`, `Item ${i}`));
+    const m3 = mergeQueue(full, [pa('new', 'Something new'), pa('n2', 'Something else', false)]);
+    expect(m3.full.map((x) => x.id)).toEqual(['new']);
+    expect(m3.queue).toBe(full);
+    expect(m3.other.map((x) => x.id)).toEqual(['n2']);
+  });
 });
 
 /* ───────────── POST /api/ai/briefing ───────────── */
@@ -252,7 +446,7 @@ describe('AI dashboard briefings', () => {
       const r = await client().post('/api/ai/briefing', { kind: 'developer', snapshot: withTitle('Failure test') });
       expect(r.status).toBe(502);
       expect(r.json.error.message).toMatch(/unexpected|try again/i);
-      expect(await q(`SELECT 1 FROM ai_cache WHERE key LIKE 'briefing:v2:developer:%'`)).toHaveLength(0);
+      expect(await q(`SELECT 1 FROM ai_cache WHERE key LIKE 'briefing:v3:developer:%'`)).toHaveLength(0);
     } finally { ai.restore(); }
   });
 
@@ -283,6 +477,83 @@ describe('AI dashboard briefings', () => {
       expect(user.indexOf('SYSTEM')).toBeLessThan(user.lastIndexOf('>>>'));
       expect(userJson({ messages: [{ role: 'user', content: user }] } as Body).items[0].id).toBe('x1'); // still valid JSON
     } finally { ai.restore(); }
+  });
+
+  it('removes AI statements about protected characteristics and says how many were withheld', async () => {
+    const ai = mockOpenAI({ chat: () => reply.json({
+      ...BRIEFING,
+      summary: 'Ashcombe Grove converts at 0.45% against 1.2% for comparables. Mostly Muslim families live nearby, so market it to them.',
+      opportunities: ['Birchfield Road converts at 1.9%, the best in the branch.', 'Target young families rather than older residents.'],
+    }) });
+    try {
+      const r = await client().post('/api/ai/briefing', { kind: 'agent', snapshot: withTitle('Protected characteristics test') });
+      expect(r.status).toBe(200);
+      const b = r.json.briefing;
+      expect(JSON.stringify(b)).not.toMatch(/Muslim|young families|older residents/);
+      expect(b.summary).toMatch(/0\.45%/);
+      expect(b.opportunities).toEqual(['Birchfield Road converts at 1.9%, the best in the branch.']);
+      expect(b.grounding.withheld).toBe(2);
+      // The prompt says so too (the code is the backstop).
+      expect((ai.calls('chat')[0].body as Body).messages[0].content).toMatch(/Never describe, rank or target areas, homes or people by who they are/);
+    } finally { ai.restore(); }
+  });
+
+  it('charges the daily AI allowance only when the AI is called: not for rejected forms or cached briefings', async () => {
+    const proposals = { proposals: [{ title: 'Generate an investment pack', detail: 'For your review.', consequential: false, rationale: 'From the findings.' }] };
+    const ai = mockOpenAI({ chat: (body) => reply.json((body as Body).response_format.json_schema.name === 'agent_proposals' ? proposals : BRIEFING) });
+    try {
+      const { c, user } = await signUp({ accountType: 'agent' });
+      const count = async (name: string) => (await q<{ n: number }>(`SELECT coalesce(sum(count), 0)::int n FROM rate_limits WHERE key = $1`, [`${name}:u:${user.id}`]))[0].n;
+      // A rejected form costs nothing at all.
+      expect((await c.post('/api/ai/briefing', { kind: 'agent', snapshot: { items: [] } })).status).toBe(400);
+      expect((await c.post('/api/ai/automation/run', { agent: 'nobody' })).status).toBe(400);
+      expect(await count('ai.daily')).toBe(0);
+      expect(await count('ai.briefing.m')).toBe(0);
+
+      const snapshot = withTitle(`Daily allowance test ${user.id}`);
+      const first = await c.post('/api/ai/briefing', { kind: 'agent', snapshot });
+      expect(first.json.cached).toBe(false);
+      expect(await count('ai.daily')).toBe(1);
+      // The same figures again: the saved briefing, with its original time, and no daily charge.
+      const again = await c.post('/api/ai/briefing', { kind: 'agent', snapshot });
+      expect(again.json).toMatchObject({ cached: true });
+      expect(again.json.briefing.generatedAt).toBe(first.json.briefing.generatedAt);
+      expect(await count('ai.daily')).toBe(1);
+      expect(await count('ai.briefing.m')).toBe(2); // the per-minute limit still applies to every valid request
+      expect(ai.calls('chat')).toHaveLength(1);
+
+      // Automation: the same rule.
+      const context = { title: `Context ${user.id}`, items: [{ id: 'w1', label: `Waiting item ${user.id}`, group: 'awaiting approval' }] };
+      expect((await c.post('/api/ai/automation/run', { agent: 'investor', context })).json.cached).toBe(false);
+      expect(await count('ai.daily')).toBe(2);
+      expect((await c.post('/api/ai/automation/run', { agent: 'investor', context })).json.cached).toBe(true);
+      expect(await count('ai.daily')).toBe(2);
+    } finally { ai.restore(); }
+  });
+
+  it('gives the daily AI limit its own code, so the website can tell it from the per-minute limit (BF9)', async () => {
+    const ai = mockOpenAI({ chat: () => reply.json(BRIEFING) });
+    const visitorKey = 'ai.daily:ip:127.0.0.1';
+    const useUp = (key: string, max: number) => q(
+      `INSERT INTO rate_limits (key, window_start, count) VALUES ($1, to_timestamp(floor(extract(epoch FROM now()) / 86400) * 86400), $2)
+       ON CONFLICT (key, window_start) DO UPDATE SET count = EXCLUDED.count`, [key, Math.round(max * limits.multiplier)]);
+    try {
+      const { c, user } = await signUp({ accountType: 'agent' });
+      await useUp(`ai.daily:u:${user.id}`, config.ai.dailyRequestsPerUser);
+      const signedIn = await c.post('/api/ai/briefing', { kind: 'agent', snapshot: withTitle(`Daily limit ${user.id}`) });
+      expect(signedIn.status).toBe(429);
+      expect(signedIn.json.error).toMatchObject({ code: 'daily_limit', message: 'You’ve reached today’s AI limit. It resets within 24 hours.' });
+      expect(Number(signedIn.json.error.fields.retryAfter)).toBeGreaterThan(0);
+      expect(signedIn.headers['retry-after']).toBe(signedIn.json.error.fields.retryAfter);
+
+      await useUp(visitorKey, config.ai.dailyRequestsPerIp);
+      const visitor = await client().post('/api/ai/briefing', { kind: 'agent', snapshot: withTitle(`Daily limit visitor ${user.id}`) });
+      expect(visitor.json.error).toMatchObject({ code: 'daily_limit', message: expect.stringMatching(/Create a free account for more/) });
+      expect(ai.calls('chat')).toHaveLength(0);
+    } finally {
+      await q('DELETE FROM rate_limits WHERE key = $1', [visitorKey]);
+      ai.restore();
+    }
   });
 });
 
@@ -392,6 +663,45 @@ describe('my-agency briefing (live data)', () => {
       expect((await agent.c.get(`/api/ai/jobs/${again.json.jobId}`)).json.job.status).toBe('done');
     } finally { ai.restore(); }
   });
+
+  it('keeps priorities about listings on streets whose names trip the protected-characteristics check', async () => {
+    const agent = await signUp({ accountType: 'agent', name: 'Agent' });
+    expect((await agent.c.post('/api/orgs', { name: 'Bath Stone Homes', kind: 'agency' })).status).toBe(201);
+    const mk = async (over: Record<string, unknown>) => {
+      const r = await agent.c.post('/api/listings', { ...LISTING, ...over });
+      expect(r.status).toBe(201);
+      const ref = r.json.listing.ref as string;
+      await q(`UPDATE listings SET status = 'live', published_at = now() - interval '5 days' WHERE ref = $1`, [ref]);
+      return ref;
+    };
+    const gay = await mk({ title: 'Georgian townhouse', addressLine: '12 Gay Street', town: 'Bath', postcode: 'BA1 2PH' });
+    const christian = await mk({ title: '2-bed flat', addressLine: '3 Christian Street', town: 'London', postcode: 'E1 1AA' });
+    const out = {
+      ...BRIEFING,
+      headline: 'Gay Street, Bath has views but no enquiries yet.',
+      summary: 'Christian Street: 0 enquiries in the last 30 days. Market the Gay Street home to gay couples.',
+      priorities: [
+        { title: 'Improve the Gay Street listing', why: 'Georgian townhouse, Gay Street, Bath has no enquiries yet.', action: 'Add more photos of the Gay Street home.', impact: 'high', relatedIds: [gay] },
+        { title: 'Answer questions about Christian Street', why: 'Christian Street has had no enquiries.', action: 'Check the description.', impact: 'medium', relatedIds: [christian] },
+        { title: 'Target Christian families for Christian Street', why: 'Christians like the area.', action: 'Advertise in churches.', impact: 'low', relatedIds: [christian] },
+      ],
+      risks: [], opportunities: [], questions: [],
+    };
+    const ai = mockOpenAI({ chat: () => reply.json(out) });
+    try {
+      const r = await agent.c.post('/api/ai/briefing', { kind: 'my-agency' });
+      expect(r.status).toBe(200);
+      const b = r.json.briefing;
+      // The labels the AI saw are street-level, and the names in them don't cost the listings their priorities.
+      const snap = userJson(ai.calls('chat')[0].body as Body);
+      expect(snap.items.map((i: { label: string }) => i.label)).toEqual(expect.arrayContaining(['Georgian townhouse, Gay Street, Bath', '2-bed flat, Christian Street, London']));
+      expect(b.headline).toBe('Gay Street, Bath has views but no enquiries yet.');
+      expect(b.summary).toBe('Christian Street: 0 enquiries in the last 30 days.');
+      expect(b.priorities.map((p: { title: string }) => p.title)).toEqual(['Improve the Gay Street listing', 'Answer questions about Christian Street']);
+      expect(b.labels).toEqual({ [gay]: 'Georgian townhouse, Gay Street, Bath', [christian]: '2-bed flat, Christian Street, London' });
+      expect(b.grounding.withheld).toBe(2);
+    } finally { ai.restore(); }
+  });
 });
 
 /* ───────────── POST /api/ai/automation/run ───────────── */
@@ -454,6 +764,28 @@ describe('AI automation proposals', () => {
       expect(mine.json.basis).toBe('demo+context');
       const userBody = ai.calls('chat')[1].body as Body;
       expect(userJson(userBody).userContext.items[0].label).toBe('Private context unit');
+    } finally { ai.restore(); }
+  });
+
+  it('leaves out proposals already waiting in the approval queue, for visitors too (without sending their queue to the AI)', async () => {
+    const ai = mockOpenAI({ chat: () => reply.json(PROPOSALS) });
+    try {
+      const first = await client().post('/api/ai/automation/run', { agent: 'landlord' });
+      expect(first.status).toBe(200);
+      const queued = first.json.proposals.filter((p: { consequential: boolean }) => p.consequential);
+      expect(queued.length).toBeGreaterThan(0);
+      expect(first.json.alreadyWaiting).toBe(0);
+      // The website sends what is waiting (queueContext). The same answer comes back from the cache, minus those.
+      const items = queued.map((p: { id: string; title: string }) => ({ id: p.id, label: p.title.toUpperCase(), group: 'awaiting approval', fields: { consequential: true } }));
+      const calls = ai.calls('chat').length;
+      const again = await client().post('/api/ai/automation/run', { agent: 'landlord', context: { title: 'Proposals already awaiting approval', items } });
+      expect(again.status).toBe(200);
+      expect(again.json.basis).toBe('demo');
+      expect(again.json.alreadyWaiting).toBe(queued.length);
+      expect(again.json.proposals.map((p: { title: string }) => p.title)).toEqual(first.json.proposals.filter((p: { consequential: boolean }) => !p.consequential).map((p: { title: string }) => p.title));
+      // Nothing new was asked of the AI, and a visitor's queue is never part of a prompt.
+      expect(ai.calls('chat').length).toBe(calls);
+      for (const call of ai.calls('chat')) expect(JSON.stringify(call.body)).not.toMatch(/Proposals already awaiting approval/);
     } finally { ai.restore(); }
   });
 

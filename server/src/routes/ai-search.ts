@@ -32,12 +32,17 @@ const PROPERTY_ID = /^[a-z0-9-]{2,40}$/i;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EmbedInput = z.object({ listingIds: z.array(z.string().regex(UUID)).max(EMBED_BATCH), queue: z.array(z.string().regex(UUID)).max(5000).default([]) });
 
-/** Queue embedding work: one job per batch of 50, each job hands the remainder to the next. */
+/**
+ * Queue embedding work: one job per batch of 50, each job hands the remainder to the next. For one listing (an edit),
+ * a job for it that hasn't started yet is reused, since it will read the latest text anyway: repeated edits queue one
+ * job, not one per save. A running job may already have read the old text, so a new one is queued behind it.
+ */
 async function queueEmbedding(listingIds: string[]) {
   const ids = [...new Set(listingIds)].filter((id) => UUID.test(id)).slice(0, 5000);
   if (!ids.length || !aiAvailable()) return;
   // Cheap to repeat: the job skips listings whose text hasn't changed.
-  await enqueue('search.embed', { listingIds: ids.slice(0, EMBED_BATCH), queue: ids.slice(EMBED_BATCH) }, { subject: ids.length === 1 ? `search.embed:${ids[0]}` : null });
+  const single = ids.length === 1;
+  await enqueue('search.embed', { listingIds: ids.slice(0, EMBED_BATCH), queue: ids.slice(EMBED_BATCH) }, single ? { subject: `search.embed:${ids[0]}`, dedupe: 'queued' } : { subject: null });
 }
 
 export async function aiSearchRoutes(app: FastifyInstance) {
