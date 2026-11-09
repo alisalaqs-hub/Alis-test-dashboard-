@@ -1,8 +1,8 @@
 /**
  * AI briefings for professional dashboards, and AI proposals for the automation agents.
  * The model reads a bounded snapshot of what the dashboard shows and explains, ranks and
- * words it. It never supplies figures: every £ or % it writes is checked against the
- * snapshot (see grounding.ts) and anything it can't back up is removed.
+ * words it. It never supplies figures: every £ or % it writes is checked against the same
+ * kind of figure in the snapshot (see grounding.ts) and anything it can't back up is removed.
  */
 import { chatJSON, HOUSE_RULES, untrusted } from '../core';
 import { S, type Infer } from '../schema';
@@ -40,6 +40,8 @@ export interface Briefing {
   risks: string[];
   opportunities: string[];
   questions: string[];
+  /** Labels of the snapshot items the priorities refer to (id → label), for display. */
+  labels: Record<string, string>;
   /** How many £/% figures were checked, and how many statements were removed because a figure wasn't in the data. */
   grounding: { checked: number; dropped: number };
   source: 'dashboard' | 'live';
@@ -55,8 +57,10 @@ const AUDIENCE: Record<BriefingKind, string> = {
   ].join('\n'),
   'my-agency': [
     'Audience: an estate agency team looking at their own live Streetkey listings (real, not demo data).',
-    'Look for: listings with views but few enquiries, unanswered enquiries, long days live, price position against the area range, recent price changes, few photos.',
-    'Good actions: answer new enquiries, improve photos and material information, review price with the vendor using the area range, send the vendor an update.',
+    'Look for: listings with views but few enquiries, unanswered enquiries, long days live, recent price changes, few photos.',
+    'Good actions: answer new enquiries, improve photos and material information, send the vendor an update.',
+    'The snapshot has no price evidence (no sold prices or comparables). Never say a price is high, low or out of line with the area, and never suggest a price or a price change; where interest is weak, suggest the agency checks its own comparable evidence.',
+    'priceChanges is null where price history isn’t recorded (agent-feed listings): never read that as “never reduced”.',
     'Never suggest pressuring buyers, inventing urgency, or wording that could mislead (Consumer Protection from Unfair Trading Regulations 2008 / DMCC Act 2024).',
   ].join('\n'),
   landlord: [
@@ -82,12 +86,21 @@ const RULES = [
   'Never promise outcomes (no guarantees), and never call anything a valuation, survey, or financial, legal or tax advice.',
 ].join('\n');
 
+/**
+ * Serialise data for an untrusted block. Runs of "<" or ">" are collapsed first, so no text in
+ * the data can rebuild the block's "<<<"/">>>" delimiters (core's untrusted() strips them in a
+ * single pass, so ">><<<>" would otherwise come out as ">>>").
+ */
+export function dataBlock(label: string, data: unknown, max: number) {
+  return untrusted(label, JSON.stringify(data).replace(/<{2,}/g, '<').replace(/>{2,}/g, '>'), max);
+}
+
 /** Ask the model for a briefing, then keep only what the snapshot supports. */
 export async function generateBriefing(kind: BriefingKind, snapshot: SnapshotT, meta: { userId?: string | null; source: Briefing['source'] }): Promise<Briefing> {
   const out = await chatJSON<BriefingOutT>([
     { role: 'system', content: `${HOUSE_RULES}\n\n${RULES}\n\n${AUDIENCE[kind]}` },
-    { role: 'user', content: `Dashboard snapshot (JSON):\n${untrusted('snapshot', JSON.stringify(snapshot), LIMITS.chars + 500)}` },
-  ], BriefingOut, 'dashboard_briefing', { purpose: `briefing.${kind}`, userId: meta.userId ?? null, role: 'main', maxTokens: 1600, effort: 'low', timeoutMs: 90_000 });
+    { role: 'user', content: `Dashboard snapshot (JSON):\n${dataBlock('snapshot', snapshot, LIMITS.chars + 500)}` },
+  ], BriefingOut, 'dashboard_briefing', { purpose: `briefing.${kind}`, userId: meta.userId ?? null, role: 'main', maxTokens: 2500, effort: 'low', timeoutMs: 90_000 });
   return groundBriefing(kind, snapshot, out, meta.source);
 }
 
@@ -102,8 +115,9 @@ export function groundBriefing(kind: BriefingKind, snapshot: SnapshotT, out: Bri
     (p) => [p.title, p.why, p.action],
   ).slice(0, 6);
   const headline = g.prose(line(out.headline, 200)) || (priorities.length ? `${priorities.length} priorit${priorities.length === 1 ? 'y' : 'ies'} from your dashboard` : 'Your dashboard briefing');
+  const labels = Object.fromEntries(snapshot.items.filter((i) => priorities.some((p) => p.relatedIds.includes(i.id))).map((i) => [i.id, i.label]));
   return {
-    kind, headline, summary: g.prose(line(out.summary, 900)), priorities,
+    kind, headline, summary: g.prose(line(out.summary, 900)), priorities, labels,
     risks: short(out.risks, 5, 240), opportunities: short(out.opportunities, 5, 240), questions: short(out.questions, 4, 200),
     grounding: g.report, source, generatedAt: new Date().toISOString(),
   };
@@ -113,7 +127,7 @@ export function groundBriefing(kind: BriefingKind, snapshot: SnapshotT, out: Bri
 
 export const ProposalsOut = S.obj({
   proposals: S.arr(S.obj({
-    title: S.str('Imperative action title, under 90 characters.'),
+    title: S.str('Imperative action title starting with its verb, under 90 characters.'),
     detail: S.str('What exactly would be prepared, one or two sentences.'),
     consequential: S.bool('True if it publishes, contacts anyone, books, spends money or changes records.'),
     rationale: S.str('Why, citing the findings. One or two sentences.'),
@@ -124,8 +138,68 @@ type ProposalsOutT = Infer<typeof ProposalsOut>;
 export interface AgentContext { id: string; name: string; serves: string; permissions: string[]; findings: string[]; toolsCalled: string[]; ruleProposals: { title: string; detail: string; consequential: boolean }[] }
 export interface AiProposal { id: string; agent: string; title: string; detail: string; consequential: boolean; rationale: string }
 
-/** Anything that reaches outside Streetkey or changes a record needs a human, whatever the model says. */
-export const CONSEQUENTIAL = /\b(?:send|email|e-mail|message|contact|notify|call|phone|reply|respond|publish|relist|delist|book|schedule|instruct|pay|spend|purchase|buy|bid|offer|request|submit|serve|accept|reject|approve|change|update|amend|edit|reduce|increase|raise|cancel|terminate|evict|remove|delete|withdraw|chase|remind)(?:s|es|d|ed|ing)?\b/i;
+/* Approval rule for AI proposals. Approval is the default: a proposal is treated as needing a
+ * person's approval unless its title starts with a read-only verb (summarise, compare, check,
+ * review, prepare, draft, generate…) AND neither title nor detail mentions anything that books,
+ * contacts, publishes, spends or changes records. The model may add caution, never remove it. */
+
+/** Inflected forms of a verb, including e-dropping and consonant-doubling ("reduce" → "reducing", "cancel" → "cancelling"). */
+function forms(v: string): string[] {
+  const out = new Set([v, `${v}s`, `${v}es`, `${v}d`, `${v}ed`, `${v}ing`]);
+  if (v.endsWith('e')) out.add(`${v.slice(0, -1)}ing`);
+  if (/[^aeiou]y$/.test(v)) { out.add(`${v.slice(0, -1)}ies`); out.add(`${v.slice(0, -1)}ied`); }
+  if (/[^aeiou][aeiou][bdgklmnprt]$/.test(v)) { out.add(`${v}${v.at(-1)}ing`); out.add(`${v}${v.at(-1)}ed`); }
+  return [...out];
+}
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[- ]/g, '[- ]?');
+
+/** Verbs that send, contact, publish, book, spend, sign or change something, in any form. */
+const RISKY_VERBS = [
+  // contacting people
+  'send', 'e-mail', 'sms', 'whatsapp', 'notify', 'call', 'phone', 'respond', 'forward', 'invite', 'inform', 'tell', 'ask', 'chase', 'remind',
+  'confirm', 'introduce', 'refer',
+  // publishing and marketing
+  'publish', 'advertise', 'relist', 'delist', 'unlist', 'upload', 'launch', 'promote', 'boost',
+  // booking and instructing
+  'book', 'arrange', 'instruct', 'hire', 'appoint', 'engage', 'assign', 'allocate', 'dispatch', 'inspect',
+  // spending, agreeing, legal steps
+  'pay', 'spend', 'invest', 'accept', 'reject', 'approve', 'authorise', 'authorize', 'renew', 'submit', 'serve', 'lodge', 'evict', 'terminate',
+  'cancel', 'withdraw', 'proceed', 'execute', 'implement',
+  // changing records or listings
+  'amend', 'edit', 'modify', 'alter', 'adjust', 'replace', 'remove', 'delete', 'archive', 'rename', 'refresh', 'swap', 'install',
+];
+/** Verbs that are often nouns here ("service charge", "open issues", "maintenance schedule", "under offer"): risky with an object. */
+const RISKY_WITH_OBJECT = [
+  'email', 'message', 'text', 'contact', 'reply', 'ring', 'share', 'post', 'list', 'visit', 'schedule', 'commission', 'order', 'buy', 'purchase',
+  'bid', 'offer', 'fund', 'refund', 'charge', 'invoice', 'bill', 'discount', 'sell', 'transfer', 'decline', 'sign', 'apply', 'issue', 'file',
+  'register', 'protect', 'request', 'change', 'update', 'lower', 'reduce', 'cut', 'increase', 'raise', 'decrease', 'complete', 'add', 'mark',
+  'upgrade', 'downgrade', 'switch', 'fix', 'repair',
+];
+const IRREGULAR = ['sent', 'paid', 'bought', 'spent', 'sold', 'told', 'rang', 'rung'];
+const OBJECT = String.raw`(?:the|a|an|it|this|that|these|those|them|its|their|his|her|your|our|all|any|each|every|both|some|more|new|missing|U\d+|\d|to|by|on|as|with|price|prices|rent|rents|asking|listings?|descriptions?|photos?|images?|status|records?|tenanc(?:y|ies)|deposits?|notices?|section|lead|licen[cs]es?|quotes?|contracts?|viewings?|slots?|appointments?|works?|repairs?|engineers?|contractors?|tenants?|vendors?|buyers?|landlords?|applicants?|replacements?)`;
+const PEOPLE = 'vendors?|sellers?|buyers?|purchasers?|tenants?|landlords?|applicants?|enquirers?|contractors?|engineers?|owners?|clients?|lenders?|solicitors?|conveyancers?|councils?|agents?|surveyors?|occupiers?|sharers?|residents?|neighbours?';
+const alt = (xs: string[]) => [...new Set(xs)].map(esc).join('|');
+/** Base and -ing forms, for "…and schedule viewings", "…then reducing the price". */
+const plain = (v: string) => [v, `${v}ing`, ...(v.endsWith('e') ? [`${v.slice(0, -1)}ing`] : [])];
+/** Anything in a proposal that reaches outside Streetkey or changes a record. */
+export const RISKY = new RegExp([
+  String.raw`\b(?:${alt([...RISKY_VERBS.flatMap(forms), ...IRREGULAR])})\b`,
+  String.raw`\b(?:${alt(RISKY_WITH_OBJECT.flatMap(forms))})\s+${OBJECT}\b`,
+  // a second action joined on: "review the listing and schedule viewings"
+  String.raw`\b(?:and|then|or|to|before|after)\s+(?:${alt([...RISKY_VERBS, ...RISKY_WITH_OBJECT].flatMap(plain))})\b`,
+  String.raw`\bappl(?:y|ies|ied|ying)\s+for\b|\bwrit(?:e|es|ing)\s+to\b|\bwrote\s+to\b|\bfollow(?:s|ed|ing)?[- ]?up\s+(?:with|on)\b|\bput\s+(?:it|the|this|them)\s+(?:\w+\s+){0,3}?(?:on|up)\b`,
+  // talking with someone: "review price with the vendor", "an update to the tenant"
+  String.raw`\b(?:with|to)\s+(?:the\s+|your\s+|a\s+|an\s+|each\s+|every\s+|all\s+|both\s+)?(?:[A-Za-z0-9]+\s+)?(?:${PEOPLE})\b`,
+].join('|'), 'i');
+/** Read-only starts: work that only prepares something for a person to look at. */
+const READ_ONLY_START = /^(?:summari[sz](?:e|ing)|compar(?:e|ing)|(?:re-?)?check(?:ing)?|review(?:ing)?|prepar(?:e|ing)|draft(?:ing)?|generat(?:e|ing)|compil(?:e|ing)|collat(?:e|ing)|analy[sz](?:e|ing)|assess(?:ing)?|estimat(?:e|ing)|calculat(?:e|ing)|identif(?:y|ying)|highlight(?:ing)?|monitor(?:ing)?|track(?:ing)?|watch(?:ing)?|read(?:ing)?|outlin(?:e|ing)|research(?:ing)?)\b/i;
+
+/** Does this proposal need a person's approval? True unless it is clearly read-only. */
+export function needsApproval(title: string, detail: string): boolean {
+  const t = title.trim();
+  // Joined with a separator, so a verb at the end of the title can't take the detail's first word as its object.
+  return !READ_ONLY_START.test(t) || RISKY.test(`${t} | ${detail}`);
+}
 
 export async function generateProposals(agent: AgentContext, context: SnapshotT | null, meta: { userId?: string | null }) {
   const system = [
@@ -133,14 +207,15 @@ export async function generateProposals(agent: AgentContext, context: SnapshotT 
     `You plan next actions for Streetkey’s “${agent.name}” (serves ${agent.serves}). It can only act within these permissions: ${agent.permissions.join(', ')}.`,
     'You never execute anything. You propose actions; a named person approves anything consequential (publishing, contacting anyone, booking, spending money, changing listing or tenancy records).',
     'Base proposals only on the findings and data given. Quote £ and % figures exactly as given; never calculate new ones. Proposals with unsupported figures are removed automatically.',
+    'userContext, when present, is extra data from the signed-in person (for example proposals already awaiting their approval): do not repeat proposals that are already waiting.',
     'Propose one to four actions, most useful first. Plain British English, no markdown.',
     'Never propose discriminating between people, pressuring buyers or tenants, unlawful eviction steps, banned tenant fees, or misleading listing claims.',
   ].join('\n');
   const data = { agent: { id: agent.id, name: agent.name, permissions: agent.permissions, toolsCalled: agent.toolsCalled }, findings: agent.findings, ruleBasedProposals: agent.ruleProposals, ...(context ? { userContext: context } : {}) };
   const out = await chatJSON<ProposalsOutT>([
     { role: 'system', content: system },
-    { role: 'user', content: `Agent findings and data (JSON):\n${untrusted('agent_run', JSON.stringify(data), LIMITS.chars + 6000)}` },
-  ], ProposalsOut, 'agent_proposals', { purpose: `automation.${agent.id}`, userId: meta.userId ?? null, role: 'fast', maxTokens: 900, effort: 'low' });
+    { role: 'user', content: `Agent findings and data (JSON):\n${dataBlock('agent_run', data, LIMITS.chars + 6000)}` },
+  ], ProposalsOut, 'agent_proposals', { purpose: `automation.${agent.id}`, userId: meta.userId ?? null, role: 'fast', maxTokens: 1500, effort: 'low' });
   return groundProposals(agent, context, out);
 }
 
@@ -152,8 +227,8 @@ export function groundProposals(agent: AgentContext, context: SnapshotT | null, 
     (p) => [p.title, p.detail, p.rationale],
   ).slice(0, 4).map((p, i) => ({
     id: `ai-${agent.id}-${stamp}-${i}`, agent: agent.id, title: p.title, detail: p.detail, rationale: p.rationale,
-    // Never downgrade: the model may only add caution, not remove it.
-    consequential: p.consequential || CONSEQUENTIAL.test(`${p.title} ${p.detail}`),
+    // Approval by default: the model may add caution, never remove it.
+    consequential: p.consequential || needsApproval(p.title, p.detail),
   }));
   return { proposals, grounding: g.report };
 }

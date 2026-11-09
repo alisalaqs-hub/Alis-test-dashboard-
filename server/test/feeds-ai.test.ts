@@ -42,15 +42,17 @@ describe('AI room redesign', () => {
   const photo = () => multipart([{ field: 'photo', name: 'kitchen.jpg', type: 'image/jpeg', data: jpegWithExif() }], { room: 'kitchen', style: 'scandi', brief: 'Pale oak, sage green', consent: 'true' });
   const send = async (cookie: string, m = photo()) => (await getApp()).inject({ method: 'POST', url: '/api/ai/room-image', payload: m.payload, headers: { ...m.headers, cookie } });
 
-  it('needs sign-in and a configured key', async () => {
-    expect((await send('')).statusCode).toBe(401);
+  it('needs a configured key and sign-in', async () => {
     const { c } = await signUp();
-    const r = await send(c.cookie);
-    expect(r.statusCode).toBe(503);
+    expect((await send(c.cookie)).statusCode).toBe(503);
     expect((await c.get('/api/ai/status')).json.imagesEnabled).toBe(false);
+    config.ai.openaiKey = 'sk-test';
+    try {
+      expect((await send('')).statusCode).toBe(401);
+    } finally { config.ai.openaiKey = ''; }
   });
 
-  it('sends the photo and brief to OpenAI, stores the result and enforces the daily limit', async () => {
+  it('queues the photo and brief as a job, stores the result and enforces the daily limit', async () => {
     config.ai.openaiKey = 'sk-test';
     config.ai.dailyImagesPerUser = 2;
     const calls: { prompt: string; fidelity: string | null; model: string | null; hasImage: boolean; auth: string | null }[] = [];
@@ -66,18 +68,22 @@ describe('AI room redesign', () => {
       const noConsent = multipart([{ field: 'photo', name: 'k.jpg', type: 'image/jpeg', data: jpegWithExif() }], { room: 'kitchen', style: 'scandi' });
       expect((await send(c.cookie, noConsent)).statusCode).toBe(400);
       const r = await send(c.cookie);
-      expect(r.statusCode).toBe(201);
+      expect(r.statusCode).toBe(202);
       const body = r.json();
-      expect(body.image.status).toBe('done');
-      expect(body.image.url).toMatch(/^\/media\/ai\/result\/.+\.png$/);
+      expect(body.jobId).toMatch(/^[0-9a-f-]{36}$/);
       expect(body.label).toMatch(/AI-generated/);
+      // jobs run synchronously in tests, so the job has finished by the time we poll
+      const job = (await c.get(`/api/ai/jobs/${body.jobId}`)).json.job;
+      expect(job.status).toBe('done');
+      expect(job.output.image.status).toBe('done');
+      expect(job.output.image.url).toMatch(/^\/media\/ai\/result\/.+\.png$/);
       expect(calls[0]).toMatchObject({ model: 'gpt-image-1', fidelity: 'high', hasImage: true, auth: 'Bearer sk-test' });
       expect(calls[0].prompt).toMatch(/Scandinavian/);
       expect(calls[0].prompt).toMatch(/Keep the room’s architecture/);
       expect(calls[0].prompt).toMatch(/Pale oak, sage green/);
-      const img = await (await getApp()).inject({ method: 'GET', url: body.image.url });
+      const img = await (await getApp()).inject({ method: 'GET', url: job.output.image.url });
       expect(img.statusCode).toBe(200);
-      expect((await send(c.cookie)).statusCode).toBe(201);
+      expect((await send(c.cookie)).statusCode).toBe(202);
       const third = await send(c.cookie);
       expect(third.statusCode).toBe(429);
       expect((await c.get('/api/ai/room-images')).json.items).toHaveLength(2);
@@ -100,10 +106,12 @@ describe('AI room redesign', () => {
     try {
       const { c } = await signUp();
       const r = await send(c.cookie);
+      expect(r.statusCode).toBe(202);
+      const job = (await c.get(`/api/ai/jobs/${r.json().jobId}`)).json.job;
       expect(n).toBe(2);
-      expect(r.statusCode).toBe(503);
-      expect(r.json().error.message).toMatch(/OPENAI_API_KEY/);
-      expect(r.json().error.message).not.toMatch(/abc123/);
+      expect(job.status).toBe('failed');
+      expect(job.error).toMatch(/OPENAI_API_KEY/);
+      expect(job.error).not.toMatch(/abc123/);
       const hist = (await c.get('/api/ai/room-images')).json.items;
       expect(hist[0].status).toBe('failed');
       expect(JSON.stringify(hist)).not.toMatch(/abc123/); // rejected keys are never stored

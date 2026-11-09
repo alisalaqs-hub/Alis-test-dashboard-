@@ -1,5 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { api, type MyListing } from '../lib/api';
+import { inboxAi, isLive, priceEvidence, type ListingStats } from '../lib/ai/inbox';
+import { useServer } from '../lib/server';
+import { ListingInsightsPanel } from './Account';
 import { getProperty } from '../data/properties';
 import { benchmark, comparableSet, engagementFor, insightsFor, K_ANON, PERIOD_DAYS, suppress, totals, type Insight } from '../engine/engagement';
 import { valuationScenario } from '../engine/valuation';
@@ -44,7 +48,122 @@ export function TrendChart({ days }: { days: { date: string; views: number; enqu
   );
 }
 
+/**
+ * Owner dashboard. Signed in with live listings on Streetkey: real figures for the chosen listing
+ * plus insights (AI when available, built-in rules otherwise). Otherwise the simulated demo.
+ */
 export default function Owner() {
+  const { status, user } = useServer();
+  const [mine, setMine] = useState<MyListing[] | null>(null);
+  const [demo, setDemo] = useState(false);
+  useEffect(() => {
+    if (status !== 'online' || !user) { setMine([]); return; }
+    let live = true;
+    setMine(null);
+    api.me.listings().then((r) => { if (live) setMine(r.items.filter((l) => isLive(l.status))); }).catch(() => { if (live) setMine([]); });
+    return () => { live = false; };
+  }, [status, user]);
+  if (status === 'online' && user && mine === null) return <p className="muted small" style={{ padding: 20 }} role="status">Checking your listings…</p>;
+  if (mine?.length && !demo) return <LiveOwner listings={mine} onDemo={() => setDemo(true)} />;
+  return <DemoOwner onBack={mine?.length ? () => setDemo(false) : undefined} />;
+}
+
+const STATUS_LABEL: Record<string, string> = { live: 'Live', under_offer: 'Under offer' };
+const shortDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+function ViewsChart({ days }: { days: ListingStats['days'] }) {
+  if (!days.length) return <p className="small muted">No figures yet.</p>;
+  const max = Math.max(1, ...days.map((d) => d.views));
+  const total = days.reduce((s, d) => s + d.views, 0);
+  const best = days.reduce((a, d) => (d.views > a.views ? d : a), days[0]);
+  return (
+    <figure style={{ margin: 0 }}>
+      <div className="owner-bars" aria-hidden="true">
+        {days.map((d) => <span key={d.day} className={d.views ? '' : 'zero'} style={{ height: `${Math.max(3, (d.views / max) * 100)}%` }} title={`${shortDate(d.day)}: ${d.views} view${d.views === 1 ? '' : 's'}`} />)}
+      </div>
+      <figcaption className="row between xs muted" style={{ marginTop: 6 }}>
+        <span>{shortDate(days[0].day)}</span>
+        <span>{total ? `${total.toLocaleString('en-GB')} views in total · busiest day ${shortDate(best.day)} (${best.views})` : 'No tracked views yet'}</span>
+        <span>{shortDate(days[days.length - 1].day)}</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+function LiveOwner({ listings, onDemo }: { listings: MyListing[]; onDemo: () => void }) {
+  const [ref, setRef] = useState(listings[0].ref);
+  const l = listings.find((x) => x.ref === ref) ?? listings[0];
+  const [stats, setStats] = useState<ListingStats | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setStats(null); setFailed(false);
+    inboxAi.stats(l.ref).then((s) => { if (live) setStats(s); }).catch(() => { if (live) setFailed(true); });
+    return () => { live = false; };
+  }, [l.ref]);
+  const rent = l.channel === 'rent';
+  const price = (n: number) => (rent ? `${gbp(n)} pcm` : gbp(n));
+  const views = stats?.totals.listing_view ?? l.stats.views30d;
+  const days = l.publishedAt ? Math.max(0, Math.floor((Date.now() - new Date(l.publishedAt).getTime()) / 86_400_000)) : null;
+  const ev = useMemo(() => priceEvidence(l), [l]);
+  const issues = l.checks.filter((c) => !c.ok);
+  const name = (x: MyListing) => x.title ?? `${x.beds}-bed ${x.type} in ${x.town}`;
+
+  return (
+    <div className="stack" style={{ gap: 18 }}>
+      <div className="page-head">
+        <div><div className="eyebrow">Property owner dashboard</div><h2 style={{ marginTop: 6 }}>How is my listing performing?</h2>
+          <p className="muted" style={{ marginTop: 6 }}>Real figures from Streetkey for the last 30 days. Views and saves only count visitors who allowed analytics; enquiries are the messages sent to you.</p></div>
+        <div className="stack" style={{ gap: 6, alignItems: 'flex-end' }}>
+          {listings.length > 1 && <label className="field" style={{ minWidth: 220 }}>Choose listing<select className="input" value={l.ref} onChange={(e) => setRef(e.target.value)}>{listings.map((x) => <option key={x.ref} value={x.ref}>{name(x)} · {x.town}</option>)}</select></label>}
+          <div className="row"><Tag kind="ok">Your live data</Tag><button type="button" className="btn sm ghost" onClick={onDemo}>See the demo dashboard</button></div>
+        </div>
+      </div>
+
+      <div className="grid g4 keep2">
+        <div className="card"><Stat label="Listing views (30 days)" value={views.toLocaleString('en-GB')} sub="Visitors who allowed analytics" /></div>
+        <div className="card"><Stat label="Saved by" value={(stats?.saves ?? l.stats.saves).toLocaleString('en-GB')} sub={`${l.stats.saves === 1 ? 'person' : 'people'} with a Streetkey account`} /></div>
+        <div className="card"><Stat label="Enquiries" value={(stats?.enquiries ?? l.stats.enquiries).toLocaleString('en-GB')} sub={l.stats.newEnquiries ? <Link to="/account/inbox">{l.stats.newEnquiries} new in your inbox</Link> : 'All caught up'} /></div>
+        <div className="card"><Stat label="Days on market" value={days ?? '—'} sub={STATUS_LABEL[l.status] ?? l.status} /></div>
+      </div>
+
+      <div className="split-r">
+        <div className="stack" style={{ gap: 16 }}>
+          <ListingInsightsPanel key={`${l.ref}:${l.updatedAt}`} listing={l} />
+          <Section title="Views over the last 30 days" kicker="Daily">
+            {stats ? <ViewsChart days={stats.days} /> : failed ? <p className="small muted">The daily figures couldn’t be loaded just now.</p> : <p className="small muted" role="status">Loading figures…</p>}
+            {stats?.note && <p className="xs muted" style={{ marginTop: 8 }}>{stats.note}</p>}
+          </Section>
+        </div>
+        <div className="stack" style={{ gap: 16 }}>
+          <Section title={name(l)} kicker="Your listing">
+            <dl className="kv">
+              <dt>{rent ? 'Rent' : 'Asking price'}</dt><dd className="num">{price(l.price)}</dd>
+              {ev && <><dt>Indicative range</dt><dd className="num">{price(ev.low)}–{price(ev.high)}</dd></>}
+              <dt>Photos</dt><dd className="num">{l.photos.length}</dd>
+              <dt>Status</dt><dd>{STATUS_LABEL[l.status] ?? l.status}</dd>
+            </dl>
+            {ev && <p className="xs muted" style={{ marginTop: 8 }}>Range from {ev.scope} evidence ({ev.comparables} comparable{ev.comparables === 1 ? '' : 's'}, demo data). <Tag kind="est" /> Not a valuation.</p>}
+            {issues.length > 0 && <ul className="clean xs" style={{ marginTop: 8 }}>{issues.map((c) => <li key={c.id}>{c.severity === 'block' ? 'Required: ' : 'Suggested: '}{c.message}</li>)}</ul>}
+            <div className="row" style={{ marginTop: 10 }}>
+              <Link className="btn sm ghost" to={`/property/${l.ref}`}>View listing</Link>
+              <Link className="btn sm ghost" to={`/list?edit=${l.ref}`}>Edit</Link>
+              <Link className="btn sm ghost" to="/account/inbox">Inbox</Link>
+            </div>
+          </Section>
+          <Section title="Improve marketability" kicker="Next steps">
+            <div className="stack">
+              <Link className="btn ghost sm" to="/account/listings">Manage all your listings</Link>
+              <Link className="btn ghost sm" to="/studio">Create an AI room concept (labelled as virtual)</Link>
+            </div>
+          </Section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DemoOwner({ onBack }: { onBack?: () => void }) {
   const [id, setId] = useState(MINE[0]);
   const p = getProperty(id)!;
   const e = useMemo(() => engagementFor(p), [p]);
@@ -59,6 +178,7 @@ export default function Owner() {
 
   return (
     <div className="stack" style={{ gap: 18 }}>
+      {onBack && <div className="callout info row between"><span>You’re looking at the demo dashboard with simulated figures.</span><button type="button" className="btn sm ghost" onClick={onBack}>Back to your listings</button></div>}
       <div className="page-head">
         <div><div className="eyebrow">Property owner dashboard</div><h2 style={{ marginTop: 6 }}>How is my property performing?</h2>
           <p className="muted" style={{ marginTop: 6 }}>Aggregated buyer engagement over the last {PERIOD_DAYS} days (visitor segments under {K_ANON} people are hidden), compared with similar listings. Facts are labelled <Tag kind="obs" />, interpretations <Tag kind="inf" />, suggestions <Tag kind="rec" />.</p></div>

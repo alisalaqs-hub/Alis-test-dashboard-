@@ -1,0 +1,54 @@
+/* Ask Streetkey: AI chat in the Ask sheet, and the AI box in property assistant panels. */
+.ask-tabs { margin: 8px 0 10px; }
+.ask-tabs button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; font-weight: 600; }
+.ask-tabs button:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+.ask-chat { display: flex; flex-direction: column; gap: 8px; height: min(64vh, 600px); min-height: 300px; }
+@media (min-width: 901px) { .ask-chat { height: min(calc(100vh - 250px), 620px); } }
+.ask-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 12px; padding: 2px 2px 8px; }
+.ask-log { display: flex; flex-direction: column; gap: 14px; }
+.ask-welcome { display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.5; }
+
+.ask-msg { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ask-who { font-size: 12px; font-weight: 700; color: var(--muted); }
+.ask-msg.user { align-self: flex-end; align-items: flex-end; max-width: 88%; gap: 4px; }
+.ask-bubble-u { margin: 0; background: var(--ink); color: var(--paper); padding: 9px 12px; border-radius: 14px 14px 4px 14px; font-size: 15px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-msg.ai { align-self: stretch; background: var(--ai-soft); border-radius: 14px 14px 14px 4px; padding: 10px 12px 12px; }
+.ask-msg.ai .ai-text a, .ask-answer .ai-text a { color: var(--ink); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+
+.ask-homes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ask-home { display: grid; grid-template-columns: 1fr auto; column-gap: 10px; row-gap: 2px; align-items: center; padding: 9px 11px; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); text-decoration: none; }
+.ask-home:hover { border-color: var(--ink); }
+.ask-home:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.ask-home-t { font-weight: 700; font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
+.ask-home-s { grid-column: 1; font-size: 13px; color: var(--muted); }
+.ask-home .tag { grid-column: 2; grid-row: 1 / span 2; }
+
+.ask-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ask-actions .btn { gap: 6px; }
+.ask-sources { margin: 0; font-size: 12px; color: var(--muted); }
+.ask-followups { margin-top: 2px; }
+.ask-chip { min-height: 36px; font-size: 13px; line-height: 1.3; white-space: normal; }
+.ask-chip:disabled { opacity: 0.55; cursor: not-allowed; }
+.ask-fail { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+
+.ask-composer { display: flex; gap: 8px; align-items: flex-end; padding-top: 10px; border-top: 1px solid var(--line); }
+.ask-input { flex: 1; resize: none; font-size: 16px; line-height: 1.4; min-height: 46px; max-height: 140px; padding: 11px 12px; border-radius: 12px; }
+.ask-send { min-width: 46px; min-height: 46px; padding: 0 14px; justify-content: center; flex: none; }
+.ask-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; }
+.ask-foot .ai-disclaimer { margin: 0; flex: 1 1 220px; }
+.ask-new { font-size: 13px; min-height: 24px; }
+
+/* Assistant panel on property pages */
+.ask-panel-form { display: flex; gap: 8px; flex-wrap: nowrap; }
+.ask-panel-form .input { min-height: 44px; font-size: 15px; }
+.ask-answer { display: flex; flex-direction: column; gap: 8px; }
+.ask-fallback-note { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+
+/* "Ask Streetkey AI" launcher on wide screens (phones use the tab bar's Ask button) */
+.ask-launch { position: fixed; right: 24px; bottom: 24px; z-index: 60; display: inline-flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 18px 0 14px; border: 0; border-radius: 999px; background: var(--ai); color: var(--on-ai); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 12px 26px -12px color-mix(in srgb, var(--ai) 85%, transparent); }
+.ask-launch:hover { filter: brightness(1.08); }
+.ask-launch:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+/* Keep focused content and the footer clear of the launcher (WCAG 2.4.11), as the tab bar does on phones. */
+@media (min-width: 901px) { html { scroll-padding-bottom: 88px; } footer.site { padding-bottom: 88px; } }
+@media print { .ask-launch { display: none; } }

@@ -1,0 +1,59 @@
+/* Streetkey AI for renovation, investment and homeowners (Estimator, Investment, My Home). Uses the site's tokens. */
+
+/* Photo picker */
+.pe-drop { display: block; position: relative; }
+.pe-drop:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; border-color: var(--focus); }
+.pe-thumbs { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.pe-thumbs li { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--surface-2); aspect-ratio: 1 / 1; }
+.pe-thumbs img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pe-thumbs .pe-n { position: absolute; left: 4px; top: 4px; background: var(--ink); color: var(--paper); font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 7px; }
+.pe-remove { position: absolute; right: 4px; top: 4px; width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.pe-remove:hover { border-color: var(--ink); }
+
+/* Observations per photo */
+.pe-obs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.pe-obs > li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: start; }
+.pe-obs > li.no-thumb { grid-template-columns: minmax(0, 1fr); }
+.pe-obs img { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; border: 1px solid var(--line); }
+.pe-obs ul { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.pe-act { display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); white-space: nowrap; }
+.pe-act.replace { background: var(--accent-soft); color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.pe-act.investigate { background: var(--gold-soft); color: var(--ink); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
+.pe-act.keep { background: var(--sage-soft); color: var(--ink); }
+.pe-basis { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pe-basis th, .pe-basis td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.pe-basis th { font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.pe-src { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; background: var(--surface-2); color: var(--ink-2); }
+.pe-src.photos { background: var(--insight-bg); color: var(--glow); }
+.pe-src.yours { background: var(--blue-soft); color: var(--ink); }
+
+/* Shared bits */
+.ai-prop-h { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 4px 0 2px; }
+.ai-prop-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.5; }
+.ai-prop-cols { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 720px) { .ai-prop-cols { grid-template-columns: minmax(0, 1fr); } }
+.ai-prop-note { font-size: 12.5px; color: var(--muted); margin: 0; }
+.ai-prop-stale { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* Verdicts: text and colour together (never colour alone) */
+.pv-verdict { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-weight: 800; font-size: 13px; border: 1px solid transparent; }
+.pv-verdict::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.pv-verdict.strong { background: var(--sage-soft); color: var(--sage); border-color: color-mix(in srgb, var(--sage) 40%, transparent); }
+.pv-verdict.workable { background: var(--blue-soft); color: var(--ink); border-color: color-mix(in srgb, var(--blue) 45%, transparent); }
+.pv-verdict.marginal { background: var(--gold-soft); color: var(--ink); border-color: color-mix(in srgb, var(--gold) 50%, transparent); }
+.pv-verdict.weak { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.pv-rule { display: flex; flex-direction: column; gap: 6px; }
+.pv-numbers { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* My Home: goals and plan */
+.ph-goal { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
+.ph-goal[aria-pressed='true'] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.ph-goal .ph-tick { width: 14px; display: inline-block; text-align: center; }
+.ph-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; counter-reset: step; }
+.ph-steps > li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: start; }
+.ph-num { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }
+.ph-step-t { font-weight: 700; }
+.ph-figs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ph-opts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ph-opts > li { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.ph-opts > li:last-child { border-bottom: 0; padding-bottom: 0; }

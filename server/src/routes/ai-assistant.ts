@@ -13,7 +13,7 @@ import { aiGuard } from '../ai/guard';
 import { parse } from '../services/http';
 
 export async function aiAssistantRoutes(app: FastifyInstance) {
-  app.post('/api/ai/chat', { bodyLimit: 64 * 1024 }, async (req) => {
+  app.post('/api/ai/chat', { bodyLimit: 128 * 1024 }, async (req) => {
     const { userId } = await aiGuard(req, 'assistant.chat', { perMinute: 8, perHour: 60 });
     const body = parse(ChatBody, req.body);
     return assistantChat(body, { userId });

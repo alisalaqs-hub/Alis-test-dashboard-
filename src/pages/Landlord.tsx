@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { gbp, gbpK, Section, Spark, Stat, Tag } from '../components/ui';
 import { AssistantPanel } from '../components/Assistant';
+import { AiBriefing, BriefingFallback } from '../components/ai/AiBriefing';
 import { landlordSkills, maintenanceForecast, PORTFOLIO } from '../ai/landlordSkills';
+import type { BriefingSnapshot } from '../lib/ai/briefing';
 
 const TODAY = new Date('2026-11-08');
 const days = (d: string) => Math.round((new Date(d).getTime() - TODAY.getTime()) / 86_400_000);
@@ -21,6 +23,11 @@ const TASKS0 = [
 ];
 type Stage = 'reported' | 'triaged' | 'assigned' | 'done';
 const STAGES: { id: Stage; label: string }[] = [{ id: 'reported', label: 'Reported' }, { id: 'triaged', label: 'Triaged' }, { id: 'assigned', label: 'Contractor assigned' }, { id: 'done', label: 'Completed' }];
+
+const ARREARS = 1_250;
+const VOID_DAYS = 18;
+const VOID_COST = VOID_DAYS * (1_250 * 12) / 365 + VOID_DAYS * 6;
+const fictional = (s: string) => s.replace(' (fictional)', '');
 
 const APPS = [
   { name: 'Applicant A (redacted)', unit: 'U4', income: 'Affordability: 2.9× rent (declared)', refs: 'Landlord ref received', rtr: 'Share code verified', flags: [] as string[] },
@@ -43,6 +50,54 @@ export default function Landlord() {
     items.push({ unit: 'ALL', item: 'Smoke & CO alarms tested at start of each tenancy', due: '2026-11-15', d: days('2026-11-15') });
     return items.sort((a, b) => a.d - b.d);
   }, []);
+  const forecast = useMemo(() => maintenanceForecast(), []);
+
+  /** Portfolio and compliance snapshot for the AI briefing. Tenant names and applications are left out. */
+  const briefing = useMemo<BriefingSnapshot>(() => ({
+    title: 'Landlord portfolio · 4 fictional units',
+    scope: 'Demonstration portfolio in England under the Renters’ Rights Act regime. Tenant applications are left out: choosing a tenant stays a human decision.',
+    asOf: TODAY.toISOString().slice(0, 10),
+    metrics: [
+      { label: 'Monthly rent roll (let units)', value: gbp(rentRoll) },
+      { label: 'Arrears', value: `${gbp(ARREARS)} (1 tenancy, 9 days)` },
+      { label: 'Occupancy', value: '81% (9 of 11 lettable rooms or units)' },
+      { label: 'Compliance items due within 30 days', value: compliance.filter((c) => c.d <= 30).length },
+      { label: 'Compliance items overdue', value: compliance.filter((c) => c.d < 0).length },
+      { label: `Void cost so far (U4, ${VOID_DAYS} days)`, value: gbpK(VOID_COST) },
+      { label: 'Maintenance forecast, next 24 months', value: gbp(forecast.reduce((s, m) => s + m.cost, 0)) },
+    ],
+    items: [
+      ...UNITS.map((u) => {
+        const rec = PORTFOLIO.find((x) => x.id === u.id);
+        return {
+          id: u.id, label: fictional(u.addr), group: 'unit',
+          fields: {
+            rentPcm: u.rent, rentPaidThisMonth: u.paid, status: u.status, gasSafetyDue: u.gas, eicrDue: u.eicr, epcRating: u.epc, epcExpires: u.epcExp,
+            deposit: u.deposit, rightToRent: u.rtr, licence: u.licence,
+            marketRentPcm: rec?.marketRent ?? null, marketRentComparableCount: rec?.marketEvidence ?? null, voidDays12m: rec?.voidDays12m ?? null, maintenanceSpend12m: rec?.maintenance12m ?? null,
+          },
+        };
+      }),
+      ...compliance.map((c, i) => ({ id: `C${i + 1}`, label: c.item, group: 'compliance', fields: { unit: c.unit, due: c.due, daysUntilDue: c.d, overdue: c.d < 0 } })),
+      ...tasks.map((t) => ({
+        id: t.id, label: t.title, group: 'maintenance request',
+        fields: { unit: t.unit, reported: t.reported, stage: STAGES.find((x) => x.id === t.stage)?.label ?? t.stage, suggestedTrade: t.triage.trade, urgency: t.triage.urgency, contractor: 'contractor' in t ? t.contractor ?? null : null },
+      })),
+      ...forecast.map((m, i) => ({ id: `F${i + 1}`, label: `${m.item} (${m.unit})`, group: 'maintenance forecast', fields: { unit: m.unit, expected: m.due, budget: m.cost } })),
+    ],
+    notes: [
+      'Section 13 rent review for U1: current £1,050 pcm; market evidence £1,095 pcm from 4 demo let comparables.',
+      'U4 void: 6 enquiries and 3 viewings booked so far.',
+      'Damp and mould reports are escalated for prompt investigation and hazard assessment (HHSRS).',
+    ],
+  }), [compliance, tasks, rentRoll, forecast]);
+  const briefingFallback = (
+    <BriefingFallback title="Coming up (built-in rules)" items={[
+      ...compliance.slice(0, 3).map((c) => <><b>{c.unit}</b> {c.item}: {c.d < 0 ? 'overdue' : `due in ${c.d} days`} ({c.due})</>),
+      <>Arrears of {gbp(ARREARS)} on U2 (9 days): talk to the tenant early and keep a record.</>,
+    ]} />
+  );
+
   const move = (id: string, dir: 1 | -1) => setTasks((ts) => ts.map((t) => {
     if (t.id !== id) return t;
     const k = STAGES.findIndex((s) => s.id === t.stage);
@@ -59,18 +114,21 @@ export default function Landlord() {
 
       <div className="grid g4 keep2">
         <div className="card"><Stat label="Monthly rent roll" value={gbp(rentRoll)} sub="Let units, contracted" /><Spark data={[8.1, 8.2, 8.2, 8.4, 8.3, 8.6, 8.7, 8.6, 8.9, 9.0, 8.9, 8.9]} height={36} color="var(--sage)" /></div>
-        <div className="card"><Stat label="Arrears" value={gbp(1_250)} tone="neg" sub="1 tenancy · 9 days" /></div>
+        <div className="card"><Stat label="Arrears" value={gbp(ARREARS)} tone="neg" sub="1 tenancy · 9 days" /></div>
         <div className="card"><Stat label="Occupancy" value="81%" sub="9 of 11 lettable rooms/units" /></div>
         <div className="card"><Stat label="Compliance due ≤ 30 days" value={compliance.filter((c) => c.d <= 30).length} tone={compliance.some((c) => c.d < 14) ? 'neg' : undefined} sub="Auto-reminders to you & contractor" /></div>
       </div>
+
+      <AiBriefing kind="landlord" title="Portfolio briefing" snapshot={briefing} fallback={briefingFallback}
+        intro="What needs doing first across compliance, arrears, voids and maintenance, with the reason and the next step." />
 
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
           <AssistantPanel title="Ask about your portfolio" kicker="AI landlord intelligence" skills={landlordSkills} ctx={PORTFOLIO} />
           <Section title="Predictive maintenance & budget" kicker="Next 24 months" right={<Tag kind="est">From component ages</Tag>}>
             <div className="table-wrap" tabIndex={0}><table className="t"><thead><tr><th>Unit</th><th>Item</th><th>Expected</th><th className="r">Budget</th></tr></thead>
-              <tbody>{maintenanceForecast().map((m, i) => <tr key={i}><td className="mono small">{m.unit}</td><td className="small">{m.item}</td><td className="small">{m.due}</td><td className="r num">{gbp(m.cost)}</td></tr>)}</tbody>
-              <tfoot><tr><td colSpan={3}>Total forecast</td><td className="r num">{gbp(maintenanceForecast().reduce((s, m) => s + m.cost, 0))}</td></tr></tfoot></table></div>
+              <tbody>{forecast.map((m, i) => <tr key={i}><td className="mono small">{m.unit}</td><td className="small">{m.item}</td><td className="small">{m.due}</td><td className="r num">{gbp(m.cost)}</td></tr>)}</tbody>
+              <tfoot><tr><td colSpan={3}>Total forecast</td><td className="r num">{gbp(forecast.reduce((s, m) => s + m.cost, 0))}</td></tr></tfoot></table></div>
             <p className="xs muted" style={{ marginTop: 8 }}>Based on verified installation dates and typical component lives; improves as maintenance records and invoices accumulate.</p>
           </Section>
           <Section title="Portfolio" kicker="Units">
@@ -145,7 +203,7 @@ export default function Landlord() {
             <p className="xs muted" style={{ marginTop: 8 }}>Increases limited to once per year via section 13 notice (2 months), challengeable at the First-tier Tribunal. Streetkey drafts the notice with comparable evidence for you to review.</p>
           </Section>
           <Section title="Void cost" kicker="U4 · 18 days">
-            <div className="num" style={{ fontSize: 24 }}>{gbpK(18 * (1_250 * 12) / 365 + 18 * 6)}</div>
+            <div className="num" style={{ fontSize: 24 }}>{gbpK(VOID_COST)}</div>
             <div className="xs muted">Lost rent + council tax & utilities so far. Listing syndicated to Streetkey Discover; 6 enquiries, 3 viewings booked.</div>
           </Section>
           <div className="callout info xs">Regulatory content reflects England as configured Nov 2026 (Renters’ Rights Act 2025 tenancy reforms from 1 May 2026; PRS Database & Ombudsman to follow). Wales (Renting Homes Act) and Scotland (PRT) rule-sets are separate modules. Not legal advice — verify current commencement status.</div>

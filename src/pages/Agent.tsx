@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PROPERTIES, photosFor, type Property } from '../data/properties';
-import { benchmark, engagementFor, insightsFor, totals } from '../engine/engagement';
+import { benchmark, engagementFor, insightsFor, PERIOD_DAYS, PERIOD_END, totals } from '../engine/engagement';
 import { dealScore } from '../engine/insights';
 import { weeklyOwnerReport } from '../engine/reports';
 import { agentSkills } from '../ai/skills';
 import { AssistantPanel } from '../components/Assistant';
-import { gbpK, pct, Section, Stat, Tag } from '../components/ui';
+import { AiBriefing, BriefingFallback } from '../components/ai/AiBriefing';
+import { gbp, gbpK, pct, Section, Stat, Tag } from '../components/ui';
+import type { BriefingSnapshot } from '../lib/ai/briefing';
 import { useStore } from '../store';
 
 const BRANCH = PROPERTIES.filter((p) => p.listing !== 'rent' && p.type !== 'commercial');
@@ -26,6 +28,9 @@ export function listingQuality(p: Property) {
   return { score: Math.round((checks.filter((c) => c.ok).length / checks.length) * 100), checks };
 }
 
+const signed = (n: number, dp = 1) => `${n >= 0 ? '+' : ''}${n.toFixed(dp)}`;
+const propertyLink = (id: string) => `/property/${encodeURIComponent(id)}`;
+
 const FEEDBACK: Record<string, string[]> = {
   'wal-001': ['Loved the period features and garden (4 of 6 viewings)', 'Worried about the cost of works and damp in the rear reception (5 of 6)', 'Felt price high relative to work needed (3 of 6)'],
   'cro-002': ['Liked the driveway and garden', 'Concern about subsidence history'],
@@ -43,6 +48,54 @@ export default function Agent() {
     return { p, t, wk, prev, bm, q, flag, gap: t.enquiryRate.p - bm.rate.p };
   }).sort((a, b) => (sortBy === 'gap' ? a.gap - b.gap : sortBy === 'views' ? b.t.views - a.t.views : a.q.score - b.q.score)), [sortBy]);
   const tot = rows.reduce((a, r) => ({ v: a.v + r.t.views, e: a.e + r.t.enquiries + r.t.viewingRequests, u: a.u + r.t.unique }), { v: 0, e: 0, u: 0 });
+  const attention = rows.filter((r) => r.flag && r.flag !== 'Strong');
+
+  /** What the command centre shows, for the AI briefing (fixed order, so re-sorting the table doesn't change it). */
+  const briefing = useMemo<BriefingSnapshot>(() => {
+    const ordered = [...rows].sort((a, b) => a.gap - b.gap || a.p.id.localeCompare(b.p.id));
+    return {
+      title: 'Northbank Estates · branch listings',
+      scope: `Demonstration branch: ${ordered.length} fictional sale listings with simulated engagement over the last ${PERIOD_DAYS} days.`,
+      asOf: PERIOD_END,
+      metrics: [
+        { label: 'Active listings', value: ordered.length },
+        { label: 'Listings needing attention', value: ordered.filter((r) => r.flag && r.flag !== 'Strong').length },
+        { label: `Views (${PERIOD_DAYS} days)`, value: tot.v },
+        { label: `Unique visitors (${PERIOD_DAYS} days)`, value: tot.u },
+        { label: 'Enquiries and viewing requests', value: tot.e },
+        { label: 'Portfolio conversion', value: pct(tot.e / tot.u) },
+        { label: 'Proposals awaiting approval', value: queue.length },
+      ],
+      items: ordered.map((r) => {
+        const gaps = r.q.checks.filter((c) => !c.ok).map((c) => c.item);
+        const history = r.p.priceHistory.map((h) => `${h.event} ${gbp(h.price)} (${h.date})`).join('; ');
+        return {
+          id: r.p.id, label: `${street(r.p)}, ${r.p.town.split(',')[0]}`, group: 'listing',
+          fields: {
+            askingPrice: r.p.price, property: `${r.p.beds}-bed ${r.p.type}`, daysOnMarket: r.p.daysOnMarket,
+            views7d: r.wk.views, viewsPrior7d: r.prev.views, views28d: r.t.views, saves28d: r.t.saves,
+            enquiries28d: r.t.enquiries, viewingRequests28d: r.t.viewingRequests,
+            conversion: pct(r.t.enquiryRate.p), comparablesConversion: pct(r.bm.rate.p), gapVsComparables: `${signed(r.gap * 100)} percentage points`,
+            qualityScore: r.q.score, alert: r.flag ?? 'none',
+          },
+          notes: [
+            ...(history ? [`Price history: ${history}`] : []),
+            ...(gaps.length ? [`Listing quality gaps: ${gaps.join(', ')}`] : []),
+            ...(FEEDBACK[r.p.id] ?? []).slice(0, 2).map((f) => `Viewing feedback: ${f}`),
+          ],
+        };
+      }),
+      notes: [
+        'Engagement figures are simulated for this demonstration.',
+        'Conversion is enquiries plus viewing requests per unique visitor; a gap against comparables is flagged only when the 95% intervals don’t overlap.',
+      ],
+    };
+  }, [rows, tot.v, tot.u, tot.e, queue.length]);
+  const briefingFallback = (
+    <BriefingFallback title="Needs attention (built-in rules)" items={[...attention].sort((a, b) => a.gap - b.gap).slice(0, 4).map((r) => (
+      <><Link to={propertyLink(r.p.id)}><b>{street(r.p)}</b></Link>: {r.flag?.toLowerCase()}, {pct(r.t.enquiryRate.p)} conversion against {pct(r.bm.rate.p)} for comparables</>
+    ))} />
+  );
 
   const proposeReport = (p: Property) => enqueue([{ id: `rep-${p.id}-${Date.now()}`, agent: 'estate-agent', title: `Email weekly report to owner of ${street(p)}`, detail: 'AI-drafted seller report; requires your review before sending.', consequential: true, payload: weeklyOwnerReport(p, 'agent-draft') }]);
   const proposeCopy = (p: Property) => {
@@ -61,11 +114,14 @@ export default function Agent() {
       </div>
 
       <div className="grid g4 keep2">
-        <div className="card"><Stat label="Active listings" value={rows.length} sub={`${rows.filter((r) => r.flag && r.flag !== 'Strong').length} need attention`} /></div>
+        <div className="card"><Stat label="Active listings" value={rows.length} sub={`${attention.length} need attention`} /></div>
         <div className="card"><Stat label="Views (28d)" value={tot.v.toLocaleString('en-GB')} sub={`${tot.u.toLocaleString('en-GB')} unique`} /></div>
         <div className="card"><Stat label="Enquiries + viewing requests" value={tot.e} sub={`Portfolio conversion ${pct(tot.e / tot.u)}`} /></div>
         <div className="card"><Stat label="Awaiting your approval" value={queue.length} tone={queue.length ? 'neg' : undefined} sub="AI drafts & agent proposals" /></div>
       </div>
+
+      <AiBriefing kind="agent" title="Branch briefing" snapshot={briefing} allowMyAgency linkFor={propertyLink} fallback={briefingFallback}
+        intro="A prioritised read of this branch: what needs attention first, why, and the next step. Agency members can switch to their live Streetkey listings." />
 
       <Section title="Listing performance" kicker="Portfolio overview" right={<select className="input" aria-label="Sort listings" style={{ width: 'auto' }} value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}><option value="gap">Sort: weakest conversion</option><option value="views">Sort: most viewed</option><option value="quality">Sort: lowest quality score</option></select>}>
         <div className="table-wrap" tabIndex={0}><table className="t">

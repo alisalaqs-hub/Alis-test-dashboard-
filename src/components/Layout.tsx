@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { StreetkeyBow, StreetkeyWordmark } from './Brand';
 import { Icon } from './Icons';
-import { SmartSearch } from './SmartSearch';
+import { AskLauncher, AskSheet } from './ai/AskChat';
 import { useStore } from '../store';
 import { useServer } from '../lib/server';
 
@@ -85,12 +85,11 @@ export default function Layout() {
       </nav>
 
       {sheet && <div className="scrim" onClick={() => setSheet(null)} />}
+      <AskLauncher onOpen={() => setSheet('ask')} />
       {sheet === 'ask' && (
-        <div ref={sheetRef} className="sheet" role="dialog" aria-modal="true" aria-label="Ask Streetkey">
+        <div ref={sheetRef} className="sheet" role="dialog" aria-modal="true" aria-labelledby="ask-sheet-title">
           <div className="sheet-grab" />
-          <div className="row between"><h2 className="sheet-h">Ask Streetkey</h2><button className="icon-btn" aria-label="Close" onClick={() => setSheet(null)}><Icon name="x" /></button></div>
-          <p className="small muted" style={{ margin: '4px 0 12px' }}>A place, a postcode, or what you want in your own words.</p>
-          <SmartSearch autoFocus onDone={() => setSheet(null)} />
+          <AskSheet page={pathname} onClose={() => setSheet(null)} />
         </div>
       )}
       {sheet === 'more' && (

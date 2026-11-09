@@ -40,9 +40,21 @@ export function safeInternalPath(to: unknown): string | null {
   return path;
 }
 
-/** The reply text: markers removed, only safe internal markdown links kept, length bounded. */
+const isItem = (l: string) => /^\s*(?:[-•*]|\d+\.)\s+/.test(l);
+/** Blank line between prose and a list, so the website renders the list (models often omit it). */
+export function spaceLists(text: string): string {
+  const out: string[] = [];
+  for (const line of text.split('\n')) {
+    const prev = out[out.length - 1];
+    if (prev !== undefined && prev.trim() && line.trim() && isItem(line) !== isItem(prev)) out.push('');
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** The reply text: markers removed, only safe internal markdown links kept, lists spaced, length bounded. */
 export function sanitiseReply(text: unknown): string {
-  let s = strip(String(text ?? '')).replace(/\r/g, '').trim();
+  let s = spaceLists(strip(String(text ?? '')).replace(/\r/g, '').trim());
   s = s.replace(/\[([^\]\n]{1,160})\]\(([^)\n]*)\)/g, (_m, label: string, href: string) => {
     const p = safeInternalPath(href);
     return p ? `[${label}](${p})` : label;
@@ -52,14 +64,15 @@ export function sanitiseReply(text: unknown): string {
 }
 
 export interface Action { label: string; to: string }
-export function sanitiseActions(list: unknown, max = 4): Action[] {
+/** `keep` lets the caller drop labels it can't stand behind (e.g. ones with unchecked figures). */
+export function sanitiseActions(list: unknown, max = 4, keep: (label: string) => boolean = () => true): Action[] {
   const out: Action[] = [];
   const seen = new Set<string>();
   for (const a of Array.isArray(list) ? list : []) {
     const rec = a as { label?: unknown; to?: unknown } | null;
     const label = typeof rec?.label === 'string' ? strip(rec.label).replace(/\s+/g, ' ').trim().slice(0, 48) : '';
     const to = safeInternalPath(rec?.to);
-    if (!label || !to || seen.has(to)) continue;
+    if (!label || !to || seen.has(to) || !keep(label)) continue;
     seen.add(to);
     out.push({ label, to });
     if (out.length >= max) break;
@@ -67,12 +80,12 @@ export function sanitiseActions(list: unknown, max = 4): Action[] {
   return out;
 }
 
-export function sanitiseFollowUps(list: unknown, max = 3): string[] {
+export function sanitiseFollowUps(list: unknown, max = 3, keep: (text: string) => boolean = () => true): string[] {
   const out: string[] = [];
   for (const f of Array.isArray(list) ? list : []) {
     if (typeof f !== 'string') continue;
     const s = strip(f).replace(/\s+/g, ' ').trim();
-    if (s.length < 3 || s.length > 100 || /https?:|www\./i.test(s)) continue;
+    if (s.length < 3 || s.length > 100 || /https?:|www\./i.test(s) || !keep(s)) continue;
     if (out.some((x) => x.toLowerCase() === s.toLowerCase())) continue;
     out.push(s);
     if (out.length >= max) break;

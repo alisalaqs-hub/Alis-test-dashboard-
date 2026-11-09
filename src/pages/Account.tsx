@@ -1,8 +1,12 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { AiButton, AiCard, AiDisclaimer, AiErrorNote, AiLabel, AiThinking, AiUnavailable } from '../components/ai/Ai';
+import '../components/ai/inbox.css';
 import { Icon } from '../components/Icons';
 import { gbp, Section, Tag } from '../components/ui';
 import { api, ApiError, mediaUrl, type MyListing } from '../lib/api';
+import { useAi, useAiAction } from '../lib/ai/core';
+import { defaultIntent, inboxAi, isLive, REPLY_INTENTS, REPLY_TONES, ruleInsights, unfilled, type ListingInsights, type ReplyIntent, type ReplyTone, type SuggestedReply, type Triage, type TriageResponse } from '../lib/ai/inbox';
 import type { EnquirySummaryDTO, MessageDTO, SavedSearchDTO } from '../lib/apiTypes';
 import { useServer } from '../lib/server';
 
@@ -200,7 +204,9 @@ export function MyListings() { return <Gate what="Managing listings"><MyListings
 function MyListingsInner() {
   const [items, setItems] = useState<MyListing[] | null>(null);
   const [msg, setMsg] = useState<{ ref: string; text: string; ok?: boolean } | null>(null);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   const { refreshListings } = useServer();
+  const ai = useAi();
   const load = () => api.me.listings().then((r) => setItems(r.items)).catch(() => setItems([]));
   useEffect(() => { void load(); }, []);
   const act = async (ref: string, fn: () => Promise<unknown>, ok: string) => {
@@ -222,12 +228,15 @@ function MyListingsInner() {
                 {['draft', 'rejected', 'withdrawn'].includes(l.status) && <button className="btn sm accent" onClick={() => void act(l.ref, () => api.listings.submit(l.ref), 'Submitted.')}>Submit for review</button>}
                 {['draft', 'rejected', 'pending', 'live', 'under_offer'].includes(l.status) && <Link className="btn sm ghost" to={`/list?edit=${l.ref}`}>Edit</Link>}
                 {['live', 'under_offer', 'sold', 'let'].includes(l.status) && <Link className="btn sm ghost" to={`/property/${l.ref}`}>View</Link>}
+                {isLive(l.status) && <button type="button" className="btn sm ghost insights-toggle" aria-expanded={!!open[l.ref]} aria-controls={`insights-${l.ref}`} onClick={() => setOpen((o) => ({ ...o, [l.ref]: !o[l.ref] }))}><Icon name="spark" size={14} />{ai.available ? 'AI insights' : 'Insights'}</button>}
                 {l.status === 'live' && <button className="btn sm ghost" onClick={() => void act(l.ref, () => api.listings.setStatus(l.ref, 'under_offer'), 'Marked under offer.')}>Under offer</button>}
                 {(l.status === 'live' || l.status === 'under_offer') && <button className="btn sm ghost" onClick={() => void act(l.ref, () => api.listings.setStatus(l.ref, l.channel === 'rent' ? 'let' : 'sold'), l.channel === 'rent' ? 'Marked let.' : 'Marked sold.')}>{l.channel === 'rent' ? 'Mark let' : 'Mark sold'}</button>}
                 {l.status === 'under_offer' && <button className="btn sm ghost" onClick={() => void act(l.ref, () => api.listings.setStatus(l.ref, 'live'), 'Back on the market.')}>Back on market</button>}
                 {l.status !== 'withdrawn' && <button className="btn sm ghost" onClick={() => { if (confirm(l.status === 'draft' ? 'Delete this draft?' : 'Withdraw this listing from Streetkey?')) void act(l.ref, () => api.listings.remove(l.ref), l.status === 'draft' ? 'Deleted.' : 'Withdrawn.'); }}>{l.status === 'draft' ? 'Delete' : 'Withdraw'}</button>}
               </div>
               {msg?.ref === l.ref && <div className={`small ${msg.ok ? 'ok-text' : 'field-error'}`} role="status">{msg.text}</div>}
+              {/* Once opened, the panel stays mounted (just hidden) so closing and reopening doesn't ask again. */}
+              {isLive(l.status) && <div id={`insights-${l.ref}`} className="insights-panel" hidden={!open[l.ref]}>{open[l.ref] !== undefined && <ListingInsightsPanel key={`${l.ref}:${l.updatedAt}`} listing={l} />}</div>}
             </div>
           </article>
         ))}
@@ -235,23 +244,193 @@ function MyListingsInner() {
   );
 }
 
+/* ---------- AI listing insights (also used on the owner dashboard) ---------- */
+/**
+ * How a live listing is doing and what would most improve it. Uses Streetkey AI when it's
+ * available (explaining figures the server computes), otherwise Streetkey's built-in rules.
+ * Give it key={listing.ref} when the listing can change, so a new listing starts fresh.
+ */
+export function ListingInsightsPanel({ listing }: { listing: MyListing }) {
+  const ai = useAi();
+  const insights = useAiAction((ref: string) => inboxAi.insights(ref));
+  const rules = useMemo(() => ruleInsights(listing), [listing]);
+  useEffect(() => { if (ai.available) void insights.run(listing.ref); }, [ai.available, listing.ref]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (ai.reason === 'checking') return <AiThinking label="Checking what’s available" />;
+  if (ai.available && insights.data) return <InsightsView data={insights.data} source="ai" />;
+  if (ai.available && !insights.error) return <AiThinking label="Looking at how your listing is doing" />;
+  return (
+    <div className="stack">
+      {ai.available && insights.error && <AiErrorNote error={insights.error} onRetry={() => void insights.run(listing.ref)} />}
+      {!ai.available && <AiUnavailable reason={ai.reason} feature="AI analysis" />}
+      <InsightsView data={rules} source="rules" />
+    </div>
+  );
+}
+
+function InsightsView({ data, source }: { data: ListingInsights; source: 'ai' | 'rules' }) {
+  const body = (
+    <>
+      <p className="insights-h">{data.headline}</p>
+      {data.whatsWorking.length > 0 && <><p className="insights-sub">What’s working</p><ul className="insights-working">{data.whatsWorking.map((w) => <li key={w}>{w}</li>)}</ul></>}
+      {data.whatToImprove.length > 0 && <>
+        <p className="insights-sub">What to improve</p>
+        <ol className="insights-list">{data.whatToImprove.map((x) => (
+          <li key={x.action}><b className="small">{x.action}</b><span className={`inbox-impact ${x.impact}`}>{x.impact === 'high' ? 'High impact' : x.impact === 'medium' ? 'Medium impact' : 'Low impact'}</span><span className="why">{x.why}</span></li>
+        ))}</ol>
+      </>}
+      {data.priceNote && <><p className="insights-sub">Price</p><p className="small" style={{ margin: 0 }}>{data.priceNote}</p></>}
+    </>
+  );
+  if (source === 'ai') {
+    const asOf = data.generatedAt ? ` on ${new Date(data.generatedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}` : '';
+    return <AiCard title="Listing insights" footer={<AiDisclaimer>Written by AI from Streetkey’s figures{asOf}. Visitor numbers only count people who allowed analytics. An indicative guide, not a valuation or financial advice.</AiDisclaimer>}>{body}</AiCard>;
+  }
+  return (
+    <section className="card flat stack" aria-label="Listing tips from Streetkey’s built-in rules">
+      <div className="row"><Tag kind="neutral">Built-in rules</Tag><b className="small">Quick checks</b></div>
+      {body}
+      <p className="xs muted" style={{ margin: 0 }}>From Streetkey’s built-in rules and your listing’s figures. Price ranges are an indicative guide, not a valuation.</p>
+    </section>
+  );
+}
+
 /* ---------- inbox ---------- */
+function TriageChips({ t, label = true }: { t: Triage; label?: boolean }) {
+  if (!t.chips.length) return null;
+  return (
+    <span className="ai-chips inbox-chips">
+      {label && <AiLabel />}<span className="sr-only">AI reading of this enquiry:</span>
+      {t.chips.map((c) => <span key={c.label} className={`ai-chip inbox-chip ${c.tone}`}>{c.label}</span>)}
+    </span>
+  );
+}
+const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+const kindLabel = (k: string) => (k === 'viewing' ? 'Viewing request' : k === 'offer' ? 'Offer' : 'Question');
+
 export function Inbox() { return <Gate what="Messages"><InboxInner /></Gate>; }
 function InboxInner() {
+  const ai = useAi();
   const [items, setItems] = useState<EnquirySummaryDTO[] | null>(null);
-  useEffect(() => { api.me.inbox().then((r) => setItems(r.items)).catch(() => setItems([])); }, []);
+  const [triage, setTriage] = useState<Record<string, Triage>>({});
+  const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = useCallback(() => api.me.inbox().then((r) => setItems(r.items)).catch(() => setItems([])), []);
+  useEffect(() => { void load(); }, [load]);
+  const hasLister = !!items?.some((i) => i.role === 'lister' && !i.filtered);
+  useEffect(() => {
+    if (!ai.available || !hasLister) return;
+    let live = true;
+    inboxAi.triageAll().then((r) => { if (live) setTriage(r.items); }).catch(() => { /* chips are optional */ });
+    return () => { live = false; };
+  }, [ai.available, hasLister, items]);
+  const held = (items ?? []).filter((i) => i.role === 'lister' && i.filtered);
+  const shown = (items ?? []).filter((i) => !(i.role === 'lister' && i.filtered));
+  const release = async (id: string) => {
+    setBusy(id); setNote(null);
+    try { await inboxAi.unfilter(id); setNote({ text: 'Moved to your inbox. We’ve emailed it to you as well.', ok: true }); await load(); }
+    catch (e) { setNote({ text: e instanceof ApiError ? e.message : 'That didn’t work. Please try again.', ok: false }); }
+    finally { setBusy(null); }
+  };
   return (
     <AccountShell title="Inbox">
-      {items === null ? <Checking /> : items.length === 0 ? <p className="muted">No messages yet. Viewing requests and questions about your listings, and replies to your enquiries, appear here.</p> :
-        <ul className="clean inbox">{items.map((e) => (
-          <li key={e.id}><Link to={`/account/inbox/${e.id}`} className="card inbox-row">
-            <div className="row between"><b>{e.role === 'lister' ? e.name : e.listing.title}</b>{e.status === 'new' && e.role === 'lister' && <span className="status-pill s-pending">New</span>}</div>
-            <span className="small muted">{e.kind === 'viewing' ? 'Viewing request' : e.kind === 'offer' ? 'Offer' : 'Question'} · {e.listing.title}{e.preferredSlot ? ` · ${e.preferredSlot}` : ''}</span>
-            {e.lastMessage && <span className="small">{e.lastMessage.author === (e.role === 'lister' ? 'lister' : 'enquirer') ? 'You: ' : ''}{e.lastMessage.body.slice(0, 140)}</span>}
-            <span className="xs muted">{new Date(e.lastMessage?.at ?? e.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</span>
-          </Link></li>
-        ))}</ul>}
+      {items === null ? <Checking /> : <>
+        {shown.length === 0 ? <p className="muted">No messages yet. Viewing requests and questions about your listings, and replies to your enquiries, appear here.</p> :
+          <ul className="clean inbox">{shown.map((e) => (
+            <li key={e.id}><Link to={`/account/inbox/${e.id}`} className="card inbox-row">
+              <div className="row between"><b>{e.role === 'lister' ? e.name : e.listing.title}</b>{e.status === 'new' && e.role === 'lister' && <span className="status-pill s-pending">New</span>}</div>
+              <span className="small muted">{kindLabel(e.kind)} · {e.listing.title}{e.preferredSlot ? ` · ${e.preferredSlot}` : ''}</span>
+              {e.role === 'lister' && triage[e.id] && <TriageChips t={triage[e.id]} />}
+              {e.lastMessage && <span className="small">{e.lastMessage.author === (e.role === 'lister' ? 'lister' : 'enquirer') ? 'You: ' : ''}{e.lastMessage.body.slice(0, 140)}</span>}
+              <span className="xs muted">{when(e.lastMessage?.at ?? e.createdAt)}</span>
+            </Link></li>
+          ))}</ul>}
+        <div role="status" aria-live="polite" className={`small ${note?.ok ? 'ok-text' : 'field-error'}`}>{note?.text}</div>
+        {held.length > 0 && <FilteredSection items={held} busy={busy} onRelease={release} />}
+      </>}
     </AccountShell>
+  );
+}
+
+function FilteredSection({ items, busy, onRelease }: { items: EnquirySummaryDTO[]; busy: string | null; onRelease: (id: string) => Promise<void> }) {
+  return (
+    <details className="card inbox-filtered">
+      <summary><span>Filtered ({items.length})</span><span className="xs muted">Held back as likely spam or scams</span></summary>
+      <div className="inbox-filtered-body">
+        <p className="small muted" style={{ margin: 0 }}>Streetkey’s automatic check held these back and didn’t email them to you. If one is genuine, choose “Not spam”: it moves to your inbox and we email it to you. Never send money or bank details to someone you haven’t met.</p>
+        <ul className="clean stack">{items.map((e) => (
+          <li key={e.id} className="inbox-filtered-row">
+            <div className="stack" style={{ gap: 4, minWidth: 0 }}>
+              <Link to={`/account/inbox/${e.id}`}><b>{e.name}</b> · {kindLabel(e.kind)} · {e.listing.title}</Link>
+              {e.filterReason && <span className="reason">{e.filterReason}</span>}
+              {e.lastMessage && <span className="snippet">“{e.lastMessage.body.slice(0, 160)}{e.lastMessage.body.length > 160 ? '…' : ''}”</span>}
+              <span className="xs muted">{when(e.createdAt)}</span>
+            </div>
+            <button type="button" className="btn sm ghost" disabled={busy === e.id} aria-label={`Not spam: move the message from ${e.name} to your inbox`} onClick={() => void onRelease(e.id)}>{busy === e.id ? 'Moving…' : 'Not spam'}</button>
+          </li>
+        ))}</ul>
+      </div>
+    </details>
+  );
+}
+
+/** Pick one option (a row of toggle buttons with a visible group label). */
+function ToggleGroup<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+  return (
+    <fieldset>
+      <legend>{label}</legend>
+      <div className="seg">{options.map((o) => <button key={o.value} type="button" className={o.value === value ? 'on' : ''} aria-pressed={o.value === value} onClick={() => onChange(o.value)}>{o.label}</button>)}</div>
+    </fieldset>
+  );
+}
+
+/** "Suggest a reply": fills the reply box with an editable draft. Never sends anything. */
+function ReplyAssist({ id, kind, triage, onDraft }: { id: string; kind: string; triage: Triage | null; onDraft: (s: SuggestedReply) => boolean }) {
+  const ai = useAi();
+  const [intent, setIntent] = useState<ReplyIntent>(() => defaultIntent(kind, triage));
+  const [chosen, setChosen] = useState(false);
+  const [tone, setTone] = useState<ReplyTone>('friendly');
+  const [notes, setNotes] = useState('');
+  const [said, setSaid] = useState('');
+  const draft = useAiAction((b: { intent: ReplyIntent; tone: ReplyTone; notes?: string }) => inboxAi.suggestReply(id, b));
+  useEffect(() => { if (!chosen) setIntent(defaultIntent(kind, triage)); }, [kind, triage, chosen]);
+  if (!ai.available) return ai.reason === 'checking' ? null : <p className="xs muted" style={{ margin: 0 }}>{ai.reason === 'offline' ? 'Reply suggestions run on the live Streetkey site.' : 'Reply suggestions aren’t switched on right now.'} You can write your reply as normal.</p>;
+  const go = async () => {
+    setSaid('');
+    const r = await draft.run({ intent, tone, notes: notes.trim() || undefined });
+    if (r && onDraft(r)) setSaid('A suggested reply is in the reply box. Check and edit it before sending.');
+  };
+  return (
+    <section className="reply-assist" aria-labelledby={`assist-${id}`}>
+      <div className="reply-assist-h"><AiLabel /><h3 id={`assist-${id}`} className="insights-h">Suggest a reply</h3></div>
+      <ToggleGroup label="What should the reply do?" value={intent} options={REPLY_INTENTS} onChange={(v) => { setIntent(v); setChosen(true); }} />
+      <ToggleGroup label="Tone" value={tone} options={REPLY_TONES} onChange={setTone} />
+      <Field label="Anything to include? (optional)" hint="For example times you can do, or answers to their questions. Your full address is only used if you type it here.">
+        <textarea className="input" rows={2} maxLength={800} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </Field>
+      <div className="row">
+        <AiButton kind="ghost" busy={draft.busy} onClick={() => void go()}>Suggest a reply</AiButton>
+        <span className="xs muted">Fills the reply box for you to edit. Nothing is sent until you press Send.</span>
+      </div>
+      {draft.busy && <AiThinking label="Drafting a reply" />}
+      <AiErrorNote error={draft.error} onRetry={() => void go()} />
+      <p className="sr-only" role="status" aria-live="polite">{said}</p>
+    </section>
+  );
+}
+
+/** The AI's reading of an enquiry, beside the conversation (lister only). */
+function ThreadTriage({ res }: { res: TriageResponse | null }) {
+  const ai = useAi();
+  if (!ai.available || !res || res.filtered) return null;
+  if (res.status === 'pending') return <AiCard title="Enquiry summary" tone="quiet"><AiThinking label="Summarising this enquiry" /></AiCard>;
+  if (!res.triage) return null;
+  const t = res.triage;
+  return (
+    <AiCard title="Enquiry summary" footer={<AiDisclaimer>An AI summary of what they wrote. Check the messages before relying on it.</AiDisclaimer>}>
+      {t.summary && <p className="small" style={{ margin: 0 }}>{t.summary}</p>}
+      <TriageChips t={t} label={false} />
+      {t.questions.length > 0 && <><p className="insights-sub">They asked</p><ul className="insights-working small">{t.questions.map((x) => <li key={x}>{x}</li>)}</ul></>}
+    </AiCard>
   );
 }
 
@@ -260,28 +439,78 @@ function ThreadInner() {
   const { id = '' } = useParams();
   const [t, setT] = useState<Awaited<ReturnType<typeof api.enquiries.get>> | null>(null);
   const [body, setBody] = useState('');
+  const [suggested, setSuggested] = useState<SuggestedReply | null>(null);
+  const [tri, setTri] = useState<TriageResponse | null>(null);
+  const [released, setReleased] = useState<{ text: string; ok: boolean } | null>(null);
+  const replyRef = useRef<HTMLTextAreaElement>(null);
   const form = useForm();
   const load = () => api.enquiries.get(id).then(setT).catch(() => setT(null));
   useEffect(() => { void load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const isLister = t?.role === 'lister';
+  // Lister only: the AI triage and whether the screen held this message back (polls briefly while a triage is prepared).
+  useEffect(() => {
+    if (!isLister) return;
+    let live = true, tries = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const fetchIt = () => inboxAi.triage(id).then((r) => {
+      if (!live) return;
+      setTri(r);
+      if (r.status === 'pending' && tries++ < 5) timer = setTimeout(fetchIt, 3000);
+    }).catch(() => { /* optional */ });
+    void fetchIt();
+    return () => { live = false; if (timer) clearTimeout(timer); };
+  }, [id, isLister]);
   if (!t) return <AccountShell title="Conversation"><Checking /></AccountShell>;
   const mine = (m: MessageDTO) => m.author === t.role;
+  const left = unfilled(body, suggested?.placeholders ?? []);
+  const applyDraft = (s: SuggestedReply) => {
+    if (body.trim() && body.trim() !== s.reply.trim() && !confirm('Replace what you’ve written with the suggested reply?')) return false;
+    setBody(s.reply); setSuggested(s);
+    requestAnimationFrame(() => replyRef.current?.focus());
+    return true;
+  };
+  const send = (e: FormEvent) => {
+    e.preventDefault();
+    if (left.length && !confirm(`Your reply still contains ${left.join(', ')}. Send it anyway?`)) return;
+    void form.run(async () => { await api.enquiries.reply(id, body); setBody(''); setSuggested(null); await load(); });
+  };
+  const release = async () => {
+    try { await inboxAi.unfilter(id); setReleased({ text: 'Moved to your inbox and emailed to you.', ok: true }); setTri(await inboxAi.triage(id).catch(() => null)); }
+    catch (e) { setReleased({ text: e instanceof ApiError ? e.message : 'That didn’t work. Please try again.', ok: false }); }
+  };
   return (
-    <AccountShell title={t.listing.title} kicker={t.kind === 'viewing' ? 'Viewing request' : t.kind === 'offer' ? 'Offer' : 'Question'}>
+    <AccountShell title={t.listing.title} kicker={kindLabel(t.kind)}>
       <div className="split-r">
         <div className="card stack">
-          <ol className="clean thread">{t.messages.map((m) => <li key={m.id} className={mine(m) ? 'me' : 'them'}><div className="bubble">{m.body}</div><span className="xs muted">{mine(m) ? 'You' : t.role === 'lister' ? t.contact.name : 'Seller / agent'} · {new Date(m.at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</span></li>)}</ol>
-          <form className="stack" onSubmit={(e) => { e.preventDefault(); void form.run(async () => { await api.enquiries.reply(id, body); setBody(''); await load(); }); }}>
+          {isLister && tri?.filtered && (
+            <div className="callout inbox-held">
+              <span><b>Held back as possible spam.</b> {tri.filterReason ?? ''} It wasn’t emailed to you. Never send money or bank details to someone you haven’t met.</span>
+              <button type="button" className="btn sm ghost" onClick={() => void release()}>Not spam</button>
+            </div>
+          )}
+          <div role="status" aria-live="polite" className={`small ${released?.ok ? 'ok-text' : 'field-error'}`}>{released?.text}</div>
+          <ol className="clean thread">{t.messages.map((m) => <li key={m.id} className={mine(m) ? 'me' : 'them'}><div className="bubble">{m.body}</div><span className="xs muted">{mine(m) ? 'You' : t.role === 'lister' ? t.contact.name : 'Seller / agent'} · {when(m.at)}</span></li>)}</ol>
+          {isLister && t.status !== 'closed' && <ReplyAssist id={id} kind={t.kind} triage={tri?.triage ?? null} onDraft={applyDraft} />}
+          <form className="stack" onSubmit={send}>
             <ErrorBox error={form.error} />
-            <Field label="Reply"><textarea className="input" rows={3} value={body} onChange={(e) => setBody(e.target.value)} required /></Field>
+            <Field label="Reply"><textarea ref={replyRef} className="input" rows={suggested ? 8 : 3} value={body} onChange={(e) => setBody(e.target.value)} required /></Field>
+            {suggested && body.trim() && <>
+              {left.length > 0 && <p className="reply-fill" style={{ margin: 0 }}>Fill in before sending: {left.map((p, i) => <span key={p}>{i > 0 && ', '}<code>{p}</code></span>)}</p>}
+              {suggested.warnings.length > 0 && <div className="callout small"><b>Check before sending</b><ul className="reply-warnings">{suggested.warnings.map((w) => <li key={w}>{w}</li>)}</ul></div>}
+              <AiDisclaimer>Suggested by AI from your listing and this conversation. You’re responsible for what you send: check facts, times and prices first.</AiDisclaimer>
+            </>}
             <div className="row"><button className="btn accent" disabled={form.busy || !body.trim()}>Send</button>{t.role === 'lister' && t.status !== 'closed' && <button type="button" className="btn ghost" onClick={() => void api.enquiries.setStatus(id, 'closed').then(load)}>Mark as done</button>}</div>
             <p className="xs muted">We email the other person when you reply. Never send money or bank details through messages.</p>
           </form>
         </div>
-        <div className="card stack">
-          <Link to={`/property/${t.listing.ref}`}><b>{t.listing.title}</b></Link>
-          <span className="num">{t.listing.channel === 'rent' ? `${gbp(t.listing.price)} pcm` : gbp(t.listing.price)}</span>
-          {t.preferredSlot && <span className="small">Preferred time: <b>{t.preferredSlot}</b></span>}
-          {t.role === 'lister' && <><span className="small">{t.contact.name}</span>{t.contact.email && <a className="small" href={`mailto:${t.contact.email}`}>{t.contact.email}</a>}{t.contact.phone && <a className="small" href={`tel:${t.contact.phone.replace(/\s/g, '')}`}>{t.contact.phone}</a>}</>}
+        <div className="stack">
+          <div className="card stack">
+            <Link to={`/property/${t.listing.ref}`}><b>{t.listing.title}</b></Link>
+            <span className="num">{t.listing.channel === 'rent' ? `${gbp(t.listing.price)} pcm` : gbp(t.listing.price)}</span>
+            {t.preferredSlot && <span className="small">Preferred time: <b>{t.preferredSlot}</b></span>}
+            {t.role === 'lister' && <><span className="small">{t.contact.name}</span>{t.contact.email && <a className="small" href={`mailto:${t.contact.email}`}>{t.contact.email}</a>}{t.contact.phone && <a className="small" href={`tel:${t.contact.phone.replace(/\s/g, '')}`}>{t.contact.phone}</a>}</>}
+          </div>
+          {isLister && <ThreadTriage res={tri} />}
         </div>
       </div>
     </AccountShell>

@@ -7,6 +7,7 @@ import { rentalScenario, valuationScenario } from '../engine/valuation';
 import { getConsent, recentEvents, setConsent, track } from '../engine/tracking';
 import { propertySkills } from '../ai/skills';
 import { AssistantPanel } from '../components/Assistant';
+import { SimilarHomes } from '../components/ai/SimilarHomes';
 import { gbp, gbpK, HouseArt, Section, Stat, Tag } from '../components/ui';
 import { useStore } from '../store';
 import { api, ApiError } from '../lib/api';
@@ -191,6 +192,8 @@ function PropertyDetailsInner({ id }: { id: string }) {
           </Section>
 
           <AssistantPanel title="Ask about this property" kicker="Property AI" skills={propertySkills} ctx={p} onAnswer={(skill) => track('ai_question', p.id, { topic: skill })} />
+
+          <SimilarHomes property={p} />
         </div>
 
         <div className="stack sticky" style={{ gap: 16 }}>

@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { suggest, type Suggestion } from '../engine/suggest';
 import { useStore } from '../store';
+import { useAi } from '../lib/ai/core';
+import { AiLabel } from './ai/Ai';
 import { Icon } from './Icons';
+import './ai/search.css';
 
 export type Mode = 'buy' | 'rent' | 'sold' | 'commercial' | 'invest';
 export const MODES: { id: Mode; label: string; placeholder: string }[] = [
@@ -12,6 +15,14 @@ export const MODES: { id: Mode; label: string; placeholder: string }[] = [
   { id: 'commercial', label: 'Commercial', placeholder: 'Area or type of space' },
   { id: 'invest', label: 'Invest', placeholder: 'Area, budget or strategy' },
 ];
+
+/** Example prompts shown when AI search is available and there's nothing typed or recent. */
+const AI_EXAMPLES: Partial<Record<Mode, string[]>> = {
+  buy: ['3 bed house with a garden near good schools under £450k', 'Victorian terrace that needs work, with loft potential', 'Flat near a station in Bristol with a balcony'],
+  rent: ['2 bed flat to rent near a station under £1,500 pcm', 'House to rent in Bristol with a garden', 'Studio or 1 bed to rent in Manchester'],
+  commercial: ['Office near London with Class MA conversion potential', 'Retail unit in Watford', 'Commercial space to convert into flats'],
+  invest: ['HMO in Manchester with at least 7% yield', 'Buy-to-let under £200k with strong rental demand', 'Refurb project with £50k profit potential'],
+};
 
 /** Where a query should go for each mode. */
 export function destination(mode: Mode, q: string) {
@@ -27,6 +38,7 @@ export function SmartSearch({ autoFocus, onDone, compact }: { autoFocus?: boolea
   const [hi, setHi] = useState(-1);
   const nav = useNavigate();
   const { recent, addRecent } = useStore();
+  const ai = useAi();
   const ref = useRef<HTMLInputElement>(null);
   const items = useMemo(() => suggest(text), [text]);
   useEffect(() => { if (autoFocus) ref.current?.focus(); }, [autoFocus]);
@@ -38,7 +50,9 @@ export function SmartSearch({ autoFocus, onDone, compact }: { autoFocus?: boolea
     nav(destination(md, q.trim()));
   };
   const pick = (s: Suggestion) => (s.kind === 'listing' ? (setOpen(false), onDone?.(), nav(`/property/${s.id}`)) : go(s.query));
-  const list: (Suggestion | { kind: 'recent'; label: string; mode: Mode })[] = text ? items : recent.slice(0, 4).map((r) => ({ kind: 'recent' as const, label: r.q, mode: (r.mode as Mode) || 'buy' }));
+  const recents = recent.slice(0, 4).map((r) => ({ kind: 'recent' as const, label: r.q, mode: (r.mode as Mode) || 'buy' }));
+  const examples: Suggestion[] = ai.available && !recents.length ? (AI_EXAMPLES[mode] ?? []).map((e) => ({ kind: 'ai' as const, label: e, sub: 'Example: Streetkey AI turns your words into filters', query: e })) : [];
+  const list: (Suggestion | { kind: 'recent'; label: string; mode: Mode })[] = text ? items : recents.length ? recents : examples;
 
   return (
     <div className="smart">
@@ -54,7 +68,7 @@ export function SmartSearch({ autoFocus, onDone, compact }: { autoFocus?: boolea
         <button type="submit" className="smart-go" aria-label="Search">Search</button>
         {open && list.length > 0 && (
           <ul className="suggest" role="listbox">
-            {!text && <li className="suggest-head">Recent searches</li>}
+            {!text && <li className="suggest-head">{recents.length ? 'Recent searches' : 'Try asking'}</li>}
             {list.map((s, i) => (
               <li key={i} role="option" aria-selected={hi === i} className={hi === i ? 'hi' : ''} onMouseDown={(e) => { e.preventDefault(); if (s.kind === 'recent') go(s.label, s.mode); else pick(s); }}>
                 <span className={`suggest-ic ${s.kind}`}><Icon name={s.kind === 'ai' ? 'spark' : s.kind === 'place' ? 'pin' : s.kind === 'listing' ? 'home' : 'clock'} size={18} /></span>
@@ -64,7 +78,9 @@ export function SmartSearch({ autoFocus, onDone, compact }: { autoFocus?: boolea
           </ul>
         )}
       </form>
-      <p className="smart-hint">Type a place — or just describe what you want, e.g. “3 bed with a garden under £450k near a station”.</p>
+      {ai.available
+        ? <p className="smart-hint aisr-hint"><AiLabel>AI search</AiLabel><span>Describe it in your own words, e.g. “3 bed with a garden under £450k near a station”, and Streetkey AI turns it into filters.</span></p>
+        : <p className="smart-hint">Type a place — or just describe what you want, e.g. “3 bed with a garden under £450k near a station”.</p>}
       {!compact && <div className="quick-chips">
         {(mode === 'rent' ? ['1 bed', '2 bed', 'Pets', 'Under £1,500 pcm', 'Near a station'] : mode === 'invest' ? ['7% yield', 'HMO', 'BRRR', 'Needs work', 'Auction'] : mode === 'commercial' ? ['Office', 'Class MA conversion', 'Retail', 'Near London'] : ['Under £350k', '3+ beds', 'Garden', 'Needs work', 'Loft potential', 'Near a station']).map((c) => (
           <button key={c} type="button" className="chip" onClick={() => { const n = text ? `${text} ${c.toLowerCase()}` : c; setText(n); ref.current?.focus(); setOpen(true); }}>+ {c}</button>

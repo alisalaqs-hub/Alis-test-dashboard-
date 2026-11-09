@@ -1,0 +1,44 @@
+/* AI trust & safety (admin review queue) and the AI operations overview. Uses Streetkey tokens only. */
+.trust-panel { border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.trust-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.trust-head .ai-risk { min-height: 24px; }
+.trust-score { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.trust-meta { font-size: 12px; color: var(--muted); }
+.trust-summary { margin: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.trust-stale { margin: 0; font-size: 13px; border-left: 3px solid var(--gold); background: var(--gold-soft); color: var(--ink); padding: 6px 10px; border-radius: 0 8px 8px 0; }
+.trust-flags { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.trust-flag { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 0 10px 10px 0; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.trust-flag.sev-high { border-left-color: var(--danger); }
+.trust-flag.sev-medium { border-left-color: var(--gold); }
+.trust-flag.sev-low { border-left-color: var(--sage); }
+.trust-flag-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; font-size: 13.5px; }
+.trust-sev { font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+.trust-flag.sev-high .trust-sev { color: var(--danger); }
+.trust-flag.sev-medium .trust-sev { color: var(--gold); }
+.trust-flag.sev-low .trust-sev { color: var(--sage); }
+.trust-src { font-size: 11.5px; color: var(--muted); }
+.trust-detail { margin: 0; font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.trust-ev { margin: 0; font-size: 12.5px; color: var(--ink-2); background: var(--surface-2); border-radius: 6px; padding: 4px 8px; overflow-wrap: anywhere; }
+.trust-ev b { font-weight: 700; color: var(--muted); margin-right: 4px; }
+.trust-ev.none { font-style: italic; color: var(--muted); }
+.trust-rules { color: var(--muted); font-style: italic; }
+.trust-cover { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.trust-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.trust-decide { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.trust-decide textarea.input { min-height: 72px; resize: vertical; line-height: 1.45; }
+.trust-decide label { font-size: 13px; font-weight: 600; }
+.trust-note { margin: 0; font-size: 13px; color: var(--muted); }
+.trust-done { margin: 0; font-size: 13px; color: var(--sage); font-weight: 600; }
+
+/* AI operations tab */
+.aiops-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.aiops-kpi { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--surface); }
+.aiops-kpi .num { font-size: 24px; display: block; margin-top: 4px; }
+.aiops-kpi .sub { font-size: 12px; color: var(--muted); }
+.aiops-bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin-top: 8px; }
+.aiops-bar i { display: block; height: 100%; background: var(--ai); border-radius: inherit; }
+.aiops-bar.warn i { background: var(--danger); }
+.aiops-code { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) {
+  .trust-panel { padding: 10px; }
+}

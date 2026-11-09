@@ -54,3 +54,7 @@ export const isPrivateSeller = (sourceKind: string) => sourceKind === 'owner' ||
 
 export const clip = (s: unknown, max: number) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 export const normaliseText = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+/** Data minimisation: contact details in messages aren't needed to summarise or draft a reply. */
+export const redactContacts = (s: string) => s
+  .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]')
+  .replace(/(?<![\w£])(?:\+44\s?|0)(?:\d[\s-]?){8,9}\d(?!\d)/g, '[phone]');

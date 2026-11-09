@@ -3,13 +3,17 @@
  * listings, so figures come from the database rather than from the browser.
  *
  * Per listing: views (last 30 days and the 30 before), saves, enquiries (last 30 days, total,
- * unanswered), days live, photos, price changes, and the asking price against the indicative
- * area range Streetkey shows listers (areaEvidence from the shared listings engine, the same
- * formula as the listing form's price check).
+ * unanswered), days live, photos and price changes made on Streetkey.
+ *
+ * Deliberately left out:
+ *  - Price evidence. Streetkey's area figures (areaEvidence) come from its fictional
+ *    demonstration homes, so they must never be used to judge a real asking price.
+ *  - Price history for agent-feed listings: feed uploads change the price without an audit
+ *    entry, so priceChanges is null (unknown) for them rather than a misleading 0.
+ *  - House and flat numbers: labels use the street, as the public listing does for private sellers.
  */
-import { areaEvidence } from '../../../../src/engine/listings';
 import { q } from '../../db';
-import { LISTING_SELECT, type ListingRow } from '../../services/listings';
+import { LISTING_SELECT, streetOnly, type ListingRow } from '../../services/listings';
 import { orgIdsFor } from '../../routes/listings';
 import { forbidden } from '../../services/http';
 import { clip, LIMITS, Snapshot, type SnapshotT } from './snapshot';
@@ -17,21 +21,6 @@ import { clip, LIMITS, Snapshot, type SnapshotT } from './snapshot';
 interface Row extends ListingRow {
   views_30d: number; views_prev_30d: number; saves: number; enquiries_30d: number; enquiries_total: number; new_enquiries: number;
   photos: number; price_changes: number; previous_price: number | null; days_live: number;
-}
-
-const COND_ADJ: Record<string, number> = { good: 0.97, fair: 0.9, poor: 0.8, derelict: 0.68 };
-
-/** Indicative area range for a listing (same method as the listing form's price check). */
-export function areaRange(r: Pick<ListingRow, 'postcode' | 'channel' | 'floor_area' | 'condition'>) {
-  let ev: ReturnType<typeof areaEvidence> = null;
-  try { ev = areaEvidence(r.postcode); } catch { ev = null; }
-  if (!ev) return null;
-  const area = Number(r.floor_area);
-  if (r.channel === 'rent') {
-    return { low: Math.round((ev.rentPerM2 * area * 0.92) / 25) * 25, high: Math.round((ev.rentPerM2 * area * 1.08) / 25) * 25, scope: ev.scope, n: ev.n };
-  }
-  const adj = COND_ADJ[r.condition ?? 'fair'] ?? 0.9;
-  return { low: Math.round((ev.refurbishedPerM2 * area * adj * 0.92) / 1000) * 1000, high: Math.round((ev.refurbishedPerM2 * area * adj * 1.08) / 1000) * 1000, scope: ev.scope, n: ev.n };
 }
 
 /** The agencies (organisations of kind 'agency') this person belongs to. */
@@ -72,28 +61,27 @@ export async function agencySnapshot(userId: string): Promise<{ snapshot: Snapsh
                 FROM enquiries WHERE NOT filtered AND listing_id IN (SELECT id FROM mine) GROUP BY listing_id) e ON e.listing_id = m.id
      LEFT JOIN (SELECT listing_id, count(*) n FROM listing_photos WHERE listing_id IN (SELECT id FROM mine) GROUP BY listing_id) ph ON ph.listing_id = m.id
      LEFT JOIN LATERAL (
-       SELECT count(*) n, (array_agg((detail->>'priceFrom')::numeric ORDER BY at DESC))[1] AS previous_price
+       SELECT count(*) n,
+              (array_agg(CASE WHEN detail->>'priceFrom' ~ '^[0-9]+(\.[0-9]+)?$' THEN (detail->>'priceFrom')::numeric END ORDER BY at DESC))[1] AS previous_price
          FROM audit_log WHERE action = 'listing.updated' AND subject = 'listing:' || m.ref AND detail ? 'priceTo'
      ) pc ON true
      ORDER BY coalesce(m.published_at, m.created_at) DESC`, [orgIds]);
 
   const items = rows.map((r) => {
-    const range = areaRange(r);
-    const price = Number(r.price);
-    const position = range ? (price > range.high ? 'above area range' : price < range.low ? 'below area range' : 'within area range') : 'no area evidence';
+    const fromFeed = r.source_kind === 'agent-feed';
     const notes: string[] = [];
-    if (range) notes.push(clip(`Area range from ${range.n} demonstration comparable${range.n === 1 ? '' : 's'} in ${range.scope}`, 200));
     if (r.status === 'under_offer') notes.push('Under offer');
+    if (fromFeed) notes.push('Managed by the agent feed: price changes sent through the feed aren’t recorded, so price history is unknown.');
     return {
       id: r.ref,
-      label: clip(`${r.title || `${r.beds}-bed ${r.property_type}`}, ${r.address_line}, ${r.town}`, 120),
+      label: clip([r.title || `${r.beds}-bed ${r.property_type}`, streetOnly(r.address_line), r.town].filter(Boolean).join(', '), 120),
       group: r.channel === 'rent' ? 'to let' : 'for sale',
       fields: {
-        price, priceBasis: r.channel === 'rent' ? 'pcm' : clip(r.price_qualifier || 'asking', 30), property: clip(`${r.beds}-bed ${r.property_type}`, 60),
+        price: Number(r.price), priceBasis: r.channel === 'rent' ? 'pcm' : clip(r.price_qualifier || 'asking', 30), property: clip(`${r.beds}-bed ${r.property_type}`, 60),
         daysLive: r.days_live, views30d: r.views_30d, viewsPrior30d: r.views_prev_30d, saves: r.saves,
         enquiries30d: r.enquiries_30d, enquiriesTotal: r.enquiries_total, unansweredEnquiries: r.new_enquiries, photos: r.photos,
-        priceChanges: r.price_changes, previousPrice: r.previous_price == null ? null : Number(r.previous_price),
-        areaRangeLow: range?.low ?? null, areaRangeHigh: range?.high ?? null, priceVsArea: position,
+        priceChanges: fromFeed ? null : r.price_changes,
+        previousPrice: fromFeed || r.previous_price == null ? null : Number(r.previous_price),
       },
       notes,
     };
@@ -114,8 +102,13 @@ export async function agencySnapshot(userId: string): Promise<{ snapshot: Snapsh
   };
   // Stay inside the snapshot size limit: drop the oldest listings first and say so.
   let kept = items;
-  while (kept.length > 1 && JSON.stringify({ ...base, items: kept }).length > LIMITS.chars - 400) kept = kept.slice(0, -1);
-  const notes = kept.length < rows.length || rows.length >= LIMITS.items ? [`Covers the ${kept.length} most recently published listings.`] : [];
+  // (900 characters are left for the notes below.)
+  while (kept.length > 1 && JSON.stringify({ ...base, items: kept }).length > LIMITS.chars - 900) kept = kept.slice(0, -1);
+  const notes = [
+    'No price evidence is included: Streetkey holds no sold prices or comparables for these listings, so the snapshot can’t show whether a price is high or low.',
+    'priceChanges counts price edits made on Streetkey; it is null where history isn’t recorded (agent-feed listings).',
+    ...(kept.length < rows.length || rows.length >= LIMITS.items ? [`Covers the ${kept.length} most recently published listings.`] : []),
+  ];
   const snapshot = Snapshot.parse({ ...base, items: kept, notes });
   return { snapshot, orgIds, empty: rows.length === 0 };
 }

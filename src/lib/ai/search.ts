@@ -14,8 +14,8 @@ import type { Property } from '../../data/properties';
 /* ───────────────────────── API shapes ───────────────────────── */
 
 /** The search box modes (SmartSearch tabs). */
-export type SearchMode = 'buy' | 'rent' | 'sold' | 'commercial' | 'invest';
-export const SEARCH_MODES: readonly SearchMode[] = ['buy', 'rent', 'sold', 'commercial', 'invest'];
+export const SEARCH_MODES = ['buy', 'rent', 'sold', 'commercial', 'invest'] as const;
+export type SearchMode = typeof SEARCH_MODES[number];
 
 /** Things people asked for that the engine can't filter on yet; the website applies the numeric ones itself. */
 export interface SearchExtras { minPrice: number | null; maxBeds: number | null; mustHaves: string[] }
@@ -75,13 +75,43 @@ export const isLiveRef = (id: string) => /^sk-[a-z0-9]{7}$/.test(id);
 export const MAX_QUERY_CHARS = 300;
 
 export const POLICY_NOTE = 'Streetkey doesn’t search or rank areas by who lives there. You can search by home, budget, commute, schools and more.';
+/**
+ * Words for groups of people by a protected characteristic (race, ethnicity, nationality,
+ * religion, sexual orientation, gender reassignment, age, disability).
+ * STRONG words rarely describe a home, so model-written text containing them is never echoed back.
+ * SOFT words also describe homes ("white kitchen", "old windows", "disabled access"), so they
+ * only count when they describe people ("white residents", "young families").
+ */
+const GROUPS_STRONG = [
+  'asians?', 'polish', 'indians?', 'pakistanis?', 'bangladeshis?', 'somalis?', 'nigerians?', 'ghanaians?', 'eritreans?', 'ethiopians?', 'kenyans?',
+  'africans?', 'caribbeans?', 'jamaicans?', 'chinese', 'koreans?', 'vietnamese', 'filipinos?', 'arabs?', 'turkish', 'turks', 'kurdish', 'kurds',
+  'iranians?', 'afghans?', 'syrians?', 'iraqis?', 'romanians?', 'bulgarians?', 'lithuanians?', 'latvians?', 'slovaks?', 'hungarians?', 'albanians?',
+  'ukrainians?', 'portuguese', 'brazilians?', 'gypsy', 'gypsies', 'roma', 'jews', 'jewish', 'muslims?', 'islamic', 'christians?', 'hindus?', 'sikhs?',
+  'catholics?', 'protestants?', 'buddhists?', 'mormons?', 'immigrants?', 'migrants?', 'foreigners?', 'refugees?', 'asylum seekers?',
+  'lgbt\\w*', 'gays?', 'lesbians?', 'queer', 'bisexuals?', 'transgender', 'elderly', 'pensioners?', 'retirees?',
+];
+const GROUPS_SOFT = [
+  'black', 'white', 'brown', 'english', 'british', 'irish', 'scottish', 'welsh', 'european', 'eastern european', 'japanese', 'russian', 'foreign',
+  'travellers?', 'trans', 'straight', 'religious', 'secular', 'diverse', 'multicultural', 'minority', 'ethnic',
+];
+/** Age and disability words: only about people ("young families", "disabled residents"), never "my old neighbourhood". */
+const GROUPS_PERSONAL = ['old', 'older', 'young', 'younger', 'retired', 'disabled'];
+const STRONG = `(?:${GROUPS_STRONG.join('|')})`;
+const GROUP = `(?:${[...GROUPS_STRONG, ...GROUPS_SOFT].join('|')})`;
+const PERSONS = 'people|persons|folk|families|households?|residents|neighbou?rs|crowd|couples';
+const PLACES = 'areas?|community|communities|neighbou?rhoods?|enclaves?|majority|minority|population';
 /** Requests to pick areas by the people who live there (protected characteristics). Never turned into filters. */
 const DEMOGRAPHIC_RES = [
-  /\b(ethnic(ity|ally)?|racial(ly)?|race of)\b/i,
-  /\b(asian|black|white|polish|indian|pakistani|bangladeshi|african|caribbean|chinese|arab|jewish|muslim|christian|hindu|sikh|catholic|english|british|eastern european|foreign|immigrant|lgbt\w*|gay|straight|disabled|elderly|retired|old|young)\s+(area|areas|community|communities|neighbou?rhoods?|people|families|residents|majority|population|neighbou?rs|crowd)\b/i,
-  /\b(mostly|mainly|predominantly|majority|full of|lots of|area with|neighbou?rhood with|community of|no|fewer|without|avoid)\s+(asian|black|white|polish|indian|pakistani|african|caribbean|chinese|arab|jews|jewish|muslims?|christians?|hindus?|sikhs|immigrants?|foreigners?|migrants?|gay|lgbt\w*|disabled|elderly|old) ?(people|families|residents|neighbou?rs)?\b/i,
+  /\b(ethnic(ity|ities|ally)?|racial(ly)?|race of|demographics?)\b/i,
+  new RegExp(`\\b${GROUP}\\s+(?:${PERSONS}|${PLACES})\\b`, 'i'),
+  new RegExp(`\\b(?:${GROUPS_PERSONAL.join('|')})\\s+(?:${PERSONS})\\b`, 'i'),
+  new RegExp(`\\b${STRONG}[- ]friendly\\b`, 'i'),
+  new RegExp(`\\b(?:mostly|mainly|predominantly|majority|full of|lots of|area with|neighbou?rhood with|community of|no|fewer|without|avoid|away from|free of)\\s+${STRONG}\\b`, 'i'),
 ];
 export const asksForDemographics = (text: string) => DEMOGRAPHIC_RES.some((re) => re.test(text));
+/** Model-written words about who lives somewhere: never shown as a filter, chip, follow-up or "unsupported" item. */
+export const PROTECTED_RE = new RegExp(`(ethnic|\\brace\\b|racial|relig|nationalit|immigra|foreign|demograph|age profile|sexual|\\b${STRONG}\\b)`, 'i');
+export const mentionsProtected = (text: string) => PROTECTED_RE.test(text) || asksForDemographics(text);
 
 /* ───────────────────────── formatting ───────────────────────── */
 
@@ -189,7 +219,8 @@ export function withoutChips(r: Pick<IntentResult, 'query' | 'extras'>, keys: st
 /** The built-in rule-based reading of a search (used when AI is off or fails). */
 export function fromRules(text: string, mode?: SearchMode | null): IntentResult {
   const query = applyMode(parseQuery(text), mode);
-  if (query.maxPrice != null && !Number.isFinite(query.maxPrice)) delete query.maxPrice;
+  // The parser reads "up to 4 beds" as a £4 budget: anything below a plausible price is not a budget.
+  if (query.maxPrice != null && (!Number.isFinite(query.maxPrice) || query.maxPrice < (query.intent === 'rent' ? 50 : 5_000))) delete query.maxPrice;
   if (query.minRefurbProfit != null && !Number.isFinite(query.minRefurbProfit)) delete query.minRefurbProfit;
   const extras = rulesExtras(text, query);
   return {
@@ -244,14 +275,17 @@ export function structuralSimilarity(target: Property, c: Property) {
   return Math.min(1, Math.round(s * 1000) / 1000);
 }
 
-const typeWord = (t: Property['type']) => (t === 'flat' ? 'flat' : t === 'bungalow' ? 'bungalow' : t === 'commercial' ? 'commercial space' : `${t} house`);
+const typeNoun: Record<Property['type'], string> = { terraced: 'a terrace', 'semi-detached': 'a semi', detached: 'a detached house', flat: 'a flat', bungalow: 'a bungalow', commercial: 'commercial space' };
 
-/** "Also in E17 · £20k cheaper · one more bedroom": built from the facts, free and instant. */
+/**
+ * "Also in E17 · £20k cheaper · one more bedroom": how a home differs from the one being viewed,
+ * built from the facts (the card itself already shows its town, type and size). Free and instant.
+ */
 export function similarReason(target: Property, c: Property): string {
   const parts: string[] = [];
   if (c.district === target.district) parts.push(`Also in ${c.district}`);
   else if (area(c) === area(target)) parts.push(`Also in ${area(c)}`);
-  else parts.push(`In ${area(c)}`);
+  else if (city(c) === city(target)) parts.push(`Also in ${city(c)}`);
   const rent = channelOf(target) === 'rent';
   const d = c.price - target.price;
   if (Math.abs(d) < 0.03 * target.price) parts.push('similar price');
@@ -259,8 +293,8 @@ export function similarReason(target: Property, c: Property): string {
   if (c.beds !== target.beds) {
     const n = Math.abs(c.beds - target.beds);
     parts.push(`${n === 1 ? 'one' : n} ${c.beds > target.beds ? 'more' : 'fewer'} bedroom${n === 1 ? '' : 's'}`);
-  } else if (c.type !== target.type) parts.push(`${c.beds ? `${c.beds}-bed ` : ''}${typeWord(c.type)}`);
-  else parts.push(c.beds ? `also ${c.beds} beds` : `also a ${typeWord(c.type)}`);
+  } else if (c.type !== target.type) parts.push(`${typeNoun[c.type]} rather than ${typeNoun[target.type]}`);
+  else if (c.beds) parts.push(`also a ${c.beds}-bed ${typeNoun[c.type].replace(/^an? /, '')}`);
   const shared = [...tags(target)].filter((x) => tags(c).has(x) && ['garden', 'parking', 'balcony', 'garage'].includes(x));
   if (shared.length && parts.length < 4) parts.push(`${shared[0]} too`);
   return cap(parts.join(' · '));

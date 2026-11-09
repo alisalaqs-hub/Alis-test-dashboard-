@@ -1,0 +1,47 @@
+/* Streetkey AI: "Check any listing" and the design studio's AI panels. Uses the site's tokens only. */
+
+/* ── provenance under each extracted field ── */
+.sk-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sk-prov { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 11.5px; color: var(--muted); min-height: 16px; }
+.sk-prov q { font-style: italic; overflow-wrap: anywhere; quotes: '“' '”'; }
+.sk-pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; line-height: 1.5; border: 1px solid transparent; white-space: nowrap; }
+.sk-pill.stated { background: var(--sage-soft); color: var(--sage); }
+.sk-pill.inferred { background: var(--gold-soft); color: var(--gold); border-color: color-mix(in srgb, var(--gold) 35%, transparent); }
+.sk-pill.edited { background: var(--surface-2); color: var(--ink-2); }
+.sk-pill.missing { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
+.sk-legend { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+
+/* ── red flags ── */
+.sk-flags { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sk-flag { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.sk-flag.high { border-left: 4px solid var(--danger); }
+.sk-flag.medium { border-left: 4px solid var(--gold); }
+.sk-flag.low { border-left: 4px solid var(--line); }
+.sk-flag .ai-risk { grid-row: span 2; min-width: 64px; justify-content: center; }
+.sk-flag-t { font-weight: 700; font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sk-flag-d { font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+.sk-flag-q { grid-column: 2; font-size: 12px; color: var(--muted); font-style: italic; overflow-wrap: anywhere; }
+
+/* ── questions for the agent ── */
+.sk-qs { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.5; }
+
+/* ── studio: AI panels ── */
+.sk-studio-panel { display: flex; flex-direction: column; gap: 10px; }
+.sk-studio-progress { display: flex; flex-direction: column; gap: 6px; }
+.sk-studio-bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.sk-studio-bar i { display: block; height: 100%; width: 40%; border-radius: inherit; background: var(--ai); animation: sk-slide 1.6s ease-in-out infinite; }
+@keyframes sk-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) { .sk-studio-bar i { animation: none; width: 100%; opacity: 0.35; } }
+.sk-two { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 640px) { .sk-two { grid-template-columns: minmax(0, 1fr); } }
+.sk-list-h { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; }
+.sk-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; line-height: 1.45; }
+.sk-materials { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sk-materials th, .sk-materials td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.sk-materials th { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.sk-style-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
+.sk-style-suggest .chip { min-height: 32px; }
+.sk-style-suggest .chip[aria-pressed='true'] { border-color: var(--ink); background: var(--surface-2); }
+.sk-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sk-actions .btn { min-height: 36px; }
+.sk-upload:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }

@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getProperty } from '../data/properties';
 import { refurbInputFor } from '../engine/insights';
@@ -7,6 +7,11 @@ import {
   type Access, type Condition, type Era, type Estimate, type PropertyType, type RefurbInput, type Spec, type VatTreatment,
 } from '../engine/refurb';
 import { download, gbp, gbpK, Meter, Section, Seg, Stacked, Stat, Tag } from '../components/ui';
+import { Icon } from '../components/Icons';
+import { AiButton, AiCard, AiDisclaimer, AiErrorNote, AiLabel, AiText, AiThinking, AiUnavailable } from '../components/ai/Ai';
+import { aiPost, pollJob, useAi, useAiAction } from '../lib/ai/core';
+import { ACTION_LABEL, applyPhotoScope, photoDetailsKey, photoFactsFrom, type RefurbExplainResult, type RefurbPhotoFacts, type RefurbPhotosResult, type ScopeBasis } from '../lib/ai/property';
+import '../components/ai/property.css';
 
 /** Allocate measured lines to rooms: item-specific trades go to their room, area-based work is shared by room area. */
 function byRoom(e: Estimate, i: RefurbInput) {
@@ -40,10 +45,228 @@ const SURVEY_RULES: { re: RegExp; label: string; apply: (s: RefurbInput['scope']
 
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="field">{label}{children}</label>; }
 
+/* ───────────────────────── AI: estimate from photos ───────────────────────── */
+const MAX_PHOTOS = 8;
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
+/** All photos go in one upload; hosting accepts about 6 MB per request, so stay well under it. */
+const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+const PHOTO_SIDE = 1280;
+const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
+const SOURCE_LABEL: Record<ScopeBasis['source'], string> = { photos: 'From photos', assumed: 'Assumed', yours: 'Your choice' };
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * Resize in the browser before upload: faster and cheaper, keeps the whole set within the upload limit,
+ * and re-encoding drops location metadata. 1280px still shows cracks, sockets and damp staining.
+ */
+async function shrinkPhoto(file: File): Promise<File> {
+  if (typeof createImageBitmap !== 'function') return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, PHOTO_SIDE / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bmp.width * scale));
+    canvas.height = Math.max(1, Math.round(bmp.height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { bmp.close(); return file; }
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    bmp.close();
+    const encode = (q: number) => new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', q));
+    let blob = await encode(0.8);
+    if (blob && blob.size > 700 * 1024) blob = (await encode(0.65)) ?? blob; // very detailed photos
+    return blob && blob.size < file.size ? new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'photo'}.jpg`, { type: 'image/jpeg' }) : file;
+  } catch { return file; } // the browser can't decode it: the server will explain
+}
+
+function AiList({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null;
+  return <div><div className="ai-prop-h">{title}</div><ul className="ai-prop-list">{items.map((t) => <li key={t}>{t}</li>)}</ul></div>;
+}
+
+interface Picked { id: string; file: File; url: string }
+
+function PhotoEstimate({ input, onApply, onUndo }: { input: RefurbInput; onApply: (next: RefurbInput) => void; onUndo: (() => void) | null }) {
+  const { available, reason, signedIn } = useAi();
+  const [picked, setPicked] = useState<Picked[]>([]);
+  const [notes, setNotes] = useState<string[]>([]);
+  const [consent, setConsent] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [applied, setApplied] = useState(false);
+  const [sentThumbs, setSentThumbs] = useState<string[]>([]);
+  /** The property details the last analysis was worked out for. */
+  const [analysedFor, setAnalysedFor] = useState<string | null>(null);
+  const urls = useRef(new Set<string>());
+  useEffect(() => () => { for (const u of urls.current) URL.revokeObjectURL(u); }, []);
+  const job = useAiAction(async (files: File[], facts: RefurbPhotoFacts) => {
+    const form = new FormData();
+    form.append('consent', 'true');
+    form.append('facts', JSON.stringify(facts));
+    files.forEach((f, k) => form.append('photos', f, f.name || `photo-${k + 1}.jpg`));
+    const { jobId } = await aiPost<{ jobId: string }>('/api/ai/refurb/from-photos', form, 120_000);
+    return pollJob<RefurbPhotosResult>(jobId, { onProgress: (j) => setProgress(j.progress), timeoutMs: 6 * 60_000 });
+  });
+
+  const add = async (list: FileList | null) => {
+    const chosen = [...(list ?? [])];
+    if (!chosen.length) return;
+    const room = Math.max(0, MAX_PHOTOS - picked.length);
+    const issues: string[] = [];
+    if (chosen.length > room) issues.push(`You can add up to ${MAX_PHOTOS} photos, so ${chosen.length - room} ${chosen.length - room === 1 ? 'wasn’t' : 'weren’t'} added.`);
+    const next: Picked[] = [];
+    let total = picked.reduce((n, p) => n + p.file.size, 0);
+    for (const f of chosen.slice(0, room)) {
+      if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { issues.push(`${f.name}: use a JPEG, PNG or WebP photo.`); continue; }
+      const small = await shrinkPhoto(f);
+      if (small.size > MAX_PHOTO_BYTES) { issues.push(`${f.name}: too large (the limit is 2 MB per photo).`); continue; }
+      if (total + small.size > MAX_TOTAL_BYTES) { issues.push(`${f.name}: not added, as the photos would come to more than ${mb(MAX_TOTAL_BYTES)} in total. Remove a photo or use a smaller one.`); continue; }
+      total += small.size;
+      const url = URL.createObjectURL(small);
+      urls.current.add(url);
+      next.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, file: small, url });
+    }
+    setPicked((p) => [...p, ...next].slice(0, MAX_PHOTOS));
+    setNotes(issues);
+  };
+  const analyse = () => {
+    setApplied(false); setProgress(null);
+    setSentThumbs(picked.map((p) => p.url));
+    setAnalysedFor(photoDetailsKey(input));
+    void job.run(picked.map((p) => p.file), photoFactsFrom(input));
+  };
+  const r = job.data;
+  const canAnalyse = picked.length > 0 && consent;
+  const stale = !!r && analysedFor != null && analysedFor !== photoDetailsKey(input);
+
+  return (
+    <Section title="Estimate from photos" kicker="Step 4 · optional" right={<AiLabel />}>
+      <p className="small muted" style={{ marginTop: 0 }}>Add up to {MAX_PHOTOS} photos of the rooms and the outside. Streetkey AI describes what it can see and suggests a scope of works; Streetkey’s cost engine prices it, using the property details above.</p>
+      {!available || !signedIn ? <AiUnavailable reason={reason} signedOut={available && !signedIn} feature="Estimating from photos" /> : <>
+        <label className="dropzone pe-drop">
+          <input className="sr-only" type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={job.busy || picked.length >= MAX_PHOTOS}
+            onChange={(e) => { void add(e.target.files); e.target.value = ''; }} />
+          {picked.length >= MAX_PHOTOS ? `You’ve added ${MAX_PHOTOS} photos (the maximum).` : `Choose photos (JPEG, PNG or WebP). They’re resized in your browser; up to ${mb(MAX_TOTAL_BYTES)} in total.`}
+        </label>
+        {picked.length > 0 && <ul className="pe-thumbs" aria-label="Photos to analyse">{picked.map((p, k) => (
+          <li key={p.id}>
+            <img src={p.url} alt={`Photo ${k + 1}: ${p.file.name}`} />
+            <span className="pe-n" aria-hidden="true">{k + 1}</span>
+            <button type="button" className="pe-remove" aria-label={`Remove photo ${k + 1}`} disabled={job.busy} onClick={() => setPicked((x) => x.filter((y) => y.id !== p.id))}><Icon name="x" size={14} /></button>
+          </li>
+        ))}</ul>}
+        {notes.length > 0 && <ul className="ticks small" role="alert" style={{ marginTop: 8 }}>{notes.map((n) => <li key={n}>{n}</li>)}</ul>}
+        <label className="check" style={{ marginTop: 10, alignItems: 'flex-start' }}>
+          <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+          <span>I’m happy for these photos to be sent to Streetkey’s AI provider (OpenAI) for analysis. They’re deleted once analysed. Please avoid photos showing people or documents.</span>
+        </label>
+        <div className="row" style={{ marginTop: 8 }}>
+          <AiButton busy={job.busy} disabled={!picked.length || !consent} onClick={analyse}>{picked.length ? `Analyse ${picked.length} photo${picked.length === 1 ? '' : 's'}` : 'Analyse photos'}</AiButton>
+          {!consent && picked.length > 0 && <span className="xs muted">Tick the box above to continue.</span>}
+        </div>
+        {job.busy && <AiThinking label={progress ?? 'Uploading your photos'} />}
+        <AiErrorNote error={job.error} onRetry={canAnalyse ? analyse : undefined} />
+        {r && !job.busy && <PhotoResult r={r} input={input} thumbs={sentThumbs} applied={applied} stale={stale}
+          onReanalyse={canAnalyse ? analyse : null}
+          onApply={() => { onApply(r.scope); setApplied(true); }}
+          onUndo={onUndo ? () => { onUndo(); setApplied(false); } : null} />}
+      </>}
+    </Section>
+  );
+}
+
+function PhotoResult({ r, input, thumbs, applied, stale, onReanalyse, onApply, onUndo }: {
+  r: RefurbPhotosResult; input: RefurbInput; thumbs: string[]; applied: boolean; stale: boolean;
+  onReanalyse: (() => void) | null; onApply: () => void; onUndo: (() => void) | null;
+}) {
+  // Priced live by the engine: the photo scope on top of the estimator's current details and plans.
+  const est = useMemo(() => estimateRefurb(applyPhotoScope(input, r.scope)), [input, r.scope]);
+  return (
+    <div style={{ marginTop: 12 }}>
+      <AiCard title="What the AI saw" footer={<AiDisclaimer>{r.label} Not a survey, valuation or quote.</AiDisclaimer>}>
+        {stale && <div className="callout small ai-prop-stale" role="status">
+          You’ve changed the property details since these photos were analysed. The total below uses your current details, but the suggested scope was worked out for the earlier ones.
+          {onReanalyse && <> <button type="button" className="btn ghost sm" onClick={onReanalyse}>Analyse again</button></>}
+        </div>}
+        <div className="row between" style={{ alignItems: 'flex-start' }}>
+          <div>
+            <div className="num" style={{ fontSize: 26, lineHeight: 1.1 }}>{gbp(est.total)}</div>
+            <div className="xs muted">Streetkey engine estimate for this scope with your current details and plans, likely {gbp(est.low)} – {gbp(est.high)}</div>
+          </div>
+          <div className="ai-chips">
+            <span className="ai-chip">Condition <b>{r.overall.condition}</b></span>
+            <span className="ai-chip">Confidence <b>{r.overall.confidence}</b></span>
+            <span className="ai-chip"><b>{r.overall.photosUsed}</b> of {r.overall.photosSent} photos used</span>
+          </div>
+        </div>
+        <div className="row" aria-live="polite">
+          {applied
+            ? <><span className="small"><b>Scope applied.</b> The estimator now uses it: fine-tune anything above.</span>{onUndo && <button type="button" className="btn ghost sm" onClick={onUndo}>Undo</button>}</>
+            : <><button type="button" className="btn accent sm" onClick={onApply}>Apply this scope to the estimator</button><span className="xs muted">Updates the condition, bathrooms and scope of works; your property details and plans stay as they are.</span></>}
+        </div>
+        <div className="ai-prop-h">Photo by photo</div>
+        <ul className="pe-obs">{r.observations.map((o) => (
+          <li key={o.photo} className={thumbs[o.photo - 1] ? '' : 'no-thumb'}>
+            {thumbs[o.photo - 1] && <img src={thumbs[o.photo - 1]} alt="" />}
+            <div className="small">
+              <b>Photo {o.photo}: {o.room}</b>{' '}
+              <span className="xs muted">{!o.analysed ? 'couldn’t be analysed' : !o.isProperty ? 'doesn’t show the property, ignored' : `${o.condition} condition · ${o.confidence} confidence`}</span>
+              {o.items.length > 0 && <ul>{o.items.map((it, k) => <li key={k}><b>{cap(it.element)}</b>: {it.observation} <span className={`pe-act ${it.likelyAction}`}>{ACTION_LABEL[it.likelyAction]}</span></li>)}</ul>}
+            </div>
+          </li>
+        ))}</ul>
+        <details>
+          <summary className="small" style={{ cursor: 'pointer' }}>How the scope was set ({r.basis.length} items)</summary>
+          <div className="table-wrap" tabIndex={0} role="region" aria-label="How the scope was set" style={{ marginTop: 6 }}>
+            <table className="pe-basis">
+              <thead><tr><th scope="col">Item</th><th scope="col">Priced as</th><th scope="col">Source</th></tr></thead>
+              <tbody>{r.basis.map((b) => <tr key={b.item}><td>{b.item}{b.note && <div className="xs muted">{b.note}</div>}</td><td>{b.value}</td><td><span className={`pe-src ${b.source}`}>{SOURCE_LABEL[b.source]}</span></td></tr>)}</tbody>
+            </table>
+          </div>
+        </details>
+        <AiList title="Questions for your surveyor or builder" items={r.questionsForSurveyor} />
+        <AiList title="Keep in mind" items={r.caveats} />
+      </AiCard>
+    </div>
+  );
+}
+
+/* ───────────────────────── AI: explain this estimate ───────────────────────── */
+function ExplainEstimate({ input, total }: { input: RefurbInput; total: number }) {
+  const { available, reason } = useAi();
+  const [asked, setAsked] = useState<string | null>(null);
+  const ex = useAiAction((i: RefurbInput, t: number) => aiPost<{ explanation: RefurbExplainResult }>('/api/ai/refurb/explain', { input: i, estimate: { total: t } }).then((r) => r.explanation));
+  const key = JSON.stringify(input);
+  const run = () => { setAsked(key); void ex.run(input, total); };
+  const x = ex.data;
+  if (reason === 'checking') return null;
+  if (!available) return <AiCard tone="quiet" title="Explain this estimate"><AiUnavailable reason={reason} feature="The AI explanation" /></AiCard>;
+  return (
+    <AiCard title="Explain this estimate" footer={x && !ex.busy ? <AiDisclaimer>{x.disclaimer}</AiDisclaimer> : undefined}>
+      {!x && !ex.busy && <>
+        <p className="small muted" style={{ margin: 0 }}>A plain-English walk-through of what drives this total, ways to save and what could push it up. The figures come from Streetkey’s cost engine.</p>
+        <div><AiButton onClick={run}>Explain this estimate</AiButton></div>
+      </>}
+      {ex.busy && <AiThinking label="Reading the estimate" />}
+      <AiErrorNote error={ex.error} onRetry={run} />
+      {x && !ex.busy && <>
+        {asked !== key && <div className="callout small ai-prop-stale" role="status">You’ve changed the inputs since this explanation. <button type="button" className="btn ghost sm" onClick={run}>Explain again</button></div>}
+        <AiText text={x.summary} />
+        <div className="ai-prop-cols">
+          <AiList title="Biggest costs" items={x.biggestCosts} />
+          <AiList title="Ways to save" items={x.waysToSave} />
+          <AiList title="What could push it up" items={x.risks} />
+          <AiList title="Next steps" items={x.nextSteps} />
+        </div>
+        {x.removedClaims > 0 && <p className="ai-prop-note">{x.removedClaims} statement{x.removedClaims === 1 ? ' was' : 's were'} left out because {x.removedClaims === 1 ? 'it quoted a figure' : 'they quoted figures'} not in Streetkey’s estimate.</p>}
+      </>}
+    </AiCard>
+  );
+}
+
 export default function Estimator() {
   const [params] = useSearchParams();
   const prop = getProperty(params.get('property') ?? '');
   const [input, setInput] = useState<RefurbInput>(() => (prop ? refurbInputFor(prop) : DEFAULT_INPUT));
+  const [beforeAi, setBeforeAi] = useState<RefurbInput | null>(null);
   const [view, setView] = useState<'trade' | 'room' | 'boq'>('trade');
   const [files, setFiles] = useState<{ name: string; kind: string }[]>([]);
   const [findings, setFindings] = useState<string[]>([]);
@@ -134,15 +357,18 @@ export default function Estimator() {
             </div>
             <label className="check" style={{ marginTop: 6 }}><input type="checkbox" checked={input.includeProfessionalFees} onChange={(e) => set('includeProfessionalFees', e.target.checked)} />Include professional fees (architect, engineer, building control, party wall)</label>
           </Section>
-          <Section title="Photos, plans & surveys" kicker="Step 4 · optional" right={<Tag kind="ai">Prototype extraction</Tag>}>
-            <label className="dropzone" style={{ display: 'block' }}>
-              <input type="file" multiple hidden onChange={(e) => onFiles(e.target.files)} accept="image/*,.pdf,.txt,.md,.csv" />
-              Drop photos, floor plans or a survey (.txt read in-browser)
+          <PhotoEstimate input={input}
+            onApply={(photoScope) => { setBeforeAi(input); setInput((cur) => applyPhotoScope(cur, photoScope)); }}
+            onUndo={beforeAi ? () => { setInput((cur) => applyPhotoScope(cur, beforeAi)); setBeforeAi(null); } : null} />
+          <Section title="Plans & surveys" kicker="Step 5 · optional" right={<Tag kind="neutral">Read in your browser</Tag>}>
+            <label className="dropzone pe-drop">
+              <input type="file" multiple className="sr-only" onChange={(e) => { void onFiles(e.target.files); e.target.value = ''; }} accept="image/*,.pdf,.txt,.md,.csv" />
+              Add floor plans or a survey (a .txt survey is read in your browser)
             </label>
             <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={loadSampleSurvey}>Load sample survey extract</button>
             {files.length > 0 && <ul className="clean small" style={{ marginTop: 10 }}>{files.map((f, i) => <li key={i}><Tag kind="neutral">{f.kind}</Tag> {f.name}</li>)}</ul>}
             {findings.length > 0 && <div className="callout info" style={{ marginTop: 10 }}><b>Survey interpretation</b> (scope updated — please confirm):<ul className="ticks" style={{ marginTop: 6 }}>{findings.map((f, i) => <li key={i}>{f}</li>)}</ul></div>}
-            <p className="xs muted" style={{ marginTop: 8 }}>Files stay in your browser. Production: vision + document models extract defects and room dimensions into a <i>proposed</i> scope that a human confirms before pricing.</p>
+            <p className="xs muted" style={{ marginTop: 8 }}>Files here stay in your browser: survey text is matched against simple rules and the scope is updated for you to confirm. For photos, use “Estimate from photos” above.</p>
           </Section>
         </div>
 
@@ -181,6 +407,8 @@ export default function Estimator() {
               </button>
             ))}
           </div>
+
+          <ExplainEstimate input={input} total={est.total} />
 
           <Section title="Breakdown" right={<>
             <Seg value={view} onChange={setView} options={[{ value: 'trade', label: 'By trade' }, { value: 'room', label: 'By room' }, { value: 'boq', label: 'Bill of quantities' }]} />

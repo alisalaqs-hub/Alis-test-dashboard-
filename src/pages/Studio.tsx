@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getProperty, PROPERTIES } from '../data/properties';
 import { designCost, fitBudget, parseDesignBrief, planLayout, STYLES, TIERS, type Dims, type RoomType, type Style, type Tier } from '../engine/design';
@@ -6,8 +6,13 @@ import { engagementFor } from '../engine/engagement';
 import { track } from '../engine/tracking';
 import { gbp, gbpK, Meter, Section, Seg, Tag } from '../components/ui';
 import { useStore } from '../store';
-import { api, ApiError, mediaUrl } from '../lib/api';
-import { useServer } from '../lib/server';
+import { ApiError, mediaUrl } from '../lib/api';
+import { useAi } from '../lib/ai/core';
+import { CONDITION_LABEL, describePhoto, designBrief, generateRoomImage, ROOM_IMAGE_PROGRESS, type DesignBriefResult, type RoomAnalysis } from '../lib/ai/studio';
+import { AiCard, AiDisclaimer, AiLabel, AiUnavailable } from '../components/ai/Ai';
+import '../components/ai/studio.css';
+
+const errText = (e: unknown) => (e instanceof ApiError ? e.message : 'Something went wrong. Please try again.');
 
 const PAINTS = [['Original', ''], ['Chalk white', '#f3f1ea'], ['Warm stone', '#e3d8c6'], ['Sage', '#c9d3c0'], ['Dusky blue', '#c3cdd6'], ['Clay', '#d9b8a3'], ['Deep green', '#4b5d52']] as const;
 
@@ -85,15 +90,48 @@ export default function Studio() {
   const [aiErr, setAiErr] = useState('');
   const [aiLeft, setAiLeft] = useState<number | null>(null);
   const [aiConsent, setAiConsent] = useState(false);
-  const { online, user, health } = useServer();
-  const aiOn = online && !!health?.features.aiImages;
+  const [aiProgress, setAiProgress] = useState('');
+  const [plan, setPlan] = useState<DesignBriefResult | null>(null);
+  const [briefBusy, setBriefBusy] = useState(false);
+  const [briefNote, setBriefNote] = useState('');
+  const [analysis, setAnalysis] = useState<{ analysis: RoomAnalysis; label: string } | null>(null);
+  const [analysisBusy, setAnalysisBusy] = useState(false);
+  const [analysisErr, setAnalysisErr] = useState('');
+  const aiState = useAi();
+  const aiOn = aiState.available;
+  const user = aiState.user;
+  const online = aiState.reason !== 'offline' && aiState.reason !== 'checking';
+  const jobRef = useRef<AbortController | null>(null);
+  useEffect(() => () => jobRef.current?.abort(), []);
   const generate = async () => {
     if (!photoFile) return;
-    setAiBusy(true); setAiErr('');
+    jobRef.current?.abort();
+    const ctrl = new AbortController(); jobRef.current = ctrl;
+    const styleName = style.name;
+    setAiBusy(true); setAiErr(''); setAiProgress('Uploading your photo…');
     try {
-      const r = await api.ai.roomImage(photoFile, { room, style: styleId, brief: brief.trim() || undefined, palette: [paint, style.palette.wall, style.palette.accent].filter(Boolean).join(',') });
-      setAi({ url: mediaUrl(r.image.url!), style: style.name, label: r.label }); setAiLeft(r.remainingToday); setPos(50);
-    } catch (e) { setAiErr((e as ApiError).message); } finally { setAiBusy(false); }
+      const r = await generateRoomImage(photoFile, { room, style: styleId, brief: brief.trim() || undefined, palette: [paint, style.palette.wall, style.palette.accent].filter(Boolean).join(',') }, { onProgress: setAiProgress, signal: ctrl.signal });
+      if (ctrl.signal.aborted) return;
+      setAi({ url: mediaUrl(r.image.url!), style: styleName, label: r.label }); setAiLeft(r.remainingToday); setPos(50);
+    } catch (e) {
+      if (!ctrl.signal.aborted) setAiErr(errText(e));
+    } finally {
+      if (jobRef.current === ctrl) { setAiBusy(false); setAiProgress(''); jobRef.current = null; }
+    }
+  };
+  const analyse = async () => {
+    if (!photoFile) return;
+    setAnalysisBusy(true); setAnalysisErr('');
+    try {
+      const r = await describePhoto(photoFile);
+      setAnalysis(r);
+      if (r.analysis.isRoom) {
+        if (r.analysis.room) setRoom(r.analysis.room);
+        const first = STYLES.find((x) => x.id === r.analysis.suggestedStyleIds[0]);
+        if (first) { setStyleId(first.id); setTier(r.analysis.suggestedTier); setPaint(''); }
+        setOverrides({});
+      }
+    } catch (e) { setAnalysisErr(errText(e)); } finally { setAnalysisBusy(false); }
   };
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -106,7 +144,25 @@ export default function Studio() {
 
   const pickStyle = (s: Style) => { setStyleId(s.id); setTier(s.tier); setOverrides({}); setPaint(''); track('design_style', prop.id, { style: s.name }); };
   const drag = (x: number) => { const r = ref.current?.getBoundingClientRect(); if (r) setPos(Math.max(0, Math.min(100, ((x - r.left) / r.width) * 100))); };
-  const runBrief = () => {
+  const runBrief = async () => {
+    setBriefNote('');
+    if (aiOn && brief.trim().length >= 3) {
+      setBriefBusy(true);
+      try {
+        const p = await designBrief({ text: brief.trim(), room, postcode: prop.postcode, dims, staged });
+        setRoom(p.room); setStyleId(p.styleId); setTier(p.tier); setOverrides({}); setPaint('');
+        if (p.budget != null) { setBudget(p.budget); setTab('budget'); }
+        setPlan(p); setBriefMsg(p.message); if (p.note) setBriefNote(p.note);
+        track('design_style', prop.id, { style: p.styleName });
+        return;
+      } catch (e) {
+        setBriefNote(`${errText(e)} Streetkey’s built-in brief reader was used instead.`);
+      } finally { setBriefBusy(false); }
+    }
+    runBriefRules();
+  };
+  const runBriefRules = () => {
+    setPlan(null);
     const b = parseDesignBrief(brief);
     const r = b.room ?? room; if (b.room) setRoom(b.room);
     if (b.budget) {
@@ -131,11 +187,25 @@ export default function Studio() {
 
       <div className="card ai-card">
         <div className="ask" style={{ boxShadow: 'none' }}>
-          <textarea rows={1} value={brief} onChange={(e) => setBrief(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runBrief(); } }} aria-label="Design brief" />
-          <button className="btn accent sm" onClick={runBrief}>Design it</button>
+          <textarea rows={1} value={brief} maxLength={600} onChange={(e) => setBrief(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!briefBusy) void runBrief(); } }} aria-label="Design brief: the room, a style or a budget" />
+          <button type="button" className="btn accent sm" onClick={() => void runBrief()} disabled={briefBusy} aria-busy={briefBusy || undefined}>{briefBusy ? 'Designing…' : 'Design it'}</button>
         </div>
-        <div className="chips" style={{ marginTop: 8 }}>{['Redesign this living room for £5,000', 'Modernise this rental flat bathroom for £4,000', 'Give this kitchen a luxury appearance for £8,000', 'Scandinavian bedroom for £3,500'].map((x) => <button key={x} className="chip xs" onClick={() => setBrief(x)}>{x}</button>)}</div>
-        {briefMsg && <div className="msg ai" style={{ maxWidth: '100%', marginTop: 10 }}><Tag kind="ai">Streetkey AI</Tag> {briefMsg}</div>}
+        <div className="chips" style={{ marginTop: 8 }}>{['Redesign this living room for £5,000', 'Modernise this rental flat bathroom for £4,000', 'Give this kitchen a luxury appearance for £8,000', 'Scandinavian bedroom for £3,500, keep the wooden floor'].map((x) => <button type="button" key={x} className="chip xs" onClick={() => setBrief(x)}>{x}</button>)}</div>
+        {briefBusy && <div className="ai-thinking" role="status" aria-live="polite"><span className="ai-dots" aria-hidden="true"><i /><i /><i /></span>Reading your brief…</div>}
+        {briefNote && <p className="xs muted" role="status" style={{ marginTop: 8 }}>{briefNote}</p>}
+        {briefMsg && !briefBusy && <div className="msg ai" style={{ maxWidth: '100%', marginTop: 10 }} role="status">{plan?.engine === 'ai' ? <AiLabel>Streetkey AI</AiLabel> : <Tag kind="neutral">Built-in rules</Tag>} {briefMsg}</div>}
+        {plan?.engine === 'ai' && !briefBusy && (plan.priorities.length > 0 || plan.keep.length > 0 || plan.materials.length > 0 || plan.notes) && <div className="sk-studio-panel" style={{ marginTop: 10 }}>
+          {(plan.priorities.length > 0 || plan.keep.length > 0) && <div className="sk-two">
+            {plan.priorities.length > 0 && <div><p className="sk-list-h">What matters most</p><ul className="sk-list">{plan.priorities.map((x) => <li key={x}>{x}</li>)}</ul></div>}
+            {plan.keep.length > 0 && <div><p className="sk-list-h">Keep</p><ul className="sk-list">{plan.keep.map((x) => <li key={x}>{x}</li>)}</ul></div>}
+          </div>}
+          {plan.materials.length > 0 && <div className="table-wrap" tabIndex={0} aria-label="Suggested materials"><table className="sk-materials"><caption className="sr-only">Suggested materials and why</caption>
+            <thead><tr><th scope="col">Item</th><th scope="col">Specification</th><th scope="col">Why</th></tr></thead>
+            <tbody>{plan.materials.map((m) => <tr key={`${m.item}-${m.spec}`}><td>{m.item}</td><td>{m.spec}</td><td className="muted">{m.why}</td></tr>)}</tbody></table></div>}
+          {plan.notes && <p className="small" style={{ margin: 0 }}>{plan.notes}</p>}
+          <AiDisclaimer>Suggestions by Streetkey AI. Costs are Streetkey’s indicative design-to-cost estimate, not quotes.</AiDisclaimer>
+        </div>}
+        {!aiOn && <AiUnavailable reason={aiState.reason} feature="The AI design brief reader" />}
       </div>
 
       <div className="split-r">
@@ -144,7 +214,7 @@ export default function Studio() {
             <Seg value={room} onChange={(r) => { setRoom(r); setOverrides({}); }} options={[{ value: 'kitchen', label: 'Kitchen' }, { value: 'bathroom', label: 'Bathroom' }, { value: 'living', label: 'Living room' }, { value: 'bedroom', label: 'Bedroom' }]} />
             <div className="row">
               {(room === 'living' || room === 'bedroom' || room === 'kitchen') && <label className="check"><input type="checkbox" checked={staged} onChange={(e) => setStaged(e.target.checked)} />Virtual staging</label>}
-              <label className="btn ghost sm" style={{ cursor: 'pointer' }}><input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) { setPhoto(URL.createObjectURL(f)); setPhotoFile(f); setAi(null); setAiErr(''); } }} />Upload room photo</label>
+              <label className="btn ghost sm sk-upload" style={{ cursor: 'pointer' }}><input type="file" className="sr-only" accept="image/jpeg,image/png,image/webp" onChange={(e) => { const f = e.target.files?.[0]; if (f) { jobRef.current?.abort(); if (photo) URL.revokeObjectURL(photo); setPhoto(URL.createObjectURL(f)); setPhotoFile(f); setAi(null); setAiErr(''); setAnalysis(null); setAnalysisErr(''); } }} />{photo ? 'Change room photo' : 'Upload room photo'}</label>
             </div>
           </div>
           <div ref={ref} className="ba card" style={{ padding: 0 }} onPointerDown={(e) => { (e.target as HTMLElement).setPointerCapture?.(e.pointerId); drag(e.clientX); }} onPointerMove={(e) => e.buttons && drag(e.clientX)}>
@@ -153,15 +223,36 @@ export default function Studio() {
             <div style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}>{photo ? <img src={photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <RoomArt room={room} s={style} before wall="" staged={false} />}</div>
             <div className="handle" style={{ left: `${pos}%` }} />
           </div>
-          {photo && <div className="card ai-gen stack" aria-live="polite">
-            <div className="row between"><b>Redesign this photo with AI</b>{aiLeft != null && <span className="xs muted">{aiLeft} left today</span>}</div>
+          {photo && <div className="card ai-gen stack">
+            <div className="row between"><b>Use AI on this photo</b>{aiLeft != null && <span className="xs muted">{aiLeft} AI design{aiLeft === 1 ? '' : 's'} left today</span>}</div>
             {aiOn && user ? <>
-              <p className="small muted">Streetkey AI keeps your room’s walls, windows and layout and restyles it as <b>{style.name}</b>{brief.trim() ? <> following your brief</> : ''}. It takes about a minute.</p>
-              <label className="check"><input type="checkbox" checked={aiConsent} onChange={(e) => setAiConsent(e.target.checked)} />I’m happy for this photo to be sent to our AI provider (OpenAI) to create the design. It isn’t used to train their models.</label>
-              <button className="btn accent" disabled={aiBusy || !aiConsent} onClick={() => void generate()}>{aiBusy ? 'Designing your room…' : ai ? `Try again as ${style.name}` : `Generate ${style.name} design`}</button>
-              {aiErr && <div className="callout small" role="alert">{aiErr}</div>}
-              {ai && <p className="xs muted">{ai.label} Drag the slider to compare. Saved in <Link to="/account/designs">your AI designs</Link>.</p>}
-            </> : aiOn ? <p className="small"><Link to="/account">Sign in or create a free account</Link> to generate a photo-real redesign of this room.</p>
+              <p className="small muted">Streetkey AI can analyse the room to suggest a style, and redesign it as <b>{style.name}</b>{brief.trim() ? <> following your brief</> : ''} while keeping the walls, windows and layout. A redesign usually takes under a minute.</p>
+              <label className="check"><input type="checkbox" checked={aiConsent} onChange={(e) => setAiConsent(e.target.checked)} />I’m happy for this photo to be sent to our AI provider (OpenAI) to analyse or redesign it. It isn’t used to train their models.</label>
+              <div className="sk-actions">
+                <button type="button" className="btn ghost" disabled={analysisBusy || aiBusy || !aiConsent} aria-busy={analysisBusy || undefined} onClick={() => void analyse()}>{analysisBusy ? 'Analysing…' : analysis ? 'Analyse again' : 'Analyse this room'}</button>
+                <button type="button" className="btn accent" disabled={aiBusy || !aiConsent} aria-busy={aiBusy || undefined} onClick={() => void generate()}>{aiBusy ? 'Designing your room…' : ai ? `Try again as ${style.name}` : `Generate ${style.name} design`}</button>
+                {aiBusy && <button type="button" className="btn ghost sm" onClick={() => { jobRef.current?.abort(); setAiBusy(false); setAiProgress(''); }}>Stop waiting</button>}
+              </div>
+              {!aiConsent && <p className="xs muted">Tick the box above to use AI on this photo.</p>}
+              {analysisBusy && <div className="ai-thinking" role="status" aria-live="polite"><span className="ai-dots" aria-hidden="true"><i /><i /><i /></span>Looking at your room…</div>}
+              {aiBusy && <div className="sk-studio-progress">
+                <div className="ai-thinking" role="status" aria-live="polite"><span className="ai-dots" aria-hidden="true"><i /><i /><i /></span>{aiProgress || ROOM_IMAGE_PROGRESS}</div>
+                <div className="sk-studio-bar" aria-hidden="true"><i /></div>
+                <p className="xs muted">You can keep exploring finishes and costs while you wait. The finished design is also saved in <Link to="/account/designs">your AI designs</Link>.</p>
+              </div>}
+              {aiErr && <div className="ai-error" role="alert"><span>{aiErr}</span><button type="button" className="linkish" onClick={() => void generate()} disabled={!aiConsent}>Try again</button></div>}
+              {analysisErr && <div className="ai-error" role="alert"><span>{analysisErr}</span></div>}
+              {ai && !aiBusy && <p className="xs muted" role="status">{ai.label} Drag the slider to compare. Saved in <Link to="/account/designs">your AI designs</Link>.</p>}
+              {analysis && !analysisBusy && (analysis.analysis.isRoom ? <AiCard title="What Streetkey AI sees in this room" tone="quiet" footer={<AiDisclaimer>{analysis.label}</AiDisclaimer>}>
+                <div className="row small"><span>Condition: <b>{CONDITION_LABEL[analysis.analysis.condition]}</b></span>{analysis.analysis.room && <span>· Room: <b>{analysis.analysis.room === 'living' ? 'living room' : analysis.analysis.room}</b></span>}</div>
+                <div className="sk-two">
+                  <div><p className="sk-list-h">Worth keeping</p>{analysis.analysis.keepWorthy.length ? <ul className="sk-list">{analysis.analysis.keepWorthy.map((x) => <li key={x}>{x}</li>)}</ul> : <p className="small muted" style={{ margin: 0 }}>Nothing in particular.</p>}</div>
+                  <div><p className="sk-list-h">To address</p>{analysis.analysis.problems.length ? <ul className="sk-list">{analysis.analysis.problems.map((x) => <li key={x}>{x}</li>)}</ul> : <p className="small muted" style={{ margin: 0 }}>Nothing obvious.</p>}</div>
+                </div>
+                {analysis.analysis.suggestedStyleIds.length > 0 && <div><p className="sk-list-h" id="sk-suggested">Suggested styles</p><div className="sk-style-suggest" role="group" aria-labelledby="sk-suggested">{analysis.analysis.suggestedStyleIds.map((id) => { const st = STYLES.find((x) => x.id === id); return st ? <button type="button" key={id} className="chip xs" aria-pressed={styleId === id} onClick={() => pickStyle(st)}>{st.name}</button> : null; })}</div></div>}
+                {analysis.analysis.notes && <p className="small" style={{ margin: 0 }}>{analysis.analysis.notes}</p>}
+              </AiCard> : <p className="callout small" role="status">This doesn’t look like a photo of a room. Try a photo taken from a corner, showing the walls and window.</p>)}
+            </> : aiOn ? <p className="small"><Link to="/account">Sign in or create a free account</Link> to analyse this room or generate a photo-real redesign. The preview above is a simple colour wash, not AI.</p>
               : online ? <p className="small muted">AI photo redesign isn’t switched on on this server yet. The preview above is a simple colour wash, not AI.</p>
               : <p className="small muted">This preview has no server, so the “after” is a simple colour wash, not AI. On the live Streetkey site, the AI redesigns your actual photo in the style you choose. Your photo stays in your browser here.</p>}
           </div>}

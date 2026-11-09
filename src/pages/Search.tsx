@@ -1,10 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { describeQuery, parseQuery, runSearch, type SearchHit, type SearchQuery } from '../engine/search';
+import { describeQuery, runSearch, type SearchHit, type SearchQuery } from '../engine/search';
 import { gbp, gbpK, HouseArt, Seg, Tag, UKMap } from '../components/ui';
 import { useStore } from '../store';
 import { externalSearchLinks } from '../engine/listings';
 import { publicListings, type Property } from '../data/properties';
+import { aiPost, useAi } from '../lib/ai/core';
+import { applyExtras, fromRules, MAX_QUERY_CHARS, SEARCH_MODES, withoutChips, type IntentResult, type RankResult, type SearchMode } from '../lib/ai/search';
+import { AiLabel, AiThinking } from '../components/ai/Ai';
+import { Icon } from '../components/Icons';
+import '../components/ai/search.css';
 
 function sourceLabel(p: Property) {
   if (!p.source) return { text: 'Streetkey demo', tone: 'demo' as const };
@@ -28,45 +33,133 @@ function narrate(q: SearchQuery, hits: SearchHit[]): string[] {
   return out;
 }
 
+/** AI relevance (from /rank) blended 50:50 with the engine's fit score; unranked results keep their order after. */
+function blend(hits: SearchHit[], scores: Map<string, number>): SearchHit[] {
+  const ranked = hits.filter((h) => scores.has(h.property.id));
+  if (ranked.length < 2) return hits;
+  const fit = ranked.map((h) => h.score);
+  const sem = ranked.map((h) => scores.get(h.property.id)!);
+  const norm = (v: number, all: number[]) => { const lo = Math.min(...all); const hi = Math.max(...all); return hi > lo ? (v - lo) / (hi - lo) : 0.5; };
+  const value = new Map(ranked.map((h) => [h.property.id, 0.5 * norm(h.score, fit) + 0.5 * norm(scores.get(h.property.id)!, sem)]));
+  return [...ranked.sort((a, b) => value.get(b.property.id)! - value.get(a.property.id)!), ...hits.filter((h) => !scores.has(h.property.id))];
+}
+
+const orList = (items: string[]) => {
+  try { return new Intl.ListFormat('en-GB', { style: 'long', type: 'disjunction' }).format(items); } catch { return items.join(', '); }
+};
+
 type Channel = 'any' | 'buy' | 'rent' | 'commercial';
+type Sort = 'fit' | 'price' | 'score' | 'ai';
+
+/** The example search shown when the page opens without ?q. The built-in rules read it well, so it never costs an AI request. */
+const EXAMPLE_QUERY = 'Find me a three-bedroom house within 45 minutes of central London for under £500,000 that requires refurbishment but has potential for a good investment return.';
+/** AI readings already fetched this visit (so going back to a search doesn't ask again). */
+const readings = new Map<string, IntentResult>();
+const rememberReading = (key: string, r: IntentResult) => { if (readings.size >= 30) readings.delete(readings.keys().next().value!); readings.set(key, r); };
 
 export default function Search() {
   const [params, setParams] = useSearchParams();
-  const initial = params.get('q') ?? 'Find me a three-bedroom house within 45 minutes of central London for under £500,000 that requires refurbishment but has potential for a good investment return.';
+  const initial = params.get('q') ?? EXAMPLE_QUERY;
   const [text, setText] = useState(initial);
   const [submitted, setSubmitted] = useState(initial);
   const [active, setActive] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
   const modeParam = params.get('mode');
+  const mode: SearchMode | null = (SEARCH_MODES as readonly string[]).includes(modeParam ?? '') ? (modeParam as SearchMode) : null;
   const [channel, setChannel] = useState<Channel>(modeParam === 'rent' ? 'rent' : modeParam === 'commercial' ? 'commercial' : 'any');
   const [maxPrice, setMaxPrice] = useState<number | ''>('');
   const [minBeds, setMinBeds] = useState<number | ''>('');
-  const [sort, setSort] = useState<'fit' | 'price' | 'score'>('fit');
-  const { saved, compare, toggleSaved, toggleCompare, savedSearches, toggleSavedSearch, addRecent, myListings, feedListings } = useStore();
+  const [sort, setSort] = useState<Sort>('fit');
+  const { saved, compare, toggleSaved, toggleCompare, savedSearches, toggleSavedSearch, addRecent, myListings, feedListings, serverListings } = useStore();
   const [src, setSrc] = useState<'all' | 'agents' | 'private'>('all');
   const searchSaved = savedSearches.some((s) => s.q === submitted);
+  const ai = useAi();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const chipsRef = useRef<HTMLDivElement>(null);
+
+  /* What the search means: Streetkey AI when available, else (and until it answers) the built-in parser. */
+  const readingKey = `${mode ?? ''}|${submitted}`;
+  const rules = useMemo(() => fromRules(submitted, mode), [submitted, mode]);
+  const [aiReading, setAiReading] = useState<{ key: string; r: IntentResult } | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  useEffect(() => {
+    const text = submitted.trim().slice(0, MAX_QUERY_CHARS);
+    if (!ai.available || !text || submitted === EXAMPLE_QUERY) return;
+    const hit = readings.get(readingKey);
+    if (hit) { setAiReading({ key: readingKey, r: hit }); return; }
+    let live = true;
+    setPending(readingKey);
+    aiPost<IntentResult>('/api/ai/search/intent', { q: text, mode }, 15_000)
+      .then((r) => { rememberReading(readingKey, r); if (live) setAiReading({ key: readingKey, r }); })
+      .catch(() => { /* silent: the built-in parser's results are already showing */ })
+      .finally(() => { if (live) setPending((p) => (p === readingKey ? null : p)); });
+    return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ai.available, readingKey]);
+  const reading = aiReading?.key === readingKey ? aiReading.r : rules;
+  const usingAi = reading.source === 'ai';
+  const understanding = ai.available && pending === readingKey && !usingAi;
+
+  // Chips people removed (for this search only).
+  const [removedFor, setRemovedFor] = useState<{ key: string; keys: string[] }>({ key: '', keys: [] });
+  const removed = removedFor.key === readingKey ? removedFor.keys : [];
+  // Focus stays with the chips after removing one or undoing; the search box if no chips are left.
+  const refocus = () => requestAnimationFrame(() => (chipsRef.current ?? inputRef.current)?.focus());
+  const removeChip = (k: string) => { setRemovedFor({ key: readingKey, keys: [...removed, k] }); refocus(); };
+  const undoRemoved = () => { setRemovedFor({ key: readingKey, keys: [] }); refocus(); };
+  const state = useMemo(() => withoutChips(reading, removed), [reading, removed]);
 
   const q = useMemo(() => {
-    const base = parseQuery(submitted);
+    const base: SearchQuery = { ...state.query, locations: [...state.query.locations], districts: [...state.query.districts], types: [...state.query.types], unsupported: [...state.query.unsupported] };
     if (channel === 'rent') base.intent = 'rent';
     if (channel === 'buy' && base.intent === 'rent') base.intent = 'buy';
-    if (channel === 'commercial') base.commercial = true;
+    if (channel === 'commercial') { base.commercial = true; base.types = []; }
     if (maxPrice !== '') base.maxPrice = maxPrice;
     if (minBeds !== '') base.minBeds = minBeds;
     return base;
-  }, [submitted, channel, maxPrice, minBeds]);
-  const hits = useMemo(() => {
-    const h = runSearch(q);
-    if (sort === 'price') return [...h].sort((a, b) => a.property.price - b.property.price);
-    if (sort === 'score') return [...h].sort((a, b) => a.dealGrade.localeCompare(b.dealGrade) || b.score - a.score);
-    return h;
+  }, [state, channel, maxPrice, minBeds]);
+  const fitHits = useMemo(() => applyExtras(runSearch(q), state.extras),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, sort, myListings.length, feedListings.length]);
+  [q, state.extras, myListings.length, feedListings.length, serverListings.length]);
+
+  /* Optional AI relevance sort: re-rank the top 60 by meaning, blended with the engine's fit. */
+  const wantAiSort = sort === 'ai' && ai.available;
+  const candidates = useMemo(() => fitHits.slice(0, 60).map((h) => h.property.id), [fitHits]);
+  const rankKey = `${submitted}|${candidates.join(',')}`;
+  const [rank, setRank] = useState<{ key: string; scores: Map<string, number> } | null>(null);
+  const [rankFailed, setRankFailed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!wantAiSort || !candidates.length || rank?.key === rankKey) return;
+    let live = true;
+    aiPost<RankResult>('/api/ai/search/rank', { q: submitted.trim().slice(0, MAX_QUERY_CHARS), ids: candidates }, 15_000)
+      .then((r) => { if (live) setRank({ key: rankKey, scores: new Map(r.items.map((i) => [i.id, i.score])) }); })
+      .catch(() => { if (live) setRankFailed(rankKey); });
+    return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantAiSort, rankKey]);
+  const rankReady = wantAiSort && rank?.key === rankKey;
+  const rankBusy = wantAiSort && !rankReady && rankFailed !== rankKey && candidates.length > 1;
+
+  const hits = useMemo(() => {
+    if (sort === 'price') return [...fitHits].sort((a, b) => a.property.price - b.property.price);
+    if (sort === 'score') return [...fitHits].sort((a, b) => a.dealGrade.localeCompare(b.dealGrade) || b.score - a.score);
+    if (rankReady && rank) return blend(fitHits, rank.scores);
+    return fitHits;
+  }, [fitHits, sort, rankReady, rank]);
   const shown = hits.filter((h) => src === 'all' || (src === 'agents' ? h.property.source?.kind === 'agent-feed' || !h.property.source : h.property.source?.kind === 'owner' || h.property.source?.kind === 'landlord'));
   const place = q.locations[0] ?? q.districts[0] ?? '';
   const external = externalSearchLinks(place, q.intent === 'rent' ? 'rent' : 'sale');
   const narrative = useMemo(() => narrate(q, hits), [q, hits]);
-  const submit = () => { setSubmitted(text); setParams({ q: text }); addRecent(text, channel === 'rent' ? 'rent' : 'buy'); };
+
+  const run = (next: string) => { setSubmitted(next); setParams({ q: next }); addRecent(next, channel === 'rent' ? 'rent' : 'buy'); };
+  const submit = () => run(text);
+  const refine = (extra: string) => { const next = `${submitted.trim()} ${extra.trim()}`.slice(0, 500); setText(next); run(next); };
+
+  // Filters on the page override the matching chips, so those chips are hidden while a filter is set.
+  const overridden = new Set([...(maxPrice !== '' ? ['maxPrice'] : []), ...(minBeds !== '' ? ['minBeds'] : []), ...(channel !== 'any' ? ['intent'] : [])]);
+  const chips = reading.understood.filter((c) => !removed.includes(c.key) && !overridden.has(c.key));
+  const sortValue: Sort = sort === 'ai' && !ai.available ? 'fit' : sort;
+  const extrasShown = state.extras.minPrice != null || state.extras.maxBeds != null || state.extras.mustHaves.length > 0;
 
   return (
     <div className="stack" style={{ gap: 20 }}>
@@ -78,21 +171,54 @@ export default function Search() {
         <div className="stack" style={{ gap: 16 }}>
           <div className="card ai-card search-head">
             <form className="smart-box" style={{ boxShadow: 'none' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
-              <input value={text} onChange={(e) => setText(e.target.value)} aria-label="Search Streetkey" enterKeyHint="search" placeholder="Place or describe it" />
+              <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)} aria-label="Search Streetkey" enterKeyHint="search" placeholder="Place or describe it" />
               <button className="smart-go" type="submit">Search</button>
             </form>
             <div className="row between" style={{ marginTop: 10, flexWrap: 'nowrap', gap: 8 }}>
-              <b className="small">{shown.length} result{shown.length === 1 ? '' : 's'}</b>
+              <b className="small" aria-live="polite">{shown.length} result{shown.length === 1 ? '' : 's'}</b>
               <button className={`save-btn${searchSaved ? ' on' : ''}`} onClick={() => toggleSavedSearch(submitted, channel === 'rent' ? 'rent' : 'buy')}>{searchSaved ? '♥ Saved' : '♡ Save search'}</button>
             </div>
+
+            {understanding && <div className="aisr-busy"><AiThinking label="Streetkey AI is reading your search" /></div>}
+            {/* Always mounted, so what the AI understood, its question and notes are announced when they appear. */}
+            <div className="aisr-reading" aria-live="polite">
+              {!understanding && (chips.length > 0 || removed.length > 0) && (
+                <div className="aisr-understood" ref={chipsRef} tabIndex={-1} role="group" aria-label={usingAi ? 'What Streetkey AI understood' : 'What you searched for'}>
+                  <span className="aisr-understood-h">{usingAi ? <AiLabel>AI understood</AiLabel> : 'Searching for'}</span>
+                  {chips.length > 0 ? (
+                    <ul className="ai-chips">
+                      {chips.map((c) => (
+                        <li key={c.key} className={`ai-chip aisr-chip${c.removable ? '' : ' fixed'}`}>
+                          <span>{c.label}</span>
+                          {c.removable && <button type="button" className="aisr-chip-x" aria-label={`Remove ${c.label}`} title="Remove and search again" onClick={() => removeChip(c.key)}><Icon name="x" size={14} /></button>}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <span className="small aisr-understood-none">No filters from your words are left.</span>}
+                  {removed.length > 0 && <button type="button" className="linkish small" onClick={undoRemoved}>Undo</button>}
+                </div>
+              )}
+              {!understanding && reading.clarify && (
+                <div className="aisr-clarify callout info">
+                  <p className="small"><AiLabel /> {reading.clarify.question}</p>
+                  {reading.clarify.answers.length > 0
+                    ? <div className="chips">{reading.clarify.answers.map((a) => <button key={a} type="button" className="chip" onClick={() => refine(a)} aria-label={`Search again ${a}`}>+ {a}</button>)}</div>
+                    : <div><button type="button" className="btn ghost sm" onClick={() => inputRef.current?.focus()}>Add to my search</button></div>}
+                </div>
+              )}
+              {!understanding && reading.unsupported.length > 0 && <p className="small aisr-note">We can’t filter on {orList(reading.unsupported)} yet.</p>}
+              {!understanding && reading.policyNote && <p className="callout info small aisr-policy" role="note">{reading.policyNote}</p>}
+            </div>
+
             <div className="msg ai" style={{ maxWidth: '100%', marginTop: 10 }}>
               <div className="row" style={{ gap: 6, flexWrap: 'nowrap', alignItems: 'flex-start' }}><Tag kind="ai">AI</Tag><p className="small">{narrative[narrative.length > 2 && /^Honest/.test(narrative[1]) ? 1 : 0]}</p></div>
               <details className="why"><summary>Why these results?</summary>
                 <div className="stack" style={{ gap: 6, marginTop: 8 }}>{narrative.map((n, i) => <p key={i} className="small">{n}</p>)}</div>
                 {q.unsupported.length > 0 && <div className="callout info small" style={{ marginTop: 10 }}><b>Not yet covered:</b> {q.unsupported.join(' ')}</div>}
                 <div className="parsed" style={{ marginTop: 10 }}>{describeQuery(q).map((d) => <span key={d}>{d}</span>)}</div>
+                <p className="xs muted" style={{ marginTop: 8 }}>{usingAi ? 'Streetkey AI turned your words into these filters; the listings, prices and scores come from Streetkey’s own data and engines.' : 'Streetkey’s built-in rules turned your words into these filters.'}</p>
                 <button className="btn ghost sm" style={{ marginTop: 10 }} onClick={() => setShowJson(!showJson)}>{showJson ? 'Hide' : 'Show'} structured query</button>
-                {showJson && <pre tabIndex={0} className="code" style={{ marginTop: 10 }}>{`// Production: the LLM emits this via tool-calling (JSON-schema validated).\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})`}</pre>}
+                {showJson && <pre tabIndex={0} className="code" style={{ marginTop: 10 }}>{`${usingAi ? '// Built by Streetkey AI from your words (JSON-schema validated, numbers range-checked).' : '// Built by Streetkey’s rule-based parser.'}\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})${extrasShown ? `\n// Also applied: ${JSON.stringify(state.extras)}` : ''}`}</pre>}
               </details>
             </div>
           </div>
@@ -102,9 +228,14 @@ export default function Search() {
             <label className="field">Max price<select className="input" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value === '' ? '' : Number(e.target.value))}><option value="">From query</option>{[250_000, 350_000, 500_000, 750_000, 1_000_000, 2_000_000].map((v) => <option key={v} value={v}>{gbpK(v)}</option>)}</select></label>
             <label className="field">Min beds<select className="input" value={minBeds} onChange={(e) => setMinBeds(e.target.value === '' ? '' : Number(e.target.value))}><option value="">From query</option>{[1, 2, 3, 4, 5].map((v) => <option key={v} value={v}>{v}+</option>)}</select></label>
             <label className="field">Listed by<select className="input" value={src} onChange={(e) => setSrc(e.target.value as typeof src)}><option value="all">Everyone</option><option value="agents">Estate agents</option><option value="private">Private sellers & landlords</option></select></label>
-            <label className="field">Sort<select className="input" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}><option value="fit">Best match</option><option value="score">Deal grade</option><option value="price">Price (low–high)</option></select></label>
+            <label className="field">Sort<select className="input" value={sortValue} onChange={(e) => setSort(e.target.value as Sort)}><option value="fit">Best match</option>{ai.available && <option value="ai">Best match + AI relevance</option>}<option value="score">Deal grade</option><option value="price">Price (low–high)</option></select></label>
           </div></details>
 
+          {sortValue === 'ai' && (rankBusy ? <AiThinking label="Ranking by relevance" />
+            : rankReady ? <p className="xs aisr-sortnote"><AiLabel /> Sorted by how closely each listing matches your words, blended with Streetkey’s best-match score.</p>
+              : rankFailed === rankKey ? <p className="xs aisr-sortnote" role="status">AI relevance isn’t available right now, so these are in Streetkey’s best-match order.</p> : null)}
+
+          <div className="stack aisr-results" style={{ gap: 16 }} aria-busy={understanding || rankBusy || undefined}>
           {shown.map((h, i) => (
             <div key={h.property.id} className={`listing${active === h.property.id ? ' hl' : ''}`} onMouseEnter={() => setActive(h.property.id)}>
               <Link to={`/property/${h.property.id}`} className="ph"><HouseArt hue={h.property.photoHue} type={h.property.type} seed={i} /></Link>
@@ -130,6 +261,7 @@ export default function Search() {
               </div>
             </div>
           ))}
+          </div>
         </div>
         <div className="sticky stack">
           <section className="card">
@@ -151,6 +283,7 @@ export default function Search() {
               <li>Commute: stored per listing. Production: TfL Unified API, NaPTAN, BODS + routing.</li>
               <li>Schools: Ofsted / Estyn / Education Scotland open data (planned).</li>
               <li>Sold prices: HM Land Registry Price Paid (OGL) — planned.</li>
+              <li>Search understanding: Streetkey AI turns your words into filters when it’s available; it never chooses listings, prices or scores.</li>
             </ul>
           </div>
         </div>

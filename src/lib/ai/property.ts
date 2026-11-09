@@ -85,6 +85,28 @@ export function photoFactsFrom(i: RefurbInput): RefurbPhotoFacts {
   };
 }
 
+/**
+ * Loads only what the photos decide (condition, bathrooms to refit and the condition-driven scope items)
+ * into the estimator's current input; everything else (postcode, size, type, spec, VAT, fees and the
+ * person's own plans such as extensions, lofts and openings) stays exactly as they have it now.
+ * Also used to undo: pass the input from before the photo scope was applied.
+ */
+export function applyPhotoScope(cur: RefurbInput, from: RefurbInput): RefurbInput {
+  const s = from.scope;
+  return {
+    ...cur, condition: from.condition, bathrooms: from.bathrooms,
+    scope: {
+      ...cur.scope,
+      stripOut: s.stripOut, rewire: s.rewire, heating: s.heating, replaster: s.replaster, kitchen: s.kitchen, windows: s.windows,
+      roof: s.roof, flooring: s.flooring, decoration: s.decoration, damp: s.damp, external: s.external, insulation: s.insulation,
+    },
+  };
+}
+
+/** The property details a photo scope was worked out for (if these change, the scope may no longer fit). */
+export const photoDetailsKey = (i: RefurbInput) =>
+  JSON.stringify([i.postcode.trim().toUpperCase(), i.propertyType, i.floorArea, i.bedrooms, i.storeys, i.era]);
+
 /* ───────────────────────── 2. explain an estimate ───────────────────────── */
 export interface RefurbExplainResult {
   summary: string; biggestCosts: string[]; waysToSave: string[]; risks: string[]; nextSteps: string[];

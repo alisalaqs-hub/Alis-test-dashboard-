@@ -39,40 +39,69 @@ function collect(text: string, rules: [RegExp, string][], max = 6): Found[] {
 // UK numbers: 0xxxx xxxxxx or +44 / 0044, allowing spaces, dashes and brackets between digits.
 const PHONE = /(?:(?:\+|\b00)\s?44\s?(?:\(0\)\s?)?|\(?\b0)(?:\d[\s\-()]{0,2}){9,10}(?!\d)/g;
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,}/gi;
-const EMAIL_SPELT = /\b[a-z0-9._-]+\s?(?:\(at\)|\[at\]|\{at\}|\sat\s)\s?[a-z0-9-]+\s?(?:\(dot\)|\[dot\]|\sdot\s|\.)\s?(?:com|co\.uk|net|org|uk|io)\b/gi;
+// Spelt-out emails need an explicit marker: "name(at)site.com", "name [at] site [dot] com" or "name at site dot com".
+// A plain " at " followed by ". " is ordinary prose ("Viewings at weekends. Net internal area…"), so it never counts.
+const MARK_DOT = String.raw`\s?(?:\(dot\)|\[dot\]|\{dot\})\s?|\s+dot\s+`;
+const SPELT_TLD = String.raw`(?:com|co(?:\.|${MARK_DOT})uk|net|org|uk|io)`;
+const EMAIL_SPELT = new RegExp(String.raw`\b[a-z0-9._-]+\s?(?:\(at\)|\[at\]|\{at\})\s?[a-z0-9-]+(?:${MARK_DOT}|\.)${SPELT_TLD}\b|\b[a-z0-9._-]+\s+at\s+[a-z0-9-]+(?:${MARK_DOT})${SPELT_TLD}\b`, 'gi');
 const URL = /\b(?:https?:\/\/|www\.)[^\s<>()"']+|\b[a-z0-9][a-z0-9-]{1,62}\.(?:co\.uk|org\.uk|com|net|org|uk|io|info|biz|me)\b(?:\/[^\s<>()"']*)?/gi;
-const MESSAGING = /\b(?:whats\s?app|telegram|wechat|viber|signal\s+(?:me|on))\b/gi;
+const MESSAGING = /\b(?:whats\s?app|telegram|wechat|viber)\b/gi;
+// "Signal" only counts as the messaging app when written like one ("on Signal", "Signal me"): "mobile signal on all networks" is about reception.
+const SIGNAL_APP = /\b(?:on|via)\s+Signal\b|\bSignal\s+(?:me|us)\b/g;
 
 /** Phone numbers, emails, web links and messaging apps in listing text (people should contact listers through Streetkey). */
 export function contactDetails(text: string): Found[] {
   const emails = collect(text, [[EMAIL, 'email address'], [EMAIL_SPELT, 'email address']]);
   let rest = text;
   for (const e of emails) rest = rest.split(e.text).join(' ');
-  return [...collect(rest, [[PHONE, 'phone number']]), ...emails, ...collect(rest, [[URL, 'web link'], [MESSAGING, 'messaging app']])].slice(0, 8);
+  return [...collect(rest, [[PHONE, 'phone number']]), ...emails, ...collect(rest, [[URL, 'web link'], [MESSAGING, 'messaging app'], [SIGNAL_APP, 'messaging app']])].slice(0, 8);
 }
 
-const PAYMENT: [RegExp, string][] = [
-  [/\b(?:bank|wire|money|telegraphic)\s+transfer\b/gi, 'bank transfer'],
+/**
+ * Not when the wording rules it out ("we never ask for payment before a viewing", "no viewing fees",
+ * "never pay by bank transfer"): honest listings often warn people about scams in exactly these words.
+ */
+const NEGATED = String.raw`(?<!\b(?:no|never|not|without|nor|don['’]t|won['’]t|doesn['’]t)\s+(?:(?:ask|asks|asking|asked|take|takes|taking|taken|request|requests|requested|require|requires|required|need|needs|needed|charge|charges|charged|accept|accepts|send|make|pay|paying|by|via|using|any|a|an|the|for|is|are|be|been|you|to|we|ever|will|should|upfront|money)\s+){0,3})`;
+const unlessNegated = (re: RegExp) => new RegExp(NEGATED + re.source, re.flags);
+const PAYMENT: [RegExp, string][] = ([
+  [/\b(?:bank|wire|money|telegraphic)\s+transfers?\b/gi, 'bank transfer'],
   [/\b(?:western\s+union|money\s?gram|remitly|world\s?remit)\b/gi, 'money transfer service'],
   [/\b(?:crypto(?:currenc(?:y|ies))?|bitcoins?|btc|ethereum|usdt|tether)\b/gi, 'cryptocurrency'],
   [/\bgift\s?cards?\b/gi, 'gift cards'],
   [/\bpay\s?pal\b/gi, 'PayPal'],
   [/\b(?:deposit|payment|pay|fee|money|funds)\b[^.!?\n]{0,50}?\bbefore\s+(?:the\s+|a\s+|any\s+|you\s+|we\s+)?(?:view(?:ing)?s?|visit(?:ing|s)?|see(?:ing)?\s+(?:it|the\s+(?:property|flat|house)))\b/gi, 'payment before viewing'],
   [/\bviewing\s+fees?\b/gi, 'viewing fee'],
-];
+] as [RegExp, string][]).map(([re, label]) => [unlessNegated(re), label]);
 /** Requests to pay off-platform or before a viewing: classic property-scam patterns. */
 export const paymentRequests = (text: string) => collect(text, PAYMENT);
 
+const MONTHS = 'january|february|march|april|may|june|july|august|september|october|november|december';
+/** Ordinary scheduling after "no viewings" ("on Sundays", "before 10am", "without an appointment"): not a refusal to show the property. */
+const WHEN = String.raw`(?:on\s+(?:a\s+)?(?:\w+days?|weekends?|bank\s+holidays?)|at\s+(?:the\s+)?(?:weekends?|night|\d)|(?:before|after|until|till|from|past)\s+(?:the\s+)?(?:\d|noon|midday|midnight|dark|\w+day\b|weekend|evening|morning|${MONTHS})|(?:during|over|in)\s+(?:the\s+)?(?:weekends?|evenings?|mornings?|holidays?|school\s+holidays|christmas|easter|\w+\s+holidays?)|between\s+\d|(?:this|next)\s+(?:week|weekend|\w+day)|without\s+(?:an?\s+|prior\s+|advance\s+)?(?:appointment|booking|notice)|(?:unless|except)\s+(?:by\s+appointment|booked|arranged))`;
 const SCAM_PHRASES: [RegExp, string][] = [
   [/\b(?:i\s+am|i'm|i’m|we\s+are|we're|we’re|owner\s+is|landlord\s+is)\s+(?:currently\s+|now\s+)?(?:abroad|overseas|out\s+of\s+the\s+country|working\s+abroad|living\s+abroad)\b/gi, 'lister says they are abroad'],
-  [/\bkeys?\b[^.!?\n]{0,40}?\b(?:posted|by\s+post|couriered|by\s+courier|sent\s+to\s+you|delivered\s+to\s+you)\b/gi, 'keys sent by post'],
-  [/\b(?:no\s+viewings?|viewings?\s+(?:are\s+|is\s+)?not\s+(?:possible|available)|can(?:not|'t|’t)\s+(?:do|arrange|offer)\s+(?:a\s+|any\s+)?viewings?)\b/gi, 'no viewings offered'],
+  [/\bkeys?\b[^.!?\n]{0,40}?(?<!(?:\bnever|\bnot|n['’]t)\s+(?:\w+\s+){0,2})\b(?:posted|by\s+post|couriered|by\s+courier|sent\s+to\s+you|delivered\s+to\s+you)\b/gi, 'keys sent by post'],
+  [new RegExp(String.raw`\b(?:no\s+viewings?|viewings?\s+(?:are\s+|is\s+)?not\s+(?:possible|available)|can(?:not|'t|’t)\s+(?:do|arrange|offer)\s+(?:a\s+|any\s+)?viewings?)\b(?!\s+${WHEN})`, 'gi'), 'no viewings offered'],
 ];
 export const scamPhrases = (text: string) => collect(text, SCAM_PHRASES);
 
-const GROUPS = 'foreigners|immigrants|asians?|africans?|indians?|pakistanis?|bangladeshis?|chinese|polish|romanians?|eastern\\s+europeans?|black\\s+people|travellers|gypsies|muslims?|jews|christians?|hindus?|sikhs?|gays?|lesbians?|lgbt\\w*|pregnant\\s+women';
+/*
+ * Discriminatory wording. Words such as "polish", "chinese" or "indian" are often ordinary English ("needs no
+ * polish", "no Indian restaurant nearby"), so a group is only matched when the wording can only mean people:
+ * a plural people-noun ("no Romanians"), an adjective with a people-noun ("no Polish tenants"), or a capitalised
+ * name standing on its own at the end of a phrase ("No Polish.", "Sorry, no Irish or Indian applicants").
+ */
+const EXCLUDE = String.raw`(?:no|not\s+suitable\s+for|not\s+for|sorry,?\s+no)\s+`;
+const GROUP_PLURALS = String.raw`foreigners|immigrants|migrants|asians|africans|indians|pakistanis|bangladeshis|romanians|eastern\s+europeans|blacks|black\s+people|travellers|gypsies|muslims|jews|christians|hindus|sikhs|gays|lesbians|lgbt\w*|pregnant\s+women`;
+const GROUP_ADJECTIVES = String.raw`foreign|asian|african|indian|pakistani|bangladeshi|chinese|polish|irish|romanian|eastern\s+european|black|muslim|jewish|christian|hindu|sikh|gay|lesbian|lgbt\w*|pregnant`;
+const PEOPLE = String.raw`people|persons|tenants|applicants|families|couples|nationals|students|buyers|lodgers|sharers|professionals|men|women|workers|renters|occupants|residents|individuals|guests`;
+const GROUP_NAMES = ['Polish', 'Chinese', 'Irish', 'Indian', 'Asian', 'African', 'Pakistani', 'Bangladeshi', 'Romanian', 'Eastern European', 'Jewish', 'Muslim', 'Hindu', 'Sikh', 'Christian'];
+const PHRASE_END = String.raw`(?=\s*(?:[.,;:!?)]|$))`;
+const NAME_ALTS = GROUP_NAMES.flatMap((n) => [n, n.toUpperCase()]).map((n) => n.replace(' ', String.raw`\s+`)).join('|');
 const DISCRIM: [RegExp, string][] = [
-  [new RegExp(`\\b(?:no|not\\s+suitable\\s+for|not\\s+for|sorry\\s+no)\\s+(?:${GROUPS})\\b`, 'gi'), 'excludes a protected group'],
+  [new RegExp(String.raw`\b${EXCLUDE}(?:${GROUP_PLURALS}|(?:${GROUP_ADJECTIVES})\s+(?:${PEOPLE}))\b`, 'gi'), 'excludes a protected group'],
+  // Case-sensitive on purpose: "No Polish." excludes people; "needs no polish." doesn't.
+  [new RegExp(String.raw`\b(?:[Nn]o|NO|[Nn]ot\s+(?:suitable\s+)?for|NOT\s+(?:SUITABLE\s+)?FOR|[Ss]orry,?\s+no)\s+(?:${NAME_ALTS})(?:${PHRASE_END}|\s+(?:or|and|nor)\s+(?:${NAME_ALTS})s?(?:\s+(?:${PEOPLE})\b|${PHRASE_END}))`, 'g'), 'excludes a protected group'],
   [/\b(?:english|british|white|christian|muslim|hindu|indian|asian|european)\s+(?:only|tenants\s+only|people\s+only|families\s+only|preferred)\b/gi, 'prefers a protected group'],
 ];
 /** Wording that excludes people by race, nationality, religion, sexual orientation or pregnancy (beyond the core checks). */
@@ -160,6 +189,8 @@ export interface Signals {
   discrimination: Found[];
   blockingChecksPass: boolean;
   wordCount: number;
+  /** Set when the AI review couldn't run (a safe, user-facing reason): the stored review is rules-only. */
+  aiProblem?: string;
 }
 
 export const typeForCheck = (id: string): FlagType => CHECK_TYPE[id] ?? 'material-info';
@@ -240,5 +271,24 @@ export function groundFigures(text: string, allowed: { money: number[]; percent:
   return keep.join(' ').trim();
 }
 
-/** Strips contact details from AI-written text meant for the lister (the model must not add any). */
+/**
+ * Evidence on an AI flag is shown to admins as evidence, so it must be checkable. It is kept only when it is
+ * (a) a quote that really appears in the listing text (each part, if the model joined several with "…" or "·"), or
+ * (b) the name of a Streetkey signal or fact the model was given, shown in plain words (the model's value is never echoed).
+ * Anything else (a paraphrase or an invented quote) becomes '' so it can't be mistaken for listing text.
+ */
+export function groundEvidence(evidence: string, listingText: string, signalNames: Record<string, string>): string {
+  const e = String(evidence ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (!e) return '';
+  const named = e.replace(/^(?:signals?|facts?)\s*[:.\-–]\s*/i, '').match(/^([A-Za-z]+)(?:\.[A-Za-z]+)*(?:\s*[:=]\s*(?:true|false|null|none|missing|yes|no))?$/);
+  if (named) {
+    const label = signalNames[named[1]];
+    if (label) return `Streetkey data: ${label}`;
+  }
+  const hay = ` ${normaliseText(listingText)} `;
+  const parts = e.split(/\s*(?:…|\.\.\.|·|\|)\s*/).map(normaliseText).filter(Boolean);
+  return parts.length && parts.every((p) => hay.includes(` ${p} `)) ? e : '';
+}
+
+/** True when AI-written text meant for the lister contains contact details or links (it must not). */
 export const hasContactDetails = (s: string) => contactDetails(s).length > 0;

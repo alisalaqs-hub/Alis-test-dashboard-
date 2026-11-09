@@ -1,7 +1,7 @@
 /** Prompt for "Ask Streetkey": house rules, what each tool is for, and the conversation as data. */
 import { HOUSE_RULES, untrusted, type Message } from '../core';
 import { S } from '../schema';
-import { findHome, propertyIntel } from './tools';
+import { findHome, isDemo, liveFacts, propertyIntel } from './tools';
 
 export const SYSTEM_PROMPT = [
   HOUSE_RULES,
@@ -23,6 +23,7 @@ export const SYSTEM_PROMPT = [
   '- Quote figures exactly as tools give them; you may round money to the nearest £1,000 and percentages to one decimal place. Never calculate new figures yourself (no adding, multiplying or averaging). If no tool gives a figure, say you can’t work it out here and point to the right calculator.',
   '- If a tool returns an error, say what is missing or ask a short question rather than guessing.',
   '- Homes with demo: true are fictional demonstration listings with illustrative figures. Mention this when you discuss one in detail, and always if asked whether a home or its figures are real.',
+  '- For live listings, anything a tool gives as null, "not assessed" or "not stated" is unknown: say it hasn’t been checked rather than describing it, and mention the assumptions listed under "assumed" when you quote estimates that rely on them.',
   '- Refer to homes by title and town, not by id. Put the ids (from tool results only) of homes you recommend or discuss in propertyIds.',
   '- actions: up to three next steps as internal Streetkey links only, using these paths: /search?q=<words>&mode=buy|rent|invest, /property/<id>, /invest?property=<id>, /estimate?property=<id>, /studio?property=<id>, /compare?ids=<id>,<id>, /prices?q=<place>, /list. Labels are two to five words, e.g. "View this home".',
   '- followUps: two or three short questions (under 60 characters) the person might ask next, written as they would ask them.',
@@ -54,14 +55,18 @@ export function historyMessages(turns: ChatTurn[]): Message[] {
 
 export const PAGE_RE = /^\/[A-Za-z0-9\-._~/%]{0,159}$/;
 
-/** What the person is looking at, as a system note. The property data counts as engine output. */
-export function contextNote(ctx?: { propertyId?: string; page?: string }) {
+/**
+ * What the person is looking at, as a system note. The property data counts as engine output.
+ * Only public homes are described: a draft, pending, withdrawn or private id adds nothing.
+ */
+export async function contextNote(ctx?: { propertyId?: string; page?: string }) {
   if (!ctx) return null;
   const parts: string[] = [];
   const page = ctx.page && PAGE_RE.test(ctx.page) ? ctx.page : null;
   if (page) parts.push(`The person is on the Streetkey page ${untrusted('page', page, 160)}.`);
   const p = ctx.propertyId ? findHome(ctx.propertyId) : null;
-  const data = p ? propertyIntel(p) : null;
+  const facts = p && !isDemo(p) ? (await liveFacts([p])).get(p.id) ?? null : null;
+  const data = p ? propertyIntel(p, facts) : null;
   if (p && data) parts.push(`They are looking at this home (Streetkey engine data, the same as get_property returns). "This home", "it" or "here" means this one (id ${p.id}):\n${JSON.stringify(data)}`);
   return parts.length ? { text: parts.join('\n'), data, propertyId: p?.id ?? null } : null;
 }

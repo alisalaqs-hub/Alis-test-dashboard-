@@ -5,8 +5,10 @@
  * shape. The server then checks the answer before the website sees it:
  *  - homes: only real, public listings; cards come from the registry, never from the model
  *  - links: only internal Streetkey paths
- *  - figures: every £ amount and percentage must match a tool result, the page's property data
- *    or the conversation; otherwise one quick correction pass, and failing that the sentence goes
+ *  - figures: every money amount and percentage must match a tool result, the page's property
+ *    data or the person's own messages (never an earlier reply, which the browser sends back);
+ *    otherwise one quick correction pass, and failing that the sentence goes. Button labels and
+ *    suggested questions with unchecked figures are dropped.
  * Stateless: the browser keeps the conversation (sessionStorage) and sends the last 12 messages.
  */
 import { createHash } from 'node:crypto';
@@ -66,7 +68,7 @@ function parseReply(content: string): Reply {
 /** One quick pass that rewrites a draft so its figures match the evidence. */
 async function correctFigures(draft: string, bad: string[], evidence: unknown, userId: string | null, timeoutMs: number) {
   const out = await chatJSON<{ reply: string }>([
-    { role: 'system', content: `${HOUSE_RULES}\nYou correct figures in a draft reply written by Streetkey’s assistant. Every £ amount and percentage must appear in the evidence (rounding to the nearest £1,000 or 0.1% is fine). Correct or remove the unchecked figures listed; do not add new figures or facts. Keep the meaning, tone, length and the "- " bullet and **bold** format.` },
+    { role: 'system', content: `${HOUSE_RULES}\nYou correct figures in a draft reply written by Streetkey’s assistant. Every money amount (£, “pounds”, “600k”, “2,100 a month”…) and percentage must appear in the evidence (rounding to the nearest £1,000 or 0.1% is fine). Correct or remove the unchecked figures listed; do not add new figures or facts. Keep the meaning, tone, length and the "- " bullet and **bold** format.` },
     { role: 'user', content: `${untrusted('draft', draft, 3500)}\nUnchecked figures: ${bad.join(', ').slice(0, 300)}\nEvidence from Streetkey’s tools (JSON):\n${JSON.stringify(evidence ?? null).slice(0, 12_000)}` },
   ], S.obj({ reply: S.str() }), 'streetkey_answer_fix', { purpose: 'assistant.fix', userId, role: 'fast', maxTokens: 900, timeoutMs });
   return sanitiseReply(out.reply);
@@ -78,28 +80,32 @@ function canned(reply: string, followUps: string[] = STARTERS): AssistantReply {
 
 async function answer(body: ChatBodyT, userId: string | null, deadline: number): Promise<AssistantReply> {
   await ensureLiveRegistry();
-  const ctx = contextNote(body.context);
+  const ctx = await contextNote(body.context);
+  // Leave time for the checks (and a quick correction pass) inside the request deadline.
+  const left = deadline - Date.now();
   const r = await runWithTools([
     { role: 'system', content: SYSTEM_PROMPT },
     ...(ctx ? [{ role: 'system' as const, content: ctx.text }] : []),
     ...historyMessages(body.messages),
   ], TOOLS, {
     purpose: 'assistant.chat', userId, role: 'main', maxTokens: 1400, effort: 'low', maxSteps: 4,
-    timeoutMs: Math.max(5_000, deadline - Date.now() - 4_000),
+    timeoutMs: Math.max(1_500, left - Math.min(4_000, Math.round(left * 0.2))),
     responseSchema: { schema: ReplySchema, name: 'streetkey_answer' },
   });
   const out = parseReply(r.content);
   const traces: ToolTrace[] = r.traces.filter((t) => t.ok);
 
-  // Figures in the reply must come from Streetkey: tools, the page's home, or the conversation itself.
-  const allowed = numbersIn([traces.map((t) => t.result), ctx?.data ?? null, body.messages.map((m) => m.content)]);
+  // Figures must come from Streetkey (tool results, the page's home) or from the person's own words.
+  // Earlier assistant replies don't count: they come back from the browser and could say anything.
+  const allowed = numbersIn([traces.map((t) => t.result), ctx?.data ?? null, body.messages.filter((m) => m.role === 'user').map((m) => m.content)]);
+  const checked = (s: string) => !ungrounded(s, allowed).length;
   let reply = sanitiseReply(out.reply);
   let grounding: Grounding = 'checked';
   let bad = ungrounded(reply, allowed);
   if (bad.length && deadline - Date.now() > 6_000) {
     try {
       const fixed = await correctFigures(reply, bad, { tools: traces.map((t) => ({ tool: t.name, result: t.result })), page: ctx?.data ?? null }, userId, deadline - Date.now() - 1_000);
-      if (fixed && !ungrounded(fixed, allowed).length) { reply = fixed; grounding = 'corrected'; bad = []; }
+      if (fixed && checked(fixed)) { reply = fixed; grounding = 'corrected'; bad = []; }
     } catch { /* fall through to trimming */ }
   }
   if (bad.length) {
@@ -114,8 +120,9 @@ async function answer(body: ChatBodyT, userId: string | null, deadline: number):
   return {
     reply, propertyIds,
     homes: propertyIds.map((id) => publicCard(findHome(id)!)),
-    actions: sanitiseActions(out.actions),
-    followUps: sanitiseFollowUps(out.followUps),
+    // Buttons and suggested questions carry no unchecked figures either (a clicked suggestion becomes the person's words).
+    actions: sanitiseActions(out.actions, 4, checked),
+    followUps: sanitiseFollowUps(out.followUps, 3, checked),
     sources, grounding,
   };
 }

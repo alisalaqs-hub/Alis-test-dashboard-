@@ -6,6 +6,79 @@ import { analyse, breakEven, DEFAULT_INVESTMENT, scenario, sensitivity, type Inv
 import { estimateRefurb } from '../engine/refurb';
 import type { BuyerType, Nation } from '../engine/tax';
 import { gbp, gbpK, Money, Pct, Section, Seg, Stacked, Stat, Tag } from '../components/ui';
+import { AiButton, AiCard, AiDisclaimer, AiErrorNote, AiThinking, AiUnavailable } from '../components/ai/Ai';
+import { aiPost, useAi, useAiAction } from '../lib/ai/core';
+import { ruleVerdict, VERDICT_LABEL, type InvestVerdictResult, type Verdict } from '../lib/ai/property';
+import '../components/ai/property.css';
+
+const SCEN_LABEL: Record<ScenarioName, string> = { downside: 'Downside', base: 'Base', optimistic: 'Optimistic' };
+
+function AiList({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null;
+  return <div><div className="ai-prop-h">{title}</div><ul className="ai-prop-list">{items.map((t) => <li key={t}>{t}</li>)}</ul></div>;
+}
+
+/** Streetkey's rule-based rating (always shown), plus an AI reading of the same recomputed numbers. */
+function VerdictPanel({ i, scen, propertyId, rule }: { i: InvestmentInput; scen: ScenarioName; propertyId?: string; rule: { verdict: Verdict; reasons: string[] } }) {
+  const { available, reason } = useAi();
+  const [asked, setAsked] = useState<string | null>(null);
+  const v = useAiAction((body: { propertyId?: string; strategy: Strategy; inputs: InvestmentInput; scenario: ScenarioName }) =>
+    aiPost<{ verdict: InvestVerdictResult }>('/api/ai/invest/explain', body).then((r) => r.verdict));
+  const key = JSON.stringify([i, scen, propertyId ?? null]);
+  const run = () => { setAsked(key); void v.run({ ...(propertyId ? { propertyId } : {}), strategy: i.strategy, inputs: i, scenario: scen }); };
+  const x = v.data;
+  const n = x?.numbers;
+  return (
+    <Section title="Verdict" kicker={`${SCEN_LABEL[scen]} case`} right={<Tag kind="neutral">Not financial advice</Tag>}>
+      <div className="pv-rule">
+        <div className="row"><span className={`pv-verdict ${rule.verdict}`}>{VERDICT_LABEL[rule.verdict]}</span><span className="small muted">Streetkey’s rule-based rating of the figures above</span></div>
+        <ul className="ticks small">{rule.reasons.map((t) => <li key={t}>{t}</li>)}</ul>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        {!available ? <AiUnavailable reason={reason} feature="The AI verdict" /> : (
+          <AiCard title="AI verdict" footer={x && !v.busy ? <AiDisclaimer>{x.disclaimer}</AiDisclaimer> : undefined}>
+            {!x && !v.busy && <>
+              <p className="small muted" style={{ margin: 0 }}>An AI reading of this scenario: strengths, risks, what has to be true and what to ask. It works from Streetkey’s own calculations and never adds figures of its own.</p>
+              <div><AiButton onClick={run}>Get an AI verdict</AiButton></div>
+            </>}
+            {v.busy && <AiThinking label="Reviewing the numbers" />}
+            <AiErrorNote error={v.error} onRetry={run} />
+            {x && n && !v.busy && <>
+              {asked !== key && <div className="callout small ai-prop-stale" role="status">You’ve changed the assumptions since this verdict. <button type="button" className="btn ghost sm" onClick={run}>Update verdict</button></div>}
+              <div className="row" style={{ alignItems: 'baseline' }}><span className={`pv-verdict ${x.verdict}`}>{VERDICT_LABEL[x.verdict]}</span><b>{x.headline}</b></div>
+              {x.verdictCapped && <p className="ai-prop-note">The AI rated this more highly than the numbers support, so Streetkey kept its rule-based rating and left out the AI’s strengths. The headline, what must be true and the stress-test reading are Streetkey’s own.</p>}
+              <div className="ai-prop-cols">
+                <AiList title="Strengths" items={x.strengths} />
+                <AiList title="Risks" items={x.risks} />
+                <AiList title="What must be true" items={x.whatMustBeTrue} />
+                <AiList title="Questions to ask" items={x.questionsToAsk} />
+              </div>
+              <div><div className="ai-prop-h">Stress test</div><p className="small" style={{ margin: 0 }}>{x.stressTestReading}</p></div>
+              <div>
+                <div className="ai-prop-h">Recomputed by Streetkey for this verdict ({SCEN_LABEL[x.scenario].toLowerCase()} case)</div>
+                <div className="ai-chips pv-numbers">
+                  {x.strategy === 'flip' ? <>
+                    <span className="ai-chip">Profit <b>{gbp(n.flipProfit)}</b></span>
+                    <span className="ai-chip">On cost <b>{(n.profitOnCost * 100).toFixed(1)}%</b></span>
+                    <span className="ai-chip">Downside profit <b>{gbp(n.downsideFlipProfit)}</b></span>
+                    {n.breakEvenSalePrice != null && <span className="ai-chip">Break-even sale <b>{gbpK(n.breakEvenSalePrice)}</b></span>}
+                  </> : <>
+                    <span className="ai-chip">Cash flow <b>{gbp(n.monthlyCashflow)}</b> a month</span>
+                    <span className="ai-chip">Downside <b>{gbp(n.downsideMonthlyCashflow)}</b> a month</span>
+                    <span className="ai-chip">Net yield <b>{(n.netYield * 100).toFixed(1)}%</b></span>
+                    <span className="ai-chip">Stress test <b>{n.icrPass ? 'pass' : 'fail'}</b>{n.icr != null ? ` (${(n.icr * 100).toFixed(0)}%)` : ''}</span>
+                  </>}
+                  <span className="ai-chip">{n.taxName} <b>{gbp(n.transactionTax)}</b></span>
+                </div>
+              </div>
+              {x.removedClaims > 0 && <p className="ai-prop-note">{x.removedClaims} statement{x.removedClaims === 1 ? ' was' : 's were'} left out because {x.removedClaims === 1 ? 'it quoted a figure' : 'they quoted figures'} Streetkey didn’t calculate.</p>}
+            </>}
+          </AiCard>
+        )}
+      </div>
+    </Section>
+  );
+}
 
 const STRATS: { value: Strategy; label: string }[] = [
   { value: 'btl', label: 'Buy-to-let' }, { value: 'brrr', label: 'BRRR' }, { value: 'flip', label: 'Flip' }, { value: 'hmo', label: 'HMO' }, { value: 'commercial', label: 'Commercial' },
@@ -41,6 +114,7 @@ export default function Investment() {
   const be = useMemo(() => breakEven(active), [active]);
   const designLabel = params.get('label');
   const baseMetric = flip ? r.flipProfit : r.monthlyCashflow;
+  const rule = useMemo(() => ruleVerdict(i.strategy, r, all[0].r), [i.strategy, r, all]);
 
   return (
     <div className="stack" style={{ gap: 18 }}>
@@ -138,6 +212,8 @@ export default function Investment() {
               </div>
             </div>
           )}
+
+          <VerdictPanel i={i} scen={scen} propertyId={prop?.id} rule={rule} />
 
           <Section title="Where the cash goes" kicker="Capital stack">
             <Stacked parts={r.breakdown.map((b, k) => ({ label: b.label, value: b.value, color: ['var(--ink)', 'var(--accent)', 'var(--blue)', 'var(--gold)', 'var(--sage)', '#8a6fb0', '#9aa0a6'][k % 7] }))} />

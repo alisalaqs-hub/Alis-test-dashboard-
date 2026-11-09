@@ -15,6 +15,7 @@ import { estimateRefurb, hiddenDefectRisks, regionFromPostcode, REGIONS } from '
 import { describeQuery, parseQuery, runSearch } from '../../../../src/engine/search';
 import { transactionTax, type BuyerType, type Nation } from '../../../../src/engine/tax';
 import { rentalScenario, valuationScenario } from '../../../../src/engine/valuation';
+import { q } from '../../db';
 import { untrusted, type Tool } from '../core';
 import { ensureLiveRegistry } from '../registry';
 import { S, type Infer } from '../schema';
@@ -54,51 +55,105 @@ export function publicCard(p: Property) {
 }
 export type PublicCard = ReturnType<typeof publicCard>;
 
-function dataNotes(p: Property): string[] {
-  if (isDemo(p)) return ['Demonstration listing: a fictional home with illustrative figures. Say so if you discuss it in detail or are asked whether it is real.'];
+/**
+ * What the lister actually supplied for a live listing. The shared registry fills gaps with
+ * defaults (build era 1945–1979, fair condition, loft "possible", 0 days on market, 0-minute
+ * commute…) so the engines can run; those defaults must never be presented as facts.
+ */
+export interface LiveFacts { eraGiven: boolean; conditionGiven: boolean; listedOn: string | null; daysOnMarket: number | null }
+const NOTHING_KNOWN: LiveFacts = { eraGiven: false, conditionGiven: false, listedOn: null, daysOnMarket: null };
+
+/** One query for up to 20 live homes (demo homes need none). Unknown on any error: treated as not supplied. */
+export async function liveFacts(homes: Property[]): Promise<Map<string, LiveFacts>> {
+  const out = new Map<string, LiveFacts>();
+  const refs = [...new Set(homes.filter((p) => !isDemo(p)).map((p) => p.id))].slice(0, 20);
+  if (!refs.length) return out;
+  const rows = await q<{ ref: string; era: string | null; condition: string | null; published_at: Date | null }>(
+    `SELECT ref, era, condition, published_at FROM listings WHERE ref = ANY($1::text[]) AND status IN ('live', 'under_offer')`, [refs],
+  ).catch(() => []);
+  for (const r of rows) {
+    const at = r.published_at ? new Date(r.published_at) : null;
+    out.set(r.ref, {
+      eraGiven: !!r.era, conditionGiven: !!r.condition, listedOn: at ? at.toISOString().slice(0, 10) : null,
+      daysOnMarket: at ? Math.max(0, Math.floor((Date.now() - at.getTime()) / 86_400_000)) : null,
+    });
+  }
+  return out;
+}
+const factsFor = async (p: Property) => (isDemo(p) ? null : (await liveFacts([p])).get(p.id) ?? NOTHING_KNOWN);
+
+/** Engine estimates for live listings that rest on registry defaults, in words for the model. */
+function assumedFor(p: Property, f: LiveFacts | null): string[] {
+  if (!f) return [];
   return [
-    'Live listing on Streetkey; the details were supplied by the lister.',
-    'Value and rent ranges use Streetkey’s demonstration evidence for the area, not HM Land Registry records.',
-    'Schools, journey times and flood/subsidence risk have not been checked for this listing yet.',
+    ...(f.eraGiven ? [] : [`build era: not stated by the lister; estimates assume ${p.era}`]),
+    ...(f.conditionGiven ? [] : [`condition: not stated by the lister; estimates assume ${p.condition} condition`]),
   ];
 }
 
-/** Facts plus engine intelligence for one home (used by get_property and as page context). */
-export function propertyIntel(p: Property) {
+function dataNotes(p: Property, f: LiveFacts | null): string[] {
+  if (isDemo(p) || !f) return ['Demonstration listing: a fictional home with illustrative figures. Say so if you discuss it in detail or are asked whether it is real.'];
+  const assumed = assumedFor(p, f);
+  return [
+    'Live listing on Streetkey; the details were supplied by the lister.',
+    'Value and rent ranges use Streetkey’s demonstration evidence for the area, not HM Land Registry records.',
+    'Schools, journey times, loft and extension potential, and flood/subsidence risk have not been assessed for this listing yet: do not describe them.',
+    ...(assumed.length ? [`The lister left some details blank, so estimates use assumptions (${assumed.map((a) => a.split(':')[0]).join(', ')}). Say so if you quote refurbishment, EPC or defect estimates.`] : []),
+  ];
+}
+
+const NOT_ASSESSED = 'not assessed';
+
+/**
+ * Facts plus engine intelligence for one home (used by get_property and as page context).
+ * Pass `facts` for live listings; without them every gap is treated as not supplied by the lister.
+ */
+export function propertyIntel(p: Property, facts?: LiveFacts | null) {
   const demo = isDemo(p);
+  const f = demo ? null : facts ?? NOTHING_KNOWN;
   const sale = p.listing !== 'rent';
   const refurb = estimateRefurb(refurbInputFor(p));
   const ds = sale ? dealScore(p) : null;
   const val = sale ? valuationScenario(p) : null;
   const rent = rentalScenario(p);
   const epc = epcPathway(p);
-  const loft = sale ? loftScenario(p) : null;
+  const loft = sale && demo ? loftScenario(p) : null;
+  const condition = !f || f.conditionGiven ? p.condition : 'not stated';
+  const assumed = assumedFor(p, f);
   return {
     ...homeCard(p),
     street: demo ? p.street : lt(p, p.street, 80), // street only: never a private seller's house number
-    nation: p.nation, era: p.era, condition: p.condition, storeys: p.storeys,
-    epc: { current: p.epc.current, potential: p.epc.potential }, councilTaxBand: p.councilTax,
+    nation: p.nation, era: !f || f.eraGiven ? p.era : 'not stated', condition, storeys: demo ? p.storeys : null,
+    epc: { current: p.epc.current, potential: demo ? p.epc.potential : null }, councilTaxBand: p.councilTax,
     leaseYears: p.leaseYears ?? null, serviceChargeAnnual: p.serviceChargeAnnual ?? null, groundRentAnnual: p.groundRentAnnual ?? null,
-    features: p.features.slice(0, 8).map((f) => lt(p, f, 60)),
+    features: p.features.slice(0, 8).map((x) => lt(p, x, 60)),
     description: !demo && p.description ? untrusted('listing_description', p.description, 600) : null,
     source: demo ? 'Streetkey demonstration data' : lt(p, `${p.source?.name ?? 'Lister'}${p.source?.verified ? ' (verified)' : ''}`, 80),
-    daysOnMarket: p.daysOnMarket,
-    priceHistory: p.priceHistory.slice(-3),
+    daysOnMarket: f ? f.daysOnMarket : p.daysOnMarket,
+    ...(f ? { listedOn: f.listedOn } : {}),
+    priceHistory: demo ? p.priceHistory.slice(-3) : null, // not tracked for live listings yet
     valuation: val ? {
       asIsRange: val.asIs, postWorksRange: val.postWorks, askingPriceIs: val.verdict, askingVsMidPct: pct1(val.askingVsMid),
       confidence: val.confidence, soldComparables: val.evidenceCount, note: 'Indicative range from comparables; not a valuation.',
     } : null,
     rentEstimatePcm: { low: rent.low, mid: rent.mid, high: rent.high, basis: rent.basis },
-    dealScore: ds ? { score: ds.total, outOf: 100, grade: ds.grade, grossYieldPct: pct1(ds.grossYield), upliftAfterWorks: whole(ds.uplift) } : null,
-    refurbEstimate: { total: refurb.total, low: refurb.low, high: refurb.high, weeks: refurb.programmeWeeks, confidence: refurb.confidence, scope: `Typical scope for ${p.condition} condition, standard finish, including VAT` },
+    dealScore: ds ? {
+      score: ds.total, outOf: 100, grade: ds.grade, grossYieldPct: pct1(ds.grossYield), upliftAfterWorks: whole(ds.uplift),
+      ...(f ? { basis: 'Uses area estimates; flood risk, planning constraints and tenant demand have not been checked for this listing.' } : {}),
+    } : null,
+    refurbEstimate: {
+      total: refurb.total, low: refurb.low, high: refurb.high, weeks: refurb.programmeWeeks, confidence: refurb.confidence,
+      scope: condition === 'not stated' ? `Typical scope for a home in ${p.condition} condition (assumed: the lister did not state the condition), standard finish, including VAT` : `Typical scope for ${p.condition} condition, standard finish, including VAT`,
+    },
     epcUpgrades: epc.steps.slice(0, 3).map((s) => ({ measure: s.measure, cost: s.cost, bandAfter: s.band })),
+    ...(assumed.length ? { assumed } : {}),
     loftConversion: loft ? { areaM2: loft.area, cost: loft.cost, valueUplift: loft.valueUplift, net: loft.net } : null,
-    loftPotential: p.loftPotential, extensionPotential: p.extensionPotential,
+    loftPotential: demo ? p.loftPotential : NOT_ASSESSED, extensionPotential: demo ? p.extensionPotential : NOT_ASSESSED,
     schools: demo ? p.schools.slice(0, 3).map((s) => ({ name: s.name, ofsted: s.rating, distanceKm: s.distanceKm })) : null,
     commute: demo && p.commute.minutes > 0 ? { to: p.commute.to, minutes: p.commute.minutes, mode: p.commute.mode, station: p.station.name, walkMins: p.station.walkMins } : null,
     risks: demo ? { flood: p.risks.flood, subsidence: p.risks.subsidence, conservationArea: p.risks.conservationArea, article4: p.risks.article4, listedBuilding: p.risks.listed, radon: p.risks.radon } : null,
     planningNearby: demo ? p.planningNearby.slice(0, 3).map((a) => ({ desc: a.desc, decision: a.decision, distanceM: a.distanceM })) : null,
-    dataNotes: dataNotes(p),
+    dataNotes: dataNotes(p, f),
     links: { details: `/property/${p.id}`, invest: `/invest?property=${p.id}`, refurb: `/estimate?property=${p.id}`, design: `/studio?property=${p.id}` },
   };
 }
@@ -144,21 +199,43 @@ async function searchHomes(a: Infer<typeof SearchArgs>) {
   need(text.length > 0, 'Give a search query.');
   const mode = (['buy', 'rent', 'invest'] as const).includes(a.mode) ? a.mode : 'buy';
   await ensureLiveRegistry();
-  const q = parseQuery(text);
-  q.intent = mode;
-  const hits = runSearch(q, PROPERTIES);
+  const query = parseQuery(text);
+  query.intent = mode;
+  const all = runSearch(query, PROPERTIES);
+  // Live listings have no journey times yet (the registry says 0 minutes), so they can't be said to meet a commute limit.
+  const hits = query.maxCommuteMins ? all.filter((h) => isDemo(h.property)) : all;
+  const top = hits.slice(0, 6);
+  const facts = await liveFacts(top.map((h) => h.property));
+  const notes = [
+    ...(top.some((h) => isDemo(h.property)) ? ['Homes with demo: true are fictional demonstration listings.'] : []),
+    ...(top.some((h) => !isDemo(h.property)) ? ['For live listings (demo: false), journey times, loft and extension potential, schools and risks have not been assessed yet.'] : []),
+    ...(hits.length < all.length ? ['Live listings were left out because their journey times have not been calculated yet.'] : []),
+  ];
   return {
-    understood: describeQuery(q), notSupportedYet: q.unsupported, totalMatches: hits.length,
-    homes: hits.slice(0, 6).map((h) => ({ ...homeCard(h.property), dealGrade: h.property.listing === 'rent' ? null : h.dealGrade, reasons: h.reasons.slice(0, 3), cautions: h.cautions.slice(0, 2) })),
+    understood: describeQuery(query), notSupportedYet: query.unsupported, totalMatches: hits.length,
+    homes: top.map((h) => {
+      const f = isDemo(h.property) ? null : facts.get(h.property.id) ?? NOTHING_KNOWN;
+      return {
+        ...homeCard(h.property), dealGrade: h.property.listing === 'rent' ? null : h.dealGrade,
+        reasons: liveSafe(h.reasons, f).slice(0, 3), cautions: liveSafe(h.cautions, f).slice(0, 2),
+      };
+    }),
     searchLink: `/search?q=${encodeURIComponent(text)}&mode=${mode}`,
-    note: hits.some((h) => isDemo(h.property)) ? 'Homes with demo: true are fictional demonstration listings.' : null,
+    note: notes.length ? notes.join(' ') : null,
   };
+}
+
+/** Engine reasons that rest on registry defaults for live listings (journey times, loft, schools, risks…). */
+const UNASSESSED = /door-to-door|commute|loft|extension|rental demand|demand index|schools?|ofsted|conversion|flood|subsidence|article 4|listed building|conservation/i;
+function liveSafe(lines: string[], f: LiveFacts | null): string[] {
+  if (!f) return lines;
+  return lines.filter((l) => !UNASSESSED.test(l) && (f.conditionGiven || !/^condition\b|good condition/i.test(l)));
 }
 
 async function getHome(a: Infer<typeof IdArgs>) {
   await ensureLiveRegistry();
   const p = findHome(a.id);
-  return p ? propertyIntel(p) : notFound(a.id);
+  return p ? propertyIntel(p, await factsFor(p)) : notFound(a.id);
 }
 
 async function compareHomes(a: Infer<typeof CompareArgs>) {
@@ -166,16 +243,20 @@ async function compareHomes(a: Infer<typeof CompareArgs>) {
   const ids = [...new Set((Array.isArray(a.ids) ? a.ids : []).map(String))].slice(0, 4);
   need(ids.length > 0, 'Give two to four property ids.');
   const found = ids.map((id) => findHome(id)).filter((p): p is Property => !!p);
+  const facts = await liveFacts(found);
   return {
     homes: found.map((p) => {
       const sale = p.listing !== 'rent';
       const ds = sale ? dealScore(p) : null;
       const val = sale ? valuationScenario(p) : null;
+      const f = isDemo(p) ? null : facts.get(p.id) ?? NOTHING_KNOWN;
+      const assumed = assumedFor(p, f);
       return {
         ...homeCard(p), epc: p.epc.current, councilTaxBand: p.councilTax,
         dealScore: ds?.total ?? null, dealGrade: ds?.grade ?? null, grossYieldPct: ds ? pct1(ds.grossYield) : null,
         askingPriceIs: val?.verdict ?? null, asIsMid: val?.asIs.mid ?? null, rentEstimateMidPcm: rentalScenario(p).mid,
-        refurbEstimate: estimateRefurb(refurbInputFor(p)).total, floodRisk: isDemo(p) ? p.risks.flood : 'not checked', daysOnMarket: p.daysOnMarket,
+        refurbEstimate: estimateRefurb(refurbInputFor(p)).total, floodRisk: f ? 'not checked' : p.risks.flood, daysOnMarket: f ? f.daysOnMarket : p.daysOnMarket,
+        ...(assumed.length ? { assumed } : {}),
       };
     }),
     notFound: ids.filter((id) => !findHome(id)),
@@ -199,14 +280,18 @@ async function refurbEstimate(a: Infer<typeof RefurbArgs>) {
   await ensureLiveRegistry();
   const p = findHome(a.propertyId);
   if (!p) return notFound(a.propertyId);
+  const f = await factsFor(p);
   const input = refurbInputFor(p);
   const e = estimateRefurb(input);
+  const eraKnown = !f || f.eraGiven;
   return {
-    home: { id: p.id, title: lt(p, p.title, 120), condition: p.condition, floorAreaM2: p.floorArea, demo: isDemo(p) },
+    home: { id: p.id, title: lt(p, p.title, 120), condition: !f || f.conditionGiven ? p.condition : 'not stated', floorAreaM2: p.floorArea, demo: isDemo(p) },
     total: e.total, low: e.low, high: e.high, confidence: e.confidence, weeksOnSite: e.programmeWeeks, costPerM2ExVat: e.costPerM2, includesVat: true,
     byTrade: e.byTrade.slice(0, 6).map((t) => ({ trade: t.trade, total: Math.round(t.total) })),
-    assumptions: e.assumptions.slice(0, 3), exclusions: e.exclusions.slice(0, 3),
-    hiddenDefectRisks: hiddenDefectRisks(input).slice(0, 3),
+    // The engine quotes the postcode it priced from; only the district is ever shown (private sellers' privacy).
+    assumptions: [...assumedFor(p, f), ...e.assumptions.slice(0, 3).map((s) => s.split(p.postcode.toUpperCase()).join(p.district))], exclusions: e.exclusions.slice(0, 3),
+    // Without a stated build era, how likely each defect is has not been assessed: they are general things to check.
+    hiddenDefectRisks: hiddenDefectRisks(input).slice(0, 3).map((r) => (eraKnown ? r : { risk: r.risk, likelihood: NOT_ASSESSED, allowance: r.allowance, basis: 'general check: based on an assumed build era, because the lister did not state it' })),
     calculator: `/estimate?property=${p.id}`,
   };
 }
@@ -235,6 +320,7 @@ async function investmentCheck(a: Infer<typeof InvestArgs>) {
   if (p.listing === 'rent') return { error: 'This home is to rent, so a purchase investment check does not apply.' };
   need(finite(a.depositPct, 5, 100), 'Deposit must be between 5% and 100%.');
   need(finite(a.ratePct, 0, 20), 'Interest rate must be between 0% and 20%.');
+  const assumed = assumedFor(p, await factsFor(p));
   const refurb = estimateRefurb(refurbInputFor(p)).total;
   const rent = p.type === 'commercial' ? p.estRentPcm : rentalScenario(p).mid;
   if (!rent) return { error: 'There is no rent estimate for this home, so yields cannot be worked out.' };
@@ -249,6 +335,7 @@ async function investmentCheck(a: Infer<typeof InvestArgs>) {
       strategy: 'Buy-to-let, interest-only mortgage, bought as an additional property by an individual',
       depositPct: a.depositPct, loanToValuePct: Math.round((100 - a.depositPct) * 10) / 10, ratePct: a.ratePct,
       rentPcm: rent, refurbishment: refurb, voidsPct: pct1(DEFAULT_INVESTMENT.voidPct), managementPct: pct1(DEFAULT_INVESTMENT.managementPct), maintenancePct: pct1(DEFAULT_INVESTMENT.maintenancePct),
+      ...(assumed.length ? { refurbishmentBasis: assumed } : {}),
     },
     grossYieldPct: pct1(r.grossYield), netYieldPct: pct1(r.netYield),
     monthlyCashFlowBeforeTax: whole(r.monthlyCashflow), annualRent: whole(r.annualRent), annualRunningCosts: whole(r.annualCosts), annualMortgageInterest: whole(r.annualFinance),

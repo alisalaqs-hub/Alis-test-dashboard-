@@ -7,7 +7,7 @@
 import { chatJSON, HOUSE_RULES, modelFor, untrusted } from '../core';
 import { S, type Infer } from '../schema';
 import { one, q } from '../../db';
-import { clip, loadEnquiry } from './shared';
+import { clip, loadEnquiry, redactContacts, UUID_RE } from './shared';
 
 export const INTENTS = ['book_viewing', 'ask_question', 'make_offer', 'check_availability', 'rental_application', 'other'] as const;
 export const URGENCIES = ['this_week', 'this_month', 'flexible', 'unknown'] as const;
@@ -88,7 +88,7 @@ export function chipsFor(t: Pick<TriageDTO, 'intent' | 'position' | 'urgency'>, 
 
 export interface TriageRow { enquiry_id: string; intent: string; buyer_position: BuyerPosition; questions: string[]; urgency: string; summary: string; sentiment: string; model: string | null; updated_at: Date; kind: string }
 export const triageDTO = (r: TriageRow): TriageDTO => {
-  const position = { chainFree: null, mortgageInPrinciple: null, cash: null, firstTimeBuyer: null, hasPropertyToSell: null, moveTimescale: null, ...(r.buyer_position ?? {}) } as BuyerPosition;
+  const position = { chainFree: null, mortgageInPrinciple: null, cash: null, firstTimeBuyer: null, hasPropertyToSell: null, moveTimescale: null, ...((r.buyer_position ?? {}) as Partial<BuyerPosition>) } as BuyerPosition;
   const base = { intent: r.intent as TriageDTO['intent'], position, urgency: r.urgency as TriageDTO['urgency'] };
   return { ...base, questions: r.questions ?? [], summary: r.summary, sentiment: r.sentiment as TriageDTO['sentiment'], chips: chipsFor(base, r.kind), model: r.model, updatedAt: r.updated_at.toISOString() };
 };
@@ -106,6 +106,7 @@ const SYSTEM = [
 
 /** Runs the triage for an enquiry and stores it. Returns what was stored (or why nothing was). */
 export async function runTriage(enquiryId: string): Promise<{ stored: boolean; skipped?: string; triage?: TriageDTO }> {
+  if (!UUID_RE.test(enquiryId)) return { stored: false, skipped: 'missing' };
   const e = await loadEnquiry(enquiryId);
   if (!e) return { stored: false, skipped: 'missing' };
   if (e.filtered) return { stored: false, skipped: 'filtered' };
@@ -115,13 +116,13 @@ export async function runTriage(enquiryId: string): Promise<{ stored: boolean; s
   const fromEnquirer = msgs.filter((m) => m.author === 'enquirer');
   if (!fromEnquirer.length) return { stored: false, skipped: 'empty' };
   const enquirerText = fromEnquirer.map((m) => m.body).join('\n');
-  const thread = msgs.map((m) => `${m.author === 'enquirer' ? 'Enquirer' : 'Lister'}: ${m.body.slice(0, 1500)}`).join('\n---\n');
+  const thread = msgs.map((m) => `${m.author === 'enquirer' ? 'Enquirer' : 'Lister'}: ${redactContacts(m.body.slice(0, 1500))}`).join('\n---\n');
   const context = `Listing: ${e.channel === 'rent' ? 'to rent' : 'for sale'}. Form type chosen by the enquirer: ${e.kind}.${e.preferred_slot ? ' They gave a preferred viewing time (see thread data).' : ''}`;
   const model = await modelFor('fast');
   const raw = await chatJSON<TriageOut>([
     { role: 'system', content: SYSTEM },
     { role: 'user', content: `${context}\n\n${untrusted('thread', `${e.preferred_slot ? `Preferred time: ${e.preferred_slot}\n` : ''}${thread}`, 9000)}` },
-  ], TriageSchema, 'enquiry_triage', { purpose: 'inbox.triage', userId: e.owner_user_id, role: 'fast', maxTokens: 1200, effort: 'low' });
+  ], TriageSchema, 'enquiry_triage', { purpose: 'inbox.triage', userId: e.owner_user_id, role: 'fast', maxTokens: 1200, effort: 'low', timeoutMs: 20_000 }); // short enough to run inside a request when no worker picks it up
   const t = validateTriage(raw, `${enquirerText}\n${e.preferred_slot ?? ''}`);
   const row = await one<TriageRow>(
     `INSERT INTO enquiry_ai (enquiry_id, intent, buyer_position, questions, urgency, summary, sentiment, model, messages_seen)

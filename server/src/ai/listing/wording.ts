@@ -64,6 +64,10 @@ const WORDS: Record<string, number> = { zero: 0, one: 1, two: 2, three: 3, four:
 // The property-size forms only ("three-bedroom house", "3-bed"): "two double bedrooms and a single" describes a subset.
 const BEDS_RE = /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)[- ]bed(room)?\b(?![- ]?s\b|rooms)/gi;
 const BATHS_RE = /\b(\d+|one|two|three|four|five|six)[- ]bath(room)?\b(?![- ]?s\b|rooms)/gi;
+const COUNT_ADJ = '(?:(?:double|single|twin|king[- ]size|good[- ]sized|generous|large|spacious|further|more|other|separate|family)[- ]+)?';
+// ("bedrooms" only: "two single beds" is furniture.)
+const BEDS_PLURAL_RE = new RegExp(`\\b(\\d+|one|two|three|four|five|six|seven|eight|nine|ten)[- ]+${COUNT_ADJ}bedrooms\\b`, 'gi');
+const BATHS_PLURAL_RE = new RegExp(`\\b(\\d+|one|two|three|four|five|six)[- ]+${COUNT_ADJ}(?:bathrooms|shower rooms)\\b`, 'gi');
 
 export interface RuleContext {
   facts: Facts;
@@ -92,22 +96,42 @@ function placeless(s: string, f: Facts) {
   return out;
 }
 
-const near = (a: number, b: number, tol = 0.005) => Math.abs(a - b) <= Math.max(0.5, Math.abs(b) * tol);
+/** Relative tolerance (unit conversions such as m² to sq ft only, never prices). */
+const near = (a: number, b: number, tol: number) => Math.abs(a - b) <= Math.max(0.5, Math.abs(b) * tol);
+/** A plain figure that is one of the stated ones: exact, or a whole number the stated value rounds to (92.4 m² written as 92). */
+const sameNumber = (n: number, x: number) => Math.abs(n - x) < 1e-6 || (Number.isInteger(n) && Math.round(x) === n);
 
-/** £ amounts in text (handles £525,000, £525k, £1.2m, 525,000 pounds, GBP 500). */
-export function moneyIn(text: string): number[] {
-  const out: number[] = [];
-  const re = /(?:£|GBP\s?)\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(k|m|million|thousand|bn)?\b|(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(k|m|million|thousand)?\s?(pounds|GBP)\b/gi;
+export interface Money { amount: number; unit: '' | 'k' | 'm' | 'bn'; decimals: number }
+
+/** £ amounts in text, with how they were written (handles £525,000, £525k, £1.2m, 525,000 pounds, GBP 500). */
+export function moneyMatchesIn(text: string): Money[] {
+  const out: Money[] = [];
+  const re = /(?:£|GBP\s?)\s?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?(k|m|million|thousand|bn)?\b|(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?(k|m|million|thousand)?\s?(pounds|GBP)\b/gi;
   for (const m of text.matchAll(re)) {
-    const raw = m[1] ?? m[3];
-    const unit = (m[2] ?? m[4] ?? '').toLowerCase();
-    let n = Number(raw.replace(/,/g, ''));
-    if (unit === 'k' || unit === 'thousand') n *= 1000;
-    else if (unit === 'm' || unit === 'million') n *= 1_000_000;
-    else if (unit === 'bn') n *= 1_000_000_000;
-    if (Number.isFinite(n)) out.push(n);
+    const raw = (m[1] ?? m[3]).replace(/,/g, '');
+    const word = (m[2] ?? m[4] ?? '').toLowerCase();
+    const unit: Money['unit'] = word === 'k' || word === 'thousand' ? 'k' : word === 'm' || word === 'million' ? 'm' : word === 'bn' ? 'bn' : '';
+    const n = Number(raw) * (unit === 'k' ? 1e3 : unit === 'm' ? 1e6 : unit === 'bn' ? 1e9 : 1);
+    if (Number.isFinite(n)) out.push({ amount: Math.round(n * 100) / 100, unit, decimals: raw.split('.')[1]?.length ?? 0 });
   }
   return out;
+}
+/** £ amounts in text, as numbers. */
+export const moneyIn = (text: string): number[] => moneyMatchesIn(text).map((m) => m.amount);
+
+/**
+ * Whether a £ amount, as written, is exactly `stated` (£525,000 or £525k for 525,000; pennies may be dropped).
+ * The only rounding allowed is a millions figure written with decimals, to its last written digit
+ * (£1.2m for £1,200,000 or £1,195,000). Anything else, however close (£527,500 for £525,000), is a different price.
+ */
+export function isStated(m: Money, stated: number): boolean {
+  if (Math.abs(m.amount - stated) < 0.005) return true;
+  if (!m.unit && Number.isInteger(m.amount) && (m.amount === Math.trunc(stated) || m.amount === Math.round(stated))) return true; // pennies left off
+  if ((m.unit === 'm' || m.unit === 'bn') && m.decimals >= 1) {
+    const step = (m.unit === 'm' ? 1e6 : 1e9) / 10 ** m.decimals;
+    return Math.abs(Math.round(stated / step) * step - m.amount) < 1;
+  }
+  return false;
 }
 
 /** Why a sentence breaks the rules (null if it's fine). */
@@ -123,16 +147,14 @@ export function sentenceProblem(sentence: string, ctx: RuleContext, allowed = al
   for (const re of SUPERLATIVE) if (re.test(s)) return 'superlative';
   // Prices: only the stated price (and stated charges) may appear.
   const money = statedMoney(f);
-  const amounts = moneyIn(s);
-  if (amounts.some((a) => !money.some((m) => near(a, m)))) return 'price';
+  if (moneyMatchesIn(s).some((a) => !money.some((m) => isStated(a, m)))) return 'price';
   // Other figures: only those in the facts or the seller's own text (floor area in sq ft is allowed).
   const nums = statedNumbers(f, ctx.sources);
   const sqftN = f.floorArea ? sqft(f.floorArea) : null;
   const stripped = s.replace(/(?:£|GBP\s?)\s?\d[\d,]*(?:\.\d+)?\s?(k|m|million|thousand|bn)?\b/gi, ' ');
   for (const n of numbersIn(stripped)) {
-    if (nums.some((x) => near(n, x, 0.001))) continue;
+    if (nums.some((x) => sameNumber(n, x))) continue;
     if (sqftN && near(n, sqftN, 0.015)) continue;
-    if (money.some((m) => near(n, m))) continue;
     return 'figure';
   }
   // Facts the text must not contradict.
@@ -145,6 +167,9 @@ export function sentenceProblem(sentence: string, ctx: RuleContext, allowed = al
   if (f.tenure === 'leasehold' && /\b(?<!share of (the )?)freehold\b/i.test(s)) return 'mismatch';
   for (const m of s.matchAll(BEDS_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n !== f.beds) return 'mismatch'; }
   for (const m of s.matchAll(BATHS_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n !== f.baths) return 'mismatch'; }
+  // Plural counts ("four bedrooms", "two double bedrooms") may describe some of the rooms, but never more than the listing has.
+  for (const m of s.matchAll(BEDS_PLURAL_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n > f.beds) return 'mismatch'; }
+  for (const m of s.matchAll(BATHS_PLURAL_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n > f.baths) return 'mismatch'; }
   // Claims the seller hasn't made (place names are taken out first: "Finsbury Park" is a town, not a park).
   const claims = placeless(s, f);
   for (const t of Object.keys(TOPICS) as Topic[]) if (!allowed.has(t) && TOPICS[t].test(claims)) return t;
@@ -208,7 +233,7 @@ export function notesProblems(notes: string, facts: Facts): Reason[] {
     if (facts.channel === 'rent' && FEES.test(s)) out.add('fees');
     if (facts.channel === 'rent' && PETS.test(s)) out.add('pets');
     for (const re of SUPERLATIVE) if (re.test(s)) out.add('superlative');
-    if (moneyIn(s).some((a) => !money.some((m) => near(a, m)))) out.add('price');
+    if (moneyMatchesIn(s).some((a) => !money.some((m) => isStated(a, m)))) out.add('price');
   }
   return [...out];
 }

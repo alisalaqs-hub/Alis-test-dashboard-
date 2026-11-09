@@ -10,7 +10,8 @@
  *
  *   POST /api/ai/automation/run    { agent, context? }  → { proposals, findings, … }
  *     Runs the agent's deterministic tools (src/ai/agents.ts, demo data), then asks the AI to
- *     propose next actions. Nothing is executed: consequential proposals go to the approval queue.
+ *     propose next actions. Nothing is executed. Every AI proposal needs approval unless it is
+ *     clearly read-only (see needsApproval in ai/briefing/generate.ts).
  *     Signed-in people may add a bounded context snapshot; visitors get demo data only.
  */
 import type { FastifyInstance } from 'fastify';
@@ -25,7 +26,8 @@ import { clip, hashOf, Snapshot, type SnapshotT } from '../ai/briefing/snapshot'
 import { HttpError, parse, requireUser } from '../services/http';
 
 const TTL_SEC = 3600;
-const VERSION = 'v1';
+// v2: type-aware figure grounding and approval-by-default for AI proposals (older cached results are not reused).
+const VERSION = 'v2';
 const JOB = 'ai.briefing';
 const AGENT_IDS = AGENTS.map((a) => a.id);
 
