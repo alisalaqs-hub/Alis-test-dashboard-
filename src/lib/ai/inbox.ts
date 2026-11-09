@@ -95,7 +95,7 @@ export function ruleInsights(l: MyListing): ListingInsights {
 
   const improve: Improvement[] = [];
   if (missing.length) improve.push({ action: 'Add the missing material information', why: missing[0].message, impact: 'high' });
-  if (photos < 3) improve.push({ action: 'Add more photos, covering every main room and the outside', why: `The listing has ${photos} photo${photos === 1 ? '' : 's'}; listings with 3 or more get far more engagement.`, impact: 'high' });
+  if (photos < 3) improve.push({ action: 'Add more photos, covering every main room and the outside', why: `The listing has ${photos} photo${photos === 1 ? '' : 's'}. Buyers want to see every main room and the outside before they enquire.`, impact: 'high' });
   else if (photos < 8) improve.push({ action: 'Add a few more photos', why: `The listing has ${photos} photos. Buyers like to see every room before they enquire.`, impact: 'medium' });
   if (words < 80) improve.push({ action: 'Write a fuller description', why: `It has ${words} words. Describe the layout, light, storage, outside space and transport links.`, impact: words < 30 ? 'high' : 'medium' });
   if (ev?.position === 'above') improve.push({ action: 'Compare your price with similar homes nearby', why: `It is above the indicative ${money(ev.low, rent)}–${money(ev.high, rent)} range from ${ev.scope} evidence.`, impact: 'high' });

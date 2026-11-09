@@ -4,6 +4,8 @@ import { config } from '../src/config';
 import { q } from '../src/db';
 import { limits } from '../src/services/ratelimit';
 import { DEFAULT_DIMS } from '../src/ai/studio/brief';
+import { mergeExtraction, type Extraction } from '../src/ai/importer/extract';
+import { rulesOnlyResult } from '../../src/lib/ai/importer';
 import { client, getApp, jpegWithExif, multipart, signUp } from './helpers';
 import { mockOpenAI, reply, TINY_PNG } from './openai-mock';
 import { fakeHosts } from './setup';
@@ -165,6 +167,126 @@ describe('AI import: check any listing', () => {
   });
 });
 
+/* ───────────── the safety net: quotes must support values, and the rules win disagreements ───────────── */
+describe('AI import: merging the AI reading with the rule reader', () => {
+  const ids = (r: { redFlags: { id: string }[] }) => r.redFlags.map((x) => x.id);
+  const read = (over: Partial<Record<keyof Extraction, unknown>>) => ({ ...EMPTY, ...over }) as unknown as Extraction;
+
+  it('drops values whose quote is in the text but does not support them, keeping the rule reader’s', () => {
+    const text = 'Two bedroom flat for sale. Price £250,000. Leasehold, 95 years remaining. EPC rating: E. Council tax band C. 721 sq ft. Service charge £1,200 per annum. Ground rent £250 per annum. London SE22 8JL.';
+    const r = mergeExtraction(read({
+      epc: f('C', 'stated', 'Council tax band C'), // a council tax quote can't give an EPC
+      floorArea: f({ amount: 721, unit: 'sqm' }, 'stated', '721 sq ft'), // wrong unit
+      serviceCharge: f({ amount: 1200, period: 'month' }, 'stated', 'Service charge £1,200 per annum'), // wrong period
+      price: f({ amount: 1200, period: 'total' }, 'stated', '£1,200'), // a service charge isn't the price
+      leaseYears: f(250, 'stated', 'Ground rent £250'), // ground rent isn't a lease length
+      saleMethod: f('auction', 'stated', null), // no quote at all
+      tenure: f('leasehold', 'stated', 'Leasehold'),
+    }), text, '');
+    expect(r.values).toMatchObject({ listing: 'sale', price: 250000, epc: 'E', councilTax: 'C', floorArea: 67, serviceChargeAnnual: 1200, groundRentAnnual: 250, leaseYears: 95, tenure: 'leasehold' });
+    expect(r.values.saleMethod).toBeUndefined();
+    for (const k of ['price', 'epc', 'floorArea', 'serviceChargeAnnual', 'leaseYears'] as const) expect(r.fields[k]).toMatchObject({ source: 'rules' });
+    expect(r.fields.tenure).toMatchObject({ source: 'both', confidence: 'stated', evidence: 'Leasehold' });
+    expect(ids(r)).toContain('lease-under-100');
+    expect(ids(r)).not.toContain('auction');
+    expect(ids(r)).not.toContain('ground-rent');
+    expect(JSON.stringify(r)).not.toMatch(/14,?400|"price":1200/);
+  });
+
+  it('keeps the rule value as “inferred” when both readers quote a different value, and shows the AI’s beside it', () => {
+    const text = 'Two bedroom flat for sale. Guide price £375,000. Offers over £350,000 considered. Leasehold, 120 years remaining. London SE22 8JL.';
+    const r = mergeExtraction(read({ price: f({ amount: 350000, period: 'total' }, 'stated', 'Offers over £350,000') }), text, '');
+    expect(r.values.price).toBe(375000);
+    expect(r.fields.price).toEqual({ confidence: 'inferred', evidence: null, source: 'rules', alt: { value: 350000, evidence: 'Offers over £350,000' } });
+  });
+
+  it('accepts values that the quote really supports, converting units and periods in code', () => {
+    const text = 'Flat for sale, leasehold. £325,000. 150 years left on the lease. EPC: C (potential B). 60 m². Service charge £300 quarterly. London SE22 8JL.';
+    const r = mergeExtraction(read({
+      price: f({ amount: 325000, period: 'total' }, 'stated', '£325,000'), epc: f('C', 'stated', 'EPC: C (potential B)'),
+      leaseYears: f(150, 'stated', '150 years left on the lease'), floorArea: f({ amount: 60, unit: 'sqm' }, 'stated', '60 m²'),
+      serviceCharge: f({ amount: 300, period: 'quarter' }, 'stated', 'Service charge £300 quarterly'),
+    }), text, '');
+    expect(r.values).toMatchObject({ price: 325000, epc: 'C', leaseYears: 150, floorArea: 60, serviceChargeAnnual: 1200 });
+    expect(r.fields.epc).toMatchObject({ confidence: 'stated', evidence: 'EPC: C (potential B)' });
+    // "potential B" is not the rating
+    expect(mergeExtraction(read({ epc: f('B', 'stated', 'EPC: C (potential B)') }), text, '').values.epc).toBe('C');
+  });
+
+  it('needs a real, un-negated auction quote before raising the auction flag', () => {
+    const negated = 'Three bedroom freehold house for sale. Guide price £300,000. Not subject to auction. London SE22 8JL.';
+    const a = mergeExtraction(read({ saleMethod: f('auction', 'stated', 'auction') }), negated, '');
+    expect(a.values.saleMethod).toBeUndefined();
+    expect(ids(a)).not.toContain('auction');
+    const real = 'Three bedroom freehold house for sale by auction. Guide price £300,000. London SE22 8JL.';
+    expect(mergeExtraction(read({ saleMethod: f('auction', 'inferred', null) }), real, '').values.saleMethod).toBeUndefined();
+    const ok = mergeExtraction(read({ saleMethod: f('auction', 'stated', 'for sale by auction') }), real, '');
+    expect(ok.values.saleMethod).toBe('auction');
+    expect(ids(ok)).toContain('auction');
+  });
+
+  it('keeps only features written in the text, never wording about who a home suits, and limits the AI’s own flags', () => {
+    const text = 'Two bedroom leasehold flat to rent, £1,500 pcm. 90 years remaining. Private balcony. No admin fees. Bright, flooded with natural light. EPC C. Council tax band B. London SE22 8JL.';
+    const r = mergeExtraction(read({
+      features: ['Ideal for young professionals', 'Close to excellent schools', 'Private balcony', 'Roof terrace'],
+      redFlags: [
+        { kind: 'missing', severity: 'high', title: 'Planning permission missing', detail: 'The loft conversion is unlawful.', evidence: null },
+        { kind: 'missing', severity: 'medium', title: 'Parking not mentioned', detail: 'There is definitely no parking, which breaches the rules.', evidence: null },
+        { kind: 'stated', severity: 'high', title: 'Admin fees charged', detail: 'Admin fees are mentioned.', evidence: 'No admin fees' },
+        { kind: 'stated', severity: 'low', title: 'Flood risk', detail: 'Flooding is mentioned.', evidence: 'flooded with natural light' },
+        { kind: 'stated', severity: 'medium', title: 'Bright but small', detail: 'Perfect for couples.', evidence: 'Bright' },
+      ],
+      questionsToAsk: ['Is it near good schools for families?', 'Is there a lift to the flat?', 'Is the fee illegal?'],
+    }), text, '');
+    expect(r.values.features).toEqual(['Balcony', 'Private balcony']); // the rule reader's, plus the AI's that is written in the text
+    const ai = r.redFlags.filter((x) => x.source === 'ai');
+    expect(ai).toEqual([{ id: 'ai-gap-parking', severity: 'low', title: 'Parking not mentioned', detail: expect.stringMatching(/^Ask whether there is parking/), evidence: null, source: 'ai' }]);
+    expect(ids(r)).not.toContain('tenant-fees');
+    expect(ids(r)).not.toContain('flood');
+    expect(r.questionsToAsk).toContain('Is there a lift to the flat?');
+    expect(r.questionsToAsk.join(' ')).not.toMatch(/schools|families|illegal/);
+  });
+});
+
+describe('AI import: the built-in reader on its own', () => {
+  const extra = (text: string) => rulesOnlyResult(text).redFlags.map((x) => x.id)
+    .filter((x) => !['no-epc', 'tenure-missing', 'council-tax', 'floor-area', 'service-charge', 'ground-rent', 'lease-unknown'].includes(x));
+
+  it('does not raise flags on negated or look-alike wording', () => {
+    for (const t of [
+      'Flat to rent £1,200 pcm. No admin fees. London SE22 8JL.',
+      'Flat to rent £1,200 pcm. No admin, referencing or check-out fees. London SE22 8JL.',
+      'Flat to rent £1,200 pcm. Admin fees: none. London SE22 8JL.',
+      'House for sale £300,000. Not subject to auction. London SE22 8JL.',
+      'House for sale £300,000. Flooded with natural light. Light-flooded kitchen. Floods of natural light. London SE22 8JL.',
+      'Freehold detached house for sale £600,000. Contemporary timber cladding to the rear extension. London SE22 8JL.',
+      'House for sale £300,000. Free of Japanese knotweed. Timber-framed windows. Probate granted. London SE22 8JL.',
+    ]) expect(extra(t), t).toEqual([]);
+  });
+
+  it('still raises them when the wording really says so', () => {
+    expect(extra('Flat to rent £1,200 pcm. Admin fee £150. London SE22 8JL.')).toContain('tenant-fees');
+    expect(extra('House for sale £300,000. For sale by auction. London SE22 8JL.')).toContain('auction');
+    expect(extra('House for sale £300,000. No onward chain, cash buyers only. London SE22 8JL.')).toContain('cash-only');
+    expect(extra('House for sale £300,000. The cellar flooded in 2019. London SE22 8JL.')).toContain('flood');
+    expect(extra('Leasehold flat for sale £300,000. 120 years remaining. Cladding on the building. London SE22 8JL.')).toContain('cladding');
+    expect(extra('Freehold house for sale £600,000. EWS1 form available for the cladding. London SE22 8JL.')).toContain('cladding');
+  });
+
+  it('reads the sale price, not a monthly charge, and keeps each charge’s period', () => {
+    const r = rulesOnlyResult('Two bedroom flat for sale. Price £250,000. Leasehold, 95 years remaining. Service charge £100 per month. Ground rent £250 per annum. London SE22 8JL.');
+    expect(r.values).toMatchObject({ listing: 'sale', price: 250000, serviceChargeAnnual: 1200, groundRentAnnual: 250, leaseYears: 95 });
+    expect(r.redFlags.map((x) => x.id)).not.toContain('ground-rent');
+    expect(r.redFlags.map((x) => x.id)).not.toContain('service-charge');
+    expect(r.questionsToAsk.join(' ')).not.toMatch(/ground rent/i);
+    const q = rulesOnlyResult('Flat for sale. £250,000. Leasehold, 110 years left. Service charge: £300 quarterly. Ground rent: £125 half yearly. London SE22 8JL.');
+    expect(q.values).toMatchObject({ listing: 'sale', price: 250000, serviceChargeAnnual: 1200, groundRentAnnual: 250 });
+    // the ground rent stays "stated" in the text even if it was cleared on the page
+    const cleared = rulesOnlyResult('Leasehold flat for sale. £250,000. 110 years left. Ground rent £250 pa. London SE22 8JL.');
+    expect(cleared.redFlags.map((x) => x.id)).not.toContain('ground-rent');
+  });
+});
+
 /* ───────────────────────── Room redesign (background job) ───────────────────────── */
 describe('AI room redesign job', () => {
   const photo = (fields: Record<string, string> = { room: 'kitchen', style: 'scandi', brief: 'Pale oak, sage green', consent: 'true' }) =>
@@ -253,6 +375,20 @@ describe('AI room redesign job', () => {
       expect(row.attempts).toBe(2);
       expect((await c.get('/api/ai/room-images')).json.items[0].status).toBe('done');
     } finally { ai.restore(); }
+  });
+
+  it('closes out designs that have been running for more than 30 minutes, and leaves recent ones alone', async () => {
+    const { c, user } = await signUp();
+    const [old] = await q<{ id: string }>(`INSERT INTO ai_images (user_id, room, style, prompt, model, status, created_at) VALUES ($1, 'kitchen', 'Modern', 'x', 'gpt-image-1', 'running', now() - interval '31 minutes') RETURNING id`, [user.id]);
+    const [recent] = await q<{ id: string }>(`INSERT INTO ai_images (user_id, room, style, prompt, model, status, created_at) VALUES ($1, 'kitchen', 'Modern', 'x', 'gpt-image-1', 'running', now() - interval '5 minutes') RETURNING id`, [user.id]);
+    const other = await signUp();
+    const [theirs] = await q<{ id: string }>(`INSERT INTO ai_images (user_id, room, style, prompt, model, status, created_at) VALUES ($1, 'kitchen', 'Modern', 'x', 'gpt-image-1', 'running', now() - interval '31 minutes') RETURNING id`, [other.user.id]);
+    const hist = (await c.get('/api/ai/room-images')).json.items;
+    expect(hist.find((h: { id: string }) => h.id === old.id)).toMatchObject({ status: 'failed', error: 'This design didn’t finish. Please try again.' });
+    expect(hist.find((h: { id: string }) => h.id === recent.id)).toMatchObject({ status: 'running', error: null });
+    expect(hist.find((h: { id: string }) => h.id === theirs.id)).toBeUndefined();
+    // only your own designs are touched
+    expect((await q<{ status: string }>('SELECT status FROM ai_images WHERE id = $1', [theirs.id]))[0].status).toBe('running');
   });
 
   it('closes out designs whose job failed without a result', async () => {
@@ -389,6 +525,23 @@ describe('AI describe a room photo', () => {
       expect(img.image_url.url).toMatch(/^data:image\/jpeg;base64,/);
       expect(Buffer.from(img.image_url.url.split(',')[1], 'base64').toString('latin1')).not.toMatch(/secret-location/);
       expect(call.messages[0].content).toMatch(/Not a survey|not a survey/);
+    } finally { ai.restore(); }
+  });
+
+  it('answers with a safe message when the vision model fails, without caching the failure', async () => {
+    let fail = true;
+    const ai = mockOpenAI({ chat: () => (fail ? { status: 500, error: { message: 'upstream exploded sk-proj-SECRETKEY123' } } : reply.json(ANALYSIS)) });
+    try {
+      const { c } = await signUp();
+      const bathroom = () => form({ consent: 'true', room: 'bathroom' }); // a photo and hint not cached by earlier tests
+      const r = await send(c.cookie, bathroom());
+      expect(r.status).toBe(502);
+      expect(r.json.error.message).toBe('The AI service had a problem. Please try again.');
+      expect(JSON.stringify(r.json)).not.toMatch(/exploded|SECRETKEY/);
+      fail = false;
+      const again = await send(c.cookie, bathroom());
+      expect(again.status).toBe(200);
+      expect(again.json.analysis.isRoom).toBe(true);
     } finally { ai.restore(); }
   });
 

@@ -419,10 +419,19 @@ function ReplyAssist({ id, kind, triage, onDraft }: { id: string; kind: string; 
 }
 
 /** The AI's reading of an enquiry, beside the conversation (lister only). */
-function ThreadTriage({ res }: { res: TriageResponse | null }) {
+function ThreadTriage({ res, stalled, onCheck }: { res: TriageResponse | null; stalled: boolean; onCheck: () => void }) {
   const ai = useAi();
   if (!ai.available || !res || res.filtered) return null;
-  if (res.status === 'pending') return <AiCard title="Enquiry summary" tone="quiet"><AiThinking label="Summarising this enquiry" /></AiCard>;
+  if (res.status === 'pending') {
+    // Polling has stopped and the summary still isn't ready: say so quietly instead of spinning for ever.
+    if (stalled) return (
+      <AiCard title="Enquiry summary" tone="quiet">
+        <p className="small muted" role="status" style={{ margin: 0 }}>The summary isn’t ready yet. Check back shortly.</p>
+        <button type="button" className="btn sm ghost" style={{ alignSelf: 'flex-start' }} onClick={onCheck}>Check again</button>
+      </AiCard>
+    );
+    return <AiCard title="Enquiry summary" tone="quiet"><AiThinking label="Summarising this enquiry" /></AiCard>;
+  }
   if (!res.triage) return null;
   const t = res.triage;
   return (
@@ -441,6 +450,8 @@ function ThreadInner() {
   const [body, setBody] = useState('');
   const [suggested, setSuggested] = useState<SuggestedReply | null>(null);
   const [tri, setTri] = useState<TriageResponse | null>(null);
+  const [triStalled, setTriStalled] = useState(false);
+  const [triCheck, setTriCheck] = useState(0);
   const [released, setReleased] = useState<{ text: string; ok: boolean } | null>(null);
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const form = useForm();
@@ -452,14 +463,17 @@ function ThreadInner() {
     if (!isLister) return;
     let live = true, tries = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    setTriStalled(false);
     const fetchIt = () => inboxAi.triage(id).then((r) => {
       if (!live) return;
       setTri(r);
-      if (r.status === 'pending' && tries++ < 5) timer = setTimeout(fetchIt, 3000);
-    }).catch(() => { /* optional */ });
+      if (r.status !== 'pending') return;
+      if (tries++ < 5) timer = setTimeout(fetchIt, 3000);
+      else setTriStalled(true);
+    }).catch(() => { if (live && tries > 0) setTriStalled(true); /* optional */ });
     void fetchIt();
     return () => { live = false; if (timer) clearTimeout(timer); };
-  }, [id, isLister]);
+  }, [id, isLister, triCheck]);
   if (!t) return <AccountShell title="Conversation"><Checking /></AccountShell>;
   const mine = (m: MessageDTO) => m.author === t.role;
   const left = unfilled(body, suggested?.placeholders ?? []);
@@ -510,7 +524,7 @@ function ThreadInner() {
             {t.preferredSlot && <span className="small">Preferred time: <b>{t.preferredSlot}</b></span>}
             {t.role === 'lister' && <><span className="small">{t.contact.name}</span>{t.contact.email && <a className="small" href={`mailto:${t.contact.email}`}>{t.contact.email}</a>}{t.contact.phone && <a className="small" href={`tel:${t.contact.phone.replace(/\s/g, '')}`}>{t.contact.phone}</a>}</>}
           </div>
-          {isLister && <ThreadTriage res={tri} />}
+          {isLister && <ThreadTriage res={tri} stalled={triStalled} onCheck={() => setTriCheck((n) => n + 1)} />}
         </div>
       </div>
     </AccountShell>

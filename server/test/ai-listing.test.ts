@@ -475,7 +475,7 @@ describe('photo consent', () => {
     try {
       const { c, ref, user } = await newListing();
       // preview without the consent field (or with anything but 'true')
-      for (const fields of [{}, { consent: 'yes' }]) {
+      for (const fields of [{}, { consent: 'yes' }] as Record<string, string>[]) {
         const m = multipart([{ field: 'photos', name: 'a.png', type: 'image/png', data: FRONT }], fields);
         const r = await c.raw('POST', '/api/ai/listing/photos/preview', m.payload, m.headers);
         expect(r.status).toBe(400);
