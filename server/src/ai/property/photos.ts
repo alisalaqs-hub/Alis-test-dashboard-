@@ -182,7 +182,7 @@ export function mapObservations(obs: PhotoObservation[], facts: RefurbPhotoFacts
   const heatLabel = (h: Heating) => (h === 'full' ? 'New heating system' : h === 'boiler' ? 'New boiler' : h === 'heat-pump' ? 'Heat pump' : 'No change');
   if (seen('heating', 'boiler')) {
     const fromPhotos: Heating = act('heating') === 'replace' ? 'full' : act('boiler') === 'replace' ? 'boiler' : 'none';
-    let h = fromPhotos;
+    let h: Heating = fromPhotos;
     if (inv('heating')) h = most(HEAT_RANK, h, base.scope.heating);
     if (inv('boiler')) h = most(HEAT_RANK, h, 'boiler', seen('heating') && !inv('heating') ? 'none' : base.scope.heating);
     s.heating = h;

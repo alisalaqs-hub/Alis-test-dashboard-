@@ -5,7 +5,7 @@ import { enqueue } from '../src/ai/jobs';
 import { finalise, statesFixedRent } from '../src/ai/listing/describe';
 import { imageSize, isPlaceholderAlt, photoTips, suggestOrder } from '../src/ai/listing/photos';
 import { ASSUMED_YIELD_PCT, CONDITION_ADJ, PRICE_TIMING, PriceGuideBody, priceRange, strayFigures } from '../src/ai/listing/price';
-import { cleanText, isStated, moneyMatchesIn, sentenceProblem } from '../src/ai/listing/wording';
+import { cleanText, isStated, moneyMatchesIn, reviewText, sentenceProblem } from '../src/ai/listing/wording';
 import { FactsSchema } from '../src/ai/listing/facts';
 import { fetchableExternal, LISTING_PHOTO_CONSENT, photoLimits } from '../src/routes/ai-listing';
 import { client, jpegWithExif, LISTING, multipart, signUp } from './helpers';
@@ -530,7 +530,7 @@ describe('photo consent', () => {
       expect(r.status).toBe(202);
       expect(r.json.job.output).toMatchObject({ checked: 1 });
       expect((await c.get('/api/ai/listing/photos/consent')).json).toEqual({ consented: true });
-      const audit = await q<{ action: string }>(`SELECT action FROM audit_log WHERE subject = $1 ORDER BY id`, [`user:${user.id}`]);
+      const audit = await q<{ action: string }>(`SELECT action FROM audit_log WHERE subject = $1 AND action LIKE 'consent.%' ORDER BY id`, [`user:${user.id}`]);
       expect(audit.map((a) => a.action)).toEqual(['consent.ai_images_withdrawn', 'consent.ai_images_withdrawn']);
     } finally { ai.restore(); }
   });
@@ -663,6 +663,11 @@ describe('wording rules', () => {
     expect(sentenceProblem('All three bedrooms have fitted wardrobes.', ctx)).toBeNull();
     const oneBed = { facts: FactsSchema.parse({ ...RENT_FACTS, beds: 1 }), sources: [] };
     expect(sentenceProblem('The bedroom has two single beds.', oneBed)).toBeNull(); // furniture, not rooms
+    // Counts written with digits are contradictions too, so the pre-submission check flags them in the seller's own text.
+    expect(sentenceProblem('A 4-bed terraced house.', ctx)).toBe('mismatch');
+    expect(sentenceProblem('It has 2 bathrooms.', ctx)).toBe('mismatch');
+    expect(sentenceProblem('A 3-bed house with 1 bathroom.', ctx)).toBeNull();
+    expect(reviewText('A 4-bed terraced house with a garden.', ctx)).toEqual([{ sentence: 'A 4-bed terraced house with a garden.', reason: 'mismatch' }]);
   });
 
   it('rentals always state the rent as fixed, even when the draft says “fixed-term” or “fixed wardrobes”', () => {

@@ -33,7 +33,7 @@ export const MAX_TEXT = 15_000;
 const conf = S.enum(['stated', 'inferred'] as const, 'stated = written in the text; inferred = deduced from other clues in the text');
 const evidence = S.nullable(S.str('A short exact quote from the listing (under 100 characters) that supports the value'));
 const field = <T>(value: T, description?: string) => S.nullable(S.obj({ value, confidence: conf, evidence }), description);
-const money = (periods: readonly string[]) => S.obj({ amount: S.num('Amount in pounds exactly as written'), period: S.enum(periods) });
+const money = <P extends string>(periods: readonly P[]) => S.obj({ amount: S.num('Amount in pounds exactly as written'), period: S.enum(periods) });
 
 export const ExtractSchema = S.obj({
   title: field(S.str('The listing headline')),
@@ -106,7 +106,7 @@ const LISTING_WORDS = {
   rent: /\b(to (let|rent)|for rent|let|letting|rent(al)?|pcm|per (calendar )?month|pw|per week|tenancy)\b/i,
   sale: /\b(for sale|sale|guide price|asking price|offers|price|freehold|leasehold|auction)\b/i,
 };
-const TYPE_WORDS: Record<NonNullable<ImportValues['type']>, RegExp> = {
+const TYPE_WORDS: Record<NonNullable<Extraction['type']>['value'], RegExp> = {
   terraced: /terrace/i, 'semi-detached': /semi[- ]?detached|\bsemi\b/i, detached: /\bdetached\b/i,
   flat: /\b(flat|apartment|maisonette|studio|penthouse)\b/i, bungalow: /bungalow/i,
 };

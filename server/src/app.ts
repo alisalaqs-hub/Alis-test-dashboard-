@@ -23,6 +23,7 @@ import { aiImportRoutes } from './routes/ai-import';
 import { aiPropertyRoutes } from './routes/ai-property';
 import { aiBriefingRoutes } from './routes/ai-briefing';
 import { AiError } from './ai/core';
+import { clearHooks } from './ai/hooks';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { enquiryRoutes } from './routes/enquiries';
@@ -110,6 +111,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     return reply.code(500).send({ error: { code: 'server_error', message: 'Something went wrong on our side. Please try again.' } });
   });
 
+  clearHooks(); // route plugins (re)register their hooks below; never twice per process
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(meRoutes);

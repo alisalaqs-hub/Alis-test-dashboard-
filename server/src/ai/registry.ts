@@ -13,7 +13,8 @@ import { LISTING_SELECT, toDTO, type ListingRow } from '../services/listings';
 export function rowToProperty(r: ListingRow, photos: string[] = []): Property {
   const d = toDTO(r, [], {});
   const p = buildListing({
-    id: d.ref, listing: d.channel, title: d.title ?? undefined, addressLine: d.addressLine, town: d.town, postcode: r.postcode,
+    // d.postcode is the public form: the outward code only for private sellers.
+    id: d.ref, listing: d.channel, title: d.title ?? undefined, addressLine: d.addressLine, town: d.town, postcode: d.postcode,
     type: d.type as PropertyType, tenure: d.tenure, leaseYears: d.leaseYears ?? undefined, beds: d.beds, baths: d.baths, floorArea: d.floorArea,
     era: (d.era ?? undefined) as never, condition: (d.condition ?? undefined) as never,
     price: d.price, epc: d.epc ?? undefined, councilTax: d.councilTax ?? undefined, features: d.features, description: d.description ?? undefined,
@@ -22,6 +23,10 @@ export function rowToProperty(r: ListingRow, photos: string[] = []): Property {
     geo: d.lat != null && d.lng != null ? { lat: d.lat, lng: d.lng } : undefined, status: d.status === 'under_offer' ? 'under offer' : 'live',
   });
   p.street = d.addressLine; // never the house number for private sellers
+  const listed = r.published_at ?? r.created_at;
+  p.createdAt = listed.toISOString();
+  p.daysOnMarket = Math.max(0, Math.floor((Date.now() - listed.getTime()) / 86_400_000));
+  p.priceHistory = [{ date: listed.toISOString().slice(0, 7), price: d.price, event: 'Listed' }];
   return p;
 }
 

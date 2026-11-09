@@ -87,6 +87,7 @@ export async function feedRoutes(app: FastifyInstance) {
       for (const i of report.inputs) {
         const g = geo.get(i.postcode);
         const status = !fk.verified ? 'pending' : i.status === 'under offer' ? 'under_offer' : 'live';
+        const before = await one<{ ref: string; price: number }>('SELECT ref, price FROM listings WHERE organisation_id = $1 AND source_ref = $2', [fk.organisation_id, i.ref], c);
         const row = await one<{ id: string }>(
           `INSERT INTO listings (ref, organisation_id, source_kind, source_ref, channel, status, title, address_line, town, postcode, district, lat, lng,
              property_type, tenure, lease_years, beds, baths, floor_area, condition, price, epc, council_tax, service_charge_annual, features, description, ownership_declared, published_at)
@@ -108,6 +109,10 @@ export async function feedRoutes(app: FastifyInstance) {
           await q(`INSERT INTO listing_photos (listing_id, storage_key, url, content_type, bytes, position) VALUES ($1, $2, $3, 'image/*', 0, $4)`, [row!.id, `ext:${url}`, url, n], c);
         }
         accepted++; touched.push(row!.id);
+        if (before && Number(before.price) !== Number(i.price)) {
+          await q(`INSERT INTO audit_log (action, subject, detail) VALUES ('listing.updated', $1, $2)`,
+            [`listing:${before.ref}`, JSON.stringify({ fields: ['price'], priceFrom: Number(before.price), priceTo: Number(i.price), via: 'feed' })], c);
+        }
       }
       const withdrawn = await q(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE organisation_id = $1 AND source_kind = 'agent-feed'
         AND status IN ('live', 'under_offer', 'pending') AND NOT (source_ref = ANY($2)) RETURNING id`, [fk.organisation_id, report.inputs.map((i) => i.ref)], c);

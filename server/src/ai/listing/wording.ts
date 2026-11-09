@@ -148,16 +148,8 @@ export function sentenceProblem(sentence: string, ctx: RuleContext, allowed = al
   // Prices: only the stated price (and stated charges) may appear.
   const money = statedMoney(f);
   if (moneyMatchesIn(s).some((a) => !money.some((m) => isStated(a, m)))) return 'price';
-  // Other figures: only those in the facts or the seller's own text (floor area in sq ft is allowed).
-  const nums = statedNumbers(f, ctx.sources);
-  const sqftN = f.floorArea ? sqft(f.floorArea) : null;
-  const stripped = s.replace(/(?:£|GBP\s?)\s?\d[\d,]*(?:\.\d+)?\s?(k|m|million|thousand|bn)?\b/gi, ' ');
-  for (const n of numbersIn(stripped)) {
-    if (nums.some((x) => sameNumber(n, x))) continue;
-    if (sqftN && near(n, sqftN, 0.015)) continue;
-    return 'figure';
-  }
-  // Facts the text must not contradict.
+  // Facts the text must not contradict (checked before other figures, so "a 4-bed house" for a 3-bed listing is a
+  // mismatch, which the pre-submission check also flags in the seller's own text, not just an unstated figure).
   const epc = s.match(/\bEPC\b[^.]{0,20}?\b(?:rating|band|grade)?\s*(?:of\s+)?([A-G])\b(?![a-z])/);
   if (epc && f.epc && epc[1] !== f.epc) return 'mismatch';
   const ct = s.match(/\bcouncil tax\b[^.]{0,12}?\bband\s+([A-I])\b(?![a-z])/i);
@@ -170,6 +162,15 @@ export function sentenceProblem(sentence: string, ctx: RuleContext, allowed = al
   // Plural counts ("four bedrooms", "two double bedrooms") may describe some of the rooms, but never more than the listing has.
   for (const m of s.matchAll(BEDS_PLURAL_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n > f.beds) return 'mismatch'; }
   for (const m of s.matchAll(BATHS_PLURAL_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n > f.baths) return 'mismatch'; }
+  // Other figures: only those in the facts or the seller's own text (floor area in sq ft is allowed).
+  const nums = statedNumbers(f, ctx.sources);
+  const sqftN = f.floorArea ? sqft(f.floorArea) : null;
+  const stripped = s.replace(/(?:£|GBP\s?)\s?\d[\d,]*(?:\.\d+)?\s?(k|m|million|thousand|bn)?\b/gi, ' ');
+  for (const n of numbersIn(stripped)) {
+    if (nums.some((x) => sameNumber(n, x))) continue;
+    if (sqftN && near(n, sqftN, 0.015)) continue;
+    return 'figure';
+  }
   // Claims the seller hasn't made (place names are taken out first: "Finsbury Park" is a town, not a park).
   const claims = placeless(s, f);
   for (const t of Object.keys(TOPICS) as Topic[]) if (!allowed.has(t) && TOPICS[t].test(claims)) return t;

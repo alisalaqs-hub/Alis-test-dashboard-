@@ -42,7 +42,8 @@ function parse(intPart: string, dec: string | undefined, unit: string | undefine
 
 /** Every amount of money written in the text (including both ends of "£12–14k", and amounts written without "£"). */
 export function moneyMentions(text: string): MoneyMention[] {
-  const out: MoneyMention[] = [];
+  const found: { at: number; m: MoneyMention }[] = [];
+  const push = (at: number, m: MoneyMention) => found.push({ at, m });
   const spans: [number, number][] = [];
   const free = (a: number, b: number) => !spans.some(([x, y]) => a < y && b > x);
 
@@ -58,8 +59,8 @@ export function moneyMentions(text: string): MoneyMention[] {
       // A second end written with its own "£" is found by the main pattern; otherwise read it here.
       if (!tail[1]) { second = { raw: tail[0].trim(), ...parse(tail[2], tail[3], tail[4] ?? unit) }; end += tail[0].length; }
     }
-    out.push({ raw, ...parse(intPart, dec, unit) });
-    if (second) out.push(second);
+    push(start, { raw, ...parse(intPart, dec, unit) });
+    if (second) push(start + raw.length, second);
     spans.push([start, end]);
   }
 
@@ -69,8 +70,8 @@ export function moneyMentions(text: string): MoneyMention[] {
     const unit = m[3] ?? m[4] ?? m[5];
     if (m[4] && /(?:×|\bx|\bby)\s?$/i.test(text.slice(Math.max(0, start - 4), start))) continue; // "6m × 4m": metres
     const head = text.slice(0, start).match(BARE_RANGE_HEAD); // "8 to 12k" means 8k to 12k
-    if (head && free(start - head[0].length, start)) out.push({ raw: head[0].trim(), ...parse(head[1], head[2], unit) });
-    out.push({ raw: m[0], ...parse(m[1], m[2], unit) });
+    if (head && free(start - head[0].length, start)) push(start - head[0].length, { raw: head[0].trim(), ...parse(head[1], head[2], unit) });
+    push(start, { raw: m[0], ...parse(m[1], m[2], unit) });
     spans.push([start, end]);
   }
 
@@ -79,10 +80,10 @@ export function moneyMentions(text: string): MoneyMention[] {
     if (!free(start, end)) continue;
     const [raw, intPart, dec] = m;
     if (!intPart.includes(',') && !dec && intPart.length === 4 && Number(intPart) >= 1800 && Number(intPart) <= 2100) continue; // a year
-    out.push({ raw, ...parse(intPart, dec, undefined) });
+    push(start, { raw, ...parse(intPart, dec, undefined) });
     spans.push([start, end]);
   }
-  return out;
+  return found.sort((a, b) => a.at - b.at).map((f) => f.m); // in the order they appear
 }
 
 /** Every percentage written in the text (including both ends of "15–20%"), as written: "4.1%" → 4.1. */

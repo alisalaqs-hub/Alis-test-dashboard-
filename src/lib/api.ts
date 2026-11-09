@@ -86,6 +86,8 @@ export const api = {
     orgs: () => get<{ items: { id: string; name: string; kind: string; verified: boolean; role: string }[] }>('/api/me/orgs'),
   },
   listings: {
+    updatePhoto: (ref: string, id: string, b: { alt?: string }) => patch<{ ok: true }>(`/api/listings/${ref}/photos/${id}`, b),
+    setPhotoOrder: (ref: string, ids: string[]) => put<{ ok: true }>(`/api/listings/${ref}/photos/order`, { ids }),
     search: (p: { q?: string; channel?: string; page?: number; pageSize?: number } = {}) => get<{ items: ListingDTO[]; total: number }>(`/api/listings${qs(p)}`),
     get: (ref: string) => get<{ listing: ListingDTO; checks?: CheckDTO[] }>(`/api/listings/${encodeURIComponent(ref)}`),
     create: (b: ListingWrite) => post<{ listing: ListingDTO; checks: CheckDTO[] }>('/api/listings', b),
@@ -104,14 +106,6 @@ export const api = {
   },
   ai: {
     status: () => get<{ imagesEnabled: boolean; dailyLimit: number; usedToday: number; signedIn: boolean; model: string }>('/api/ai/status'),
-    roomImage: (photo: File | Blob, fields: { room: string; style: string; brief?: string; palette?: string }) => {
-      const f = new FormData();
-      f.append('room', fields.room); f.append('style', fields.style); f.append('consent', 'true');
-      if (fields.brief) f.append('brief', fields.brief);
-      if (fields.palette) f.append('palette', fields.palette);
-      f.append('photo', photo, (photo as File).name ?? 'room.jpg');
-      return request<{ image: AiImageDTO; remainingToday: number; label: string }>('POST', '/api/ai/room-image', f, { timeout: 240_000 });
-    },
     history: () => get<{ items: AiImageDTO[] }>('/api/ai/room-images'),
   },
   admin: {

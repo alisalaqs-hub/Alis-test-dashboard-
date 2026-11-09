@@ -31,7 +31,6 @@ export async function emit<K extends Name>(name: K, payload: HookPayloads[K]) {
     try { await fn(payload); } catch (e) { if (process.env.NODE_ENV !== 'test') console.warn(`[hook ${name}]`, (e as Error).message); }
   }
 }
-export function clearHooks() { for (const k of Object.keys(subs) as Name[]) delete subs[k]; }
 
 /* ───────── screening (a hook that can stop an action) ───────── */
 export interface EnquiryScreenInput { enquiryId: string; listingId: string; name: string; email: string; message: string; kind: string }
@@ -46,3 +45,4 @@ export async function screenEnquiry(e: EnquiryScreenInput): Promise<ScreenVerdic
     return await Promise.race([enquiryScreener(e), new Promise<ScreenVerdict>((res) => setTimeout(() => res({ filter: false }), 8000))]);
   } catch { return { filter: false }; }
 }
+export function clearHooks() { for (const k of Object.keys(subs) as Name[]) delete subs[k]; enquiryScreener = null; }

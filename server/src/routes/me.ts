@@ -43,9 +43,15 @@ export async function meRoutes(app: FastifyInstance) {
       q('SELECT room, style, brief, status, result_url, created_at FROM ai_images WHERE user_id = $1', [u.id]),
       q('SELECT created_at, last_seen_at, expires_at, user_agent FROM sessions WHERE user_id = $1', [u.id]),
     ]);
+    // Automated assessments about you or your listings (UK GDPR Articles 15 and 22).
+    const aiAboutMe = {
+      listingReviews: await q(`SELECT l.ref, r.risk, r.score, r.summary, r.flags, r.auto_approved, r.created_at FROM listing_ai_reviews r JOIN listings l ON l.id = r.listing_id WHERE l.owner_user_id = $1 ORDER BY r.created_at`, [u.id]).catch(() => []),
+      enquiryTriage: await q(`SELECT l.ref AS listing, a.intent, a.buyer_position, a.questions, a.urgency, a.summary, a.created_at FROM enquiry_ai a JOIN enquiries e ON e.id = a.enquiry_id JOIN listings l ON l.id = e.listing_id WHERE e.from_user_id = $1`, [u.id]).catch(() => []),
+      usage: await q(`SELECT purpose, count(*)::int AS requests, min(at) AS first, max(at) AS last FROM ai_usage WHERE user_id = $1 GROUP BY purpose`, [u.id]).catch(() => []),
+    };
     await audit(req, 'user.exported', `user:${u.id}`);
     reply.header('Content-Disposition', 'attachment; filename="streetkey-my-data.json"');
-    return { exportedAt: new Date().toISOString(), account: publicUser(u), listings, savedHomes: saved, savedSearches: searches, enquiriesSent: sent, consents, aiImages: images, sessions };
+    return { exportedAt: new Date().toISOString(), account: publicUser(u), listings, savedHomes: saved, savedSearches: searches, enquiriesSent: sent, consents, aiImages: images, aiAssessments: aiAboutMe, sessions };
   });
 
   /** UK GDPR right to erasure: removes the account and personal details. Listings are withdrawn. */
@@ -57,7 +63,9 @@ export async function meRoutes(app: FastifyInstance) {
     await tx(async (c) => {
       await q(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE owner_user_id = $1 AND status NOT IN ('draft', 'withdrawn')`, [u.id], c);
       await q(`DELETE FROM listings WHERE owner_user_id = $1 AND status = 'draft'`, [u.id], c);
+      await q(`DELETE FROM enquiry_ai WHERE enquiry_id IN (SELECT id FROM enquiries WHERE from_user_id = $1)`, [u.id], c);
       await q(`UPDATE enquiries SET name = 'Deleted user', email = 'deleted@invalid', phone = NULL WHERE from_user_id = $1`, [u.id], c);
+      await q(`UPDATE ai_usage SET user_id = NULL WHERE user_id = $1`, [u.id], c);
       await q('DELETE FROM saved_listings WHERE user_id = $1', [u.id], c);
       await q('DELETE FROM saved_searches WHERE user_id = $1', [u.id], c);
       await q('DELETE FROM sessions WHERE user_id = $1', [u.id], c);

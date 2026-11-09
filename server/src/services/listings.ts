@@ -127,7 +127,7 @@ export async function geocode(postcode: string): Promise<{ postcode: string; dis
 export function columnsFrom(b: Partial<ListingBodyT>) {
   const map: Record<string, unknown> = {};
   const set = (col: string, v: unknown) => { if (v !== undefined) map[col] = v; };
-  set('channel', b.channel); set('title', b.title || null); set('address_line', b.addressLine); set('town', b.town);
+  set('channel', b.channel); if (b.title !== undefined) map.title = b.title || null; set('address_line', b.addressLine); set('town', b.town);
   set('property_type', b.type); set('tenure', b.tenure); set('lease_years', b.tenure && b.tenure !== 'leasehold' ? null : b.leaseYears);
   set('beds', b.beds); set('baths', b.baths); set('floor_area', b.floorArea); set('era', b.era); set('condition', b.condition);
   set('price', b.price); set('price_qualifier', b.priceQualifier); set('epc', b.epc); set('council_tax', b.councilTax);

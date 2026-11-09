@@ -67,7 +67,7 @@ export async function aiSearchRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/ai/search/similar/:id', async (req) => {
-    const g = await aiGuard(req, 'search.similar', { perMinute: 30 });
+    const g = await aiGuard(req, 'search.similar', { perMinute: 30, countDaily: false }); // cached, cheap: browsing never uses up the daily AI allowance
     const { id } = req.params as { id: string };
     if (!PROPERTY_ID.test(id)) throw notFound('That listing');
     return similarHomes(id, { userId: g.userId });

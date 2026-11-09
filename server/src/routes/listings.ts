@@ -170,10 +170,12 @@ export async function listingRoutes(app: FastifyInstance) {
     await audit(req, goLive ? 'listing.published' : 'listing.submitted', `listing:${ref}`);
     await emit('listingSubmitted', { listingId: row.id, ref, userId: req.user!.id });
     if (goLive) await emit('listingsPublished', { listingIds: [row.id] });
-    if (!goLive && config.adminEmail) {
+    // A hook (e.g. an AI trust review with auto-approval) may have changed the status already.
+    const now = (await one<{ status: string }>('SELECT status FROM listings WHERE id = $1', [row.id]))?.status ?? (goLive ? 'live' : 'pending');
+    if (now === 'pending' && config.adminEmail) {
       await mails.enquiryToLister(config.adminEmail, row.title ?? row.address_line, ref, 'Streetkey', 'question', 'A new listing is waiting for review in the admin area.').catch(() => {});
     }
-    return { status: goLive ? 'live' : 'pending' };
+    return { status: now };
   });
 
   app.post('/api/listings/:ref/status', async (req) => {
@@ -220,7 +222,9 @@ export async function listingRoutes(app: FastifyInstance) {
       if (count >= config.storage.maxPhotosPerListing) { rejected.push(`${part.filename}: limit of ${config.storage.maxPhotosPerListing} photos reached`); continue; }
       const clean = cleanImage(buf, type);
       const stored = await putFile(newKey(`listings/${row.ref}`, type), clean, type);
-      const alt = part.filename ? part.filename.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').slice(0, 120) : null;
+      // Use the file name as alt text only when it describes something (not "IMG_1234" or "photo-1").
+      const base = (part.filename ?? '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
+      const alt = base && !/^(img|dsc|dscn|pxl|photo|image|picture|pic|screenshot|whatsapp image|untitled|file|scan)?\s*[\d\s()]*$/i.test(base) ? base.slice(0, 120) : null;
       const p = await one<{ id: string }>('INSERT INTO listing_photos (listing_id, storage_key, url, content_type, bytes, position, alt) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
         [row.id, stored.key, stored.url, type, clean.length, position++, alt]);
       added.push({ id: p!.id, url: stored.url, alt }); count++;

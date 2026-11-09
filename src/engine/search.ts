@@ -67,8 +67,9 @@ export function parseQuery(text: string): SearchQuery {
   const beds = t.match(/\b(\d|one|two|three|four|five|six|seven)[- ]?(?:\+\s*)?(?:bed(?:room)?s?|br)\b/);
   if (beds) q.minBeds = WORD_NUM[beds[1]] ?? parseInt(beds[1], 10);
 
-  const price = t.match(/\b(?:under|below|less than|max(?:imum)?|up to|budget(?: of)?)\s*(£?\s?[\d,.]+\s?[km]?)\b/);
-  if (price) q.maxPrice = money(price[1]);
+  // A price needs £, a k/m suffix or at least 4 digits ("up to 4 beds" is not £4).
+  const price = t.match(/\b(?:under|below|less than|max(?:imum)?|up to|budget(?: of)?)\s*(£\s?[\d,.]+\s?[km]?|[\d,.]+\s?[km]\b|\d[\d,]{3,}(?:\.\d+)?)(?!\s*(?:-|\s)?(?:bed|bath|br\b|min|mile|year|week|storey|floor))/);
+  if (price) { const v = money(price[1]); if (Number.isFinite(v) && v >= 100) q.maxPrice = v; }
 
   const commute = t.match(/within\s+(\d+)\s*(?:min(?:ute)?s?)\s+(?:of|from|to)\s+([a-z\s]+?)(?:,|\.|\bunder\b|\bwith\b|\band\b|\bfor\b|\bthat\b|$)/);
   if (commute) { q.maxCommuteMins = parseInt(commute[1], 10); q.commuteTo = commute[2].trim(); }
@@ -120,6 +121,8 @@ function commuteOk(p: Property, q: SearchQuery) {
   const hub = q.commuteTo ?? '';
   const matchesHub = /london/.test(hub) ? p.town.includes('London') : p.commute.to.toLowerCase().includes(hub.split(' ').pop() ?? '') || p.town.toLowerCase().includes(hub.split(' ').pop() ?? '');
   if (!matchesHub) return { ok: false, note: '' };
+  // Listings whose journey times haven't been calculated yet can't be said to meet a limit.
+  if (!p.commute.minutes || /not yet calculated/i.test(p.commute.mode)) return { ok: false, note: '' };
   // Add station walk time to door-to-door estimate.
   const door = p.commute.minutes + p.station.walkMins;
   return { ok: door <= q.maxCommuteMins, note: `≈${door} min door-to-door to ${p.commute.to} (${p.commute.mode})` };
