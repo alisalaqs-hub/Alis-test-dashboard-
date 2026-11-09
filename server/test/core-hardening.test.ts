@@ -146,3 +146,22 @@ describe('AI budget, per-person caps and the out-of-credit pause', () => {
     } finally { ai.restore(); }
   });
 });
+
+describe('account deletion (right to erasure)', () => {
+  it('removes design-studio photos and AI results, AI jobs and draft listing photos', async () => {
+    const { putFile, getFile: read } = await import('../src/services/storage');
+    const { PASSWORD } = await import('./helpers');
+    const s = await signUp();
+    const src = await putFile(`ai/source/${s.user.id}-room.png`, TINY_PNG, 'image/png');
+    const res = await putFile(`ai/results/${s.user.id}-room.png`, TINY_PNG, 'image/png');
+    await q(`INSERT INTO ai_images (user_id, room, style, brief, prompt, model, status, source_key, result_key, result_url) VALUES ($1, 'kitchen', 'modern', 'my kitchen', 'p', 'gpt-image-2', 'done', $2, $3, $4)`, [s.user.id, src.key, res.key, res.url]);
+    await q(`INSERT INTO ai_jobs (kind, user_id, input) VALUES ('studio.room_image', $1, '{"brief":"my kitchen"}')`, [s.user.id]);
+    const draft = await s.c.post('/api/listings', { channel: 'sale', title: 'Draft home' }).catch(() => null);
+    expect((await s.c.del('/api/me', { password: PASSWORD })).status).toBe(200);
+    expect(await q('SELECT 1 FROM ai_images WHERE user_id = $1', [s.user.id])).toHaveLength(0);
+    expect(await q('SELECT 1 FROM ai_jobs WHERE user_id = $1', [s.user.id])).toHaveLength(0);
+    expect(await read(src.key)).toBeNull();
+    expect(await read(res.key)).toBeNull();
+    if (draft?.status === 201) expect(await q('SELECT 1 FROM listings WHERE owner_user_id = $1 AND status = $2', [s.user.id, 'draft'])).toHaveLength(0);
+  });
+});

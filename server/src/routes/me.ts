@@ -6,6 +6,7 @@ import { getUser, publicUser } from '../auth/session';
 import { config } from '../config';
 import { one, q, tx } from '../db';
 import { audit, HttpError, notFound, parse, requireUser } from '../services/http';
+import { deleteFile } from '../services/storage';
 
 const KEY = z.string().trim().min(2).max(80).regex(/^[a-z0-9-]+$/i);
 const toSearch = (r: { id: string; query: string; mode: string; alert_frequency: SavedSearchDTO['alertFrequency']; created_at: Date }): SavedSearchDTO =>
@@ -54,14 +55,25 @@ export async function meRoutes(app: FastifyInstance) {
     return { exportedAt: new Date().toISOString(), account: publicUser(u), listings, savedHomes: saved, savedSearches: searches, enquiriesSent: sent, consents, aiImages: images, aiAssessments: aiAboutMe, sessions };
   });
 
-  /** UK GDPR right to erasure: removes the account and personal details. Listings are withdrawn. */
+  /**
+   * UK GDPR right to erasure: removes the account and personal details, design-studio photos and AI results,
+   * AI jobs, draft listings and their photos. Published listings are withdrawn (kept, without the owner's details,
+   * for the audit trail).
+   */
   app.delete('/api/me', async (req, reply) => {
     const u = requireUser(req);
     const b = parse(z.object({ password: z.string().max(200) }), req.body);
     const row = await one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [u.id]);
     if (!row || !(await verifyPassword(b.password, row.password_hash))) throw new HttpError(400, 'Your password isn’t right.', 'bad_credentials', { password: 'Incorrect password.' });
+    // Files to remove once the database changes are committed: room photos and AI designs, and draft listings' photos.
+    const files = [
+      ...(await q<{ k: string | null }>(`SELECT unnest(ARRAY[source_key, result_key]) AS k FROM ai_images WHERE user_id = $1`, [u.id])),
+      ...(await q<{ k: string }>(`SELECT p.storage_key AS k FROM listing_photos p JOIN listings l ON l.id = p.listing_id WHERE l.owner_user_id = $1 AND l.status = 'draft'`, [u.id])),
+    ].map((r) => r.k).filter((k): k is string => !!k && !k.startsWith('ext:'));
     await tx(async (c) => {
       await q(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE owner_user_id = $1 AND status NOT IN ('draft', 'withdrawn')`, [u.id], c);
+      await q('DELETE FROM ai_images WHERE user_id = $1', [u.id], c);
+      await q('DELETE FROM ai_jobs WHERE user_id = $1', [u.id], c);
       await q(`DELETE FROM listings WHERE owner_user_id = $1 AND status = 'draft'`, [u.id], c);
       await q(`DELETE FROM enquiry_ai WHERE enquiry_id IN (SELECT id FROM enquiries WHERE from_user_id = $1)`, [u.id], c);
       await q(`UPDATE enquiries SET name = 'Deleted user', email = 'deleted@invalid', phone = NULL WHERE from_user_id = $1`, [u.id], c);
@@ -73,7 +85,8 @@ export async function meRoutes(app: FastifyInstance) {
       await q(`UPDATE users SET email = $2, display_name = 'Deleted user', phone = NULL, password_hash = $3, marketing_opt_in = false, deleted_at = now() WHERE id = $1`,
         [u.id, `deleted+${u.id}@invalid`, `deleted$${newToken().token}`], c);
     });
-    await audit(req, 'user.deleted', `user:${u.id}`);
+    await Promise.allSettled(files.map((k) => deleteFile(k)));
+    await audit(req, 'user.deleted', `user:${u.id}`, { filesRemoved: files.length });
     reply.clearCookie(config.session.cookie, { path: '/' });
     return { ok: true };
   });
