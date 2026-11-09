@@ -8,7 +8,7 @@
  * Keep this file free of browser-only imports (React, fetch helpers, import.meta.env):
  * the server type-checks and bundles it.
  */
-import { bedroomRange, parseQuery, type SearchHit, type SearchQuery } from '../../engine/search';
+import { parseQuery, type SearchHit, type SearchQuery } from '../../engine/search';
 import type { Property } from '../../data/properties';
 
 /* ───────────────────────── API shapes ───────────────────────── */
@@ -20,11 +20,8 @@ export type SearchMode = typeof SEARCH_MODES[number];
 /** Things people asked for that the engine can't filter on yet; the website applies the numeric ones itself. */
 export interface SearchExtras { minPrice: number | null; maxBeds: number | null; mustHaves: string[] }
 
-/**
- * One "understood" chip. `key` identifies the constraint, so removing the chip removes exactly that constraint.
- * `kind: 'preference'` marks a must-have that only puts listings mentioning it first (it never filters).
- */
-export interface SearchChip { key: string; label: string; removable: boolean; kind?: 'filter' | 'preference' }
+/** One "understood" chip. `key` identifies the constraint, so removing the chip removes exactly that constraint. */
+export interface SearchChip { key: string; label: string; removable: boolean }
 
 /** A tappable follow-up: the answers are phrases added to the search text. */
 export interface Clarify { question: string; answers: string[] }
@@ -58,8 +55,6 @@ export interface SimilarItem {
 export interface SimilarResult { items: SimilarItem[]; semantic: boolean }
 /** POST /api/ai/search/rank */
 export interface RankResult { items: { id: string; score: number }[]; missing: string[] }
-/** What a saved search keeps besides its text: the filters the person saw (after removing chips and setting page filters). */
-export interface SavedSearchFilters { query: SearchQuery; extras: SearchExtras }
 
 /* ───────────────────────── constants ───────────────────────── */
 
@@ -94,66 +89,28 @@ const GROUPS_STRONG = [
   'ukrainians?', 'portuguese', 'brazilians?', 'gypsy', 'gypsies', 'roma', 'jews', 'jewish', 'muslims?', 'islamic', 'christians?', 'hindus?', 'sikhs?',
   'catholics?', 'protestants?', 'buddhists?', 'mormons?', 'immigrants?', 'migrants?', 'foreigners?', 'refugees?', 'asylum seekers?',
   'lgbt\\w*', 'gays?', 'lesbians?', 'queer', 'bisexuals?', 'transgender', 'elderly', 'pensioners?', 'retirees?',
-  'punjabis?', 'tamils?', 'gujaratis?', 'bengalis?', 'sylhetis?', 'kashmiris?', 'sinhalese', 'greeks?', 'cypriots?', 'hasidic', 'hasidim', 'haredi', 'charedi',
-  'zimbabweans?', 'congolese', 'sudanese', 'yemenis?', 'moroccans?', 'algerians?', 'egyptians?', 'lebanese', 'palestinians?', 'israelis?',
-  'latinos?', 'latinas?', 'latinx', 'hispanics?', 'west indians?', 'afro[- ]caribbeans?', 'bame', 'bme', 'people of colou?r', 'mixed[- ]race',
-  'atheists?', 'pagans?', 'rastafarians?', 'expats?', 'russians', 'germans', 'italians', 'spaniards?', 'americans', 'muslim', 'hindu',
 ];
 const GROUPS_SOFT = [
   'black', 'white', 'brown', 'english', 'british', 'irish', 'scottish', 'welsh', 'european', 'eastern european', 'japanese', 'russian', 'foreign',
   'travellers?', 'trans', 'straight', 'religious', 'secular', 'diverse', 'multicultural', 'minority', 'ethnic',
-  'italian', 'french', 'spanish', 'german', 'american', 'australian', 'orthodox', 'mixed',
 ];
 /** Age and disability words: only about people ("young families", "disabled residents"), never "my old neighbourhood". */
 const GROUPS_PERSONAL = ['old', 'older', 'young', 'younger', 'retired', 'disabled'];
 const STRONG = `(?:${GROUPS_STRONG.join('|')})`;
-const SOFT = `(?:${GROUPS_SOFT.join('|')})`;
 const GROUP = `(?:${[...GROUPS_STRONG, ...GROUPS_SOFT].join('|')})`;
-const PERSONS = 'people|persons|folk|families|households?|residents|neighbou?rs|crowd|couples|speakers';
+const PERSONS = 'people|persons|folk|families|households?|residents|neighbou?rs|crowd|couples';
 const PLACES = 'areas?|community|communities|neighbou?rhoods?|enclaves?|majority|minority|population';
-/** Home finishes that soft group words also describe ("mostly white walls", "no white goods"). */
-const HOME_FINISH = '(?:kitchens?|walls?|interiors?|d[ée]cor|finish(?:es)?|units?|tiles?|bathrooms?|paint\\w*|woodwork|windows?|doors?|render\\w*|brick\\w*|goods|appliances|marble|stone|oak|floors?|carpets?|worktops?)';
-/** Places of worship that only ever come up as "who lives near here" (never echoed, never a filter). */
-const WORSHIP = '(?:mosques?|synagogues?|gurdwaras?|mandirs?|shuls?|madrass?as?|yeshivas?)';
-/** Places of worship that also name buildings or stations ("converted church", "Temple Meads"): only near / close to … counts. */
-const WORSHIP_NEAR = new RegExp(`\\b(?:near(?:by)?|close to|next (?:door )?to|walk(?:ing)?(?: distance)? (?:to|of|from)|minutes? (?:from|to|of)|by|opposite|around|within reach of)\\s+(?:(?:an?|the|my|our|local|good|catholic|anglican|baptist|methodist|evangelical|pentecostal|hindu|buddhist|sikh|jewish|christian|orthodox|parish)\\s+)*(?:churche?s?|chapels?|cathedrals?|temples?(?!\\s+(?:meads|fortune|station|newsam|cowley))|meeting houses?|kingdom halls?)\\b`, 'i');
 /** Requests to pick areas by the people who live there (protected characteristics). Never turned into filters. */
 const DEMOGRAPHIC_RES = [
-  /\b(ethnic(ity|ities|ally)?|racial(ly)?|race of|demographics?|diversity)\b/i,
+  /\b(ethnic(ity|ities|ally)?|racial(ly)?|race of|demographics?)\b/i,
   new RegExp(`\\b${GROUP}\\s+(?:${PERSONS}|${PLACES})\\b`, 'i'),
   new RegExp(`\\b(?:${GROUPS_PERSONAL.join('|')})\\s+(?:${PERSONS})\\b`, 'i'),
   new RegExp(`\\b${STRONG}[- ]friendly\\b`, 'i'),
   new RegExp(`\\b(?:mostly|mainly|predominantly|majority|full of|lots of|area with|neighbou?rhood with|community of|no|fewer|without|avoid|away from|free of)\\s+${STRONG}\\b`, 'i'),
-  // "mostly white", "predominantly British" (but not "mostly white walls").
-  new RegExp(`\\b(?:mostly|mainly|predominantly|largely|overwhelmingly|majority)\\s+${SOFT}\\b(?!\\s+${HOME_FINISH})`, 'i'),
-  // "white British", "black African", "British Asian".
-  /\b(?:white|black|brown|mixed)[- ](?:british|english|irish|scottish|welsh|european|african|caribbean|asian|other|americans?)\b/i,
-  /\bbritish[- ](?:asians?|indians?|pakistanis?|bangladeshis?|chinese|africans?|caribbeans?|muslims?|jews|jewish|sikhs?|hindus?)\b/i,
-  // "English-speaking neighbours", "Polish speakers".
-  new RegExp(`\\b${GROUP}[- ]speak(?:ing|ers?)\\b`, 'i'),
-  new RegExp(`\\b${WORSHIP}\\b`, 'i'),
-  WORSHIP_NEAR,
 ];
-/**
- * "<word> community / population / enclave" is about who lives somewhere unless the word describes the
- * place or its feel ("gated community", "close-knit community", "large student population").
- */
-const COMMUNITY_RE = /\b([a-z][a-z'’-]*)\s+(?:community|communities|populations?|enclaves?|ghettos?)\b/gi;
-const COMMUNITY_OK = new Set([
-  'a', 'an', 'the', 'of', 'and', 'with', 'in', 'into', 'our', 'my', 'your', 'local', 'whole', 'entire', 'total',
-  'gated', 'retirement', 'village', 'rural', 'farming', 'coastal', 'seaside', 'residential', 'housing', 'co-housing', 'cohousing', 'eco', 'garden', 'golf',
-  'lakeside', 'riverside', 'waterside', 'country', 'island', 'sustainable', 'green', 'planned', 'new', 'growing', 'established',
-  'friendly', 'family-friendly', 'dog-friendly', 'close-knit', 'tight-knit', 'strong', 'quiet', 'lovely', 'nice', 'vibrant', 'thriving', 'lively', 'active',
-  'welcoming', 'good', 'great', 'safe', 'real', 'proper', 'small', 'big', 'large', 'creative', 'artistic', 'arts', 'artist', 'artists', 'online',
-  'low', 'high', 'dense', 'sparse', 'student', 'students', 'university', 'commuter', 'professional', 'working', 'family', 'families', 'business',
-]);
-function communityOfPeople(text: string) {
-  for (const m of text.matchAll(COMMUNITY_RE)) if (!COMMUNITY_OK.has(m[1].toLowerCase().replace(/’/g, "'"))) return true;
-  return false;
-}
-export const asksForDemographics = (text: string) => DEMOGRAPHIC_RES.some((re) => re.test(text)) || communityOfPeople(text);
+export const asksForDemographics = (text: string) => DEMOGRAPHIC_RES.some((re) => re.test(text));
 /** Model-written words about who lives somewhere: never shown as a filter, chip, follow-up or "unsupported" item. */
-export const PROTECTED_RE = new RegExp(`(ethnic|\\brace\\b|racial|relig|nationalit|immigra|foreign|demograph|age profile|sexual|\\b${STRONG}\\b|\\b${WORSHIP}\\b)`, 'i');
+export const PROTECTED_RE = new RegExp(`(ethnic|\\brace\\b|racial|relig|nationalit|immigra|foreign|demograph|age profile|sexual|\\b${STRONG}\\b)`, 'i');
 export const mentionsProtected = (text: string) => PROTECTED_RE.test(text) || asksForDemographics(text);
 
 /* ───────────────────────── formatting ───────────────────────── */
@@ -201,8 +158,8 @@ function rulesExtras(text: string, query: SearchQuery): SearchExtras {
     const lo = amount(between[1]); const hi = amount(between[2]);
     if (Number.isFinite(lo) && Number.isFinite(hi) && lo < hi && hi >= 100) { ex.minPrice = lo; if (!query.maxPrice) query.maxPrice = hi; }
   }
-  const beds = bedroomRange(text);
-  if (beds.max) ex.maxBeds = beds.max;
+  const maxBeds = t.match(/\b(?:up to|max(?:imum)?|no more than|at most)\s+(\d)\s*(?:-\s*)?(?:bed(?:room)?s?)\b/);
+  if (maxBeds) ex.maxBeds = parseInt(maxBeds[1], 10);
   return ex;
 }
 
@@ -225,7 +182,7 @@ export function chipsFor(query: SearchQuery, extras: SearchExtras, aiLabels: Par
   for (const f of FLAG_FIELDS) if (query[f]) out.push({ key: f, label: aiLabels[f] ?? FLAG_LABELS[f], removable: true });
   if (query.minYield) out.push({ key: 'minYield', label: `${Number((query.minYield * 100).toFixed(1))}%+ yield`, removable: true });
   if (query.minRefurbProfit) out.push({ key: 'minRefurbProfit', label: `Profit ${gbpShort(query.minRefurbProfit)}+`, removable: true });
-  for (const m of extras.mustHaves) out.push({ key: `must:${m.toLowerCase()}`, label: cap(m), removable: true, kind: 'preference' });
+  for (const m of extras.mustHaves) out.push({ key: `must:${m.toLowerCase()}`, label: cap(m), removable: true });
   return out;
 }
 
@@ -272,61 +229,27 @@ export function fromRules(text: string, mode?: SearchMode | null): IntentResult 
   };
 }
 
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** The must-haves a listing's own text mentions ("balcony" also matches "balconies"). Never a guess. */
-export function mustHavesIn(p: Pick<Property, 'features' | 'description' | 'title'>, mustHaves: string[]): string[] {
-  const text = `${p.features.join(' ')} ${p.description ?? ''} ${p.title}`.toLowerCase();
-  return mustHaves.map((m) => m.toLowerCase()).filter((m) => {
-    if (!m) return false;
-    const forms = [escapeRe(m), ...(m.endsWith('y') ? [`${escapeRe(m.slice(0, -1))}ies`] : [])];
-    return new RegExp(`(^|[^a-z0-9])(?:${forms.join('|')})(?:s|es)?(?![a-z0-9])`).test(text);
-  });
-}
-
 /**
  * Applies the extras the engine can't filter on: price floor and bedroom ceiling (hard filters),
- * and "must haves" as preferences: listings whose own text mentions more of them come first
- * (otherwise in the same order), with a visible "Mentions …" reason. They never hide a listing.
+ * and "must haves" as a visible reason when the listing mentions them (never a guess).
  */
 export function applyExtras(hits: SearchHit[], extras: SearchExtras): SearchHit[] {
   const musts = extras.mustHaves.map((m) => m.toLowerCase()).filter(Boolean);
-  const kept = hits.filter((h) => (extras.minPrice == null || h.property.price >= extras.minPrice) && (extras.maxBeds == null || h.property.beds <= extras.maxBeds));
-  if (!musts.length) return kept;
-  return kept
-    .map((h, i) => {
-      const found = mustHavesIn(h.property, musts);
-      return { h: found.length ? { ...h, reasons: [`Mentions ${found.join(', ')}`, ...h.reasons] } : h, n: found.length, i };
-    })
-    .sort((a, b) => b.n - a.n || a.i - b.i)
-    .map((x) => x.h);
-}
-
-/**
- * The words AI relevance ranking embeds: the chips still in force (place, type, size, features)
- * and the preferences. Built from the validated reading, never the raw text, so removed chips and
- * anything about who lives somewhere can't affect the order. Prices and the intent are left out
- * (the results already meet them; numbers don't help a meaning match).
- */
-export function rankText(chips: SearchChip[]): string {
-  return chips.filter((c) => !['intent', 'minPrice', 'maxPrice'].includes(c.key)).map((c) => c.label).join(', ').slice(0, MAX_QUERY_CHARS);
-}
-
-/** What a saved search keeps for its alerts (the engine query without the "not covered" notes). */
-export function savedFilters(query: SearchQuery, extras: SearchExtras): SavedSearchFilters {
-  return { query: { ...copyQuery(query), unsupported: [] }, extras: { minPrice: extras.minPrice, maxBeds: extras.maxBeds, mustHaves: [...extras.mustHaves] } };
+  return hits
+    .filter((h) => (extras.minPrice == null || h.property.price >= extras.minPrice) && (extras.maxBeds == null || h.property.beds <= extras.maxBeds))
+    .map((h) => {
+      if (!musts.length) return h;
+      const text = `${h.property.features.join(' ')} ${h.property.description ?? ''} ${h.property.title}`.toLowerCase();
+      const found = musts.filter((m) => text.includes(m));
+      return found.length ? { ...h, reasons: [`Mentions ${found.join(', ')}`, ...h.reasons] } : h;
+    });
 }
 
 /* ───────────────────────── similar homes ───────────────────────── */
 
 export const channelOf = (p: Pick<Property, 'listing'>) => (p.listing === 'rent' ? 'rent' : 'sale');
-const area = (p: Pick<Property, 'town'>) => p.town.split(',')[0].trim();
-const city = (p: Pick<Property, 'town'>) => p.town.split(',').pop()!.trim();
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-/** Same postcode district, area or city as the home being viewed. */
-export const isLocal = (target: Pick<Property, 'town' | 'district'>, c: Pick<Property, 'town' | 'district'>) =>
-  same(c.district, target.district) || same(area(c), area(target)) || same(city(c), city(target));
-/** "Ecclesall, Sheffield" for a home in another city than the one being viewed; just the area otherwise. */
-export const placeLabel = (target: Pick<Property, 'town' | 'district'>, c: Pick<Property, 'town' | 'district'>) => (isLocal(target, c) ? area(c) : c.town);
+const area = (p: Property) => p.town.split(',')[0].trim();
+const city = (p: Property) => p.town.split(',').pop()!.trim();
 export const isPublic = (p: Property) => p.visibility !== 'private' && p.status !== 'withdrawn' && p.status !== 'pending';
 const tags = (p: Property) => {
   const t = `${p.features.join(' ')} ${p.description ?? ''}`.toLowerCase();
@@ -339,20 +262,10 @@ export function similarOk(target: Property, c: Property) {
     && Math.abs(c.price - target.price) <= 0.35 * target.price && Math.abs(c.beds - target.beds) <= 1;
 }
 
-/**
- * Candidates for "similar": the hard limits, and homes in the same district, area or city. Other cities
- * are only considered when fewer than 3 local homes qualify (their cards and reasons then say where they are).
- */
-export function similarCandidates(target: Property, pool: Property[]): Property[] {
-  const ok = pool.filter((p) => isPublic(p) && similarOk(target, p));
-  const local = ok.filter((p) => isLocal(target, p));
-  return local.length >= 3 ? local : ok;
-}
-
 /** 0–1 structural closeness: place, price, size, type and shared features. */
 export function structuralSimilarity(target: Property, c: Property) {
   let s = 0;
-  if (same(c.district, target.district)) s += 0.35; else if (same(area(c), area(target))) s += 0.25; else if (same(city(c), city(target))) s += 0.15;
+  if (c.district === target.district) s += 0.35; else if (area(c) === area(target)) s += 0.25; else if (city(c) === city(target)) s += 0.15;
   s += 0.25 * (1 - Math.min(1, Math.abs(c.price - target.price) / (0.35 * target.price || 1)));
   s += c.beds === target.beds ? 0.15 : 0.05;
   if (c.type === target.type) s += 0.15; else if (HOUSES.includes(c.type) && HOUSES.includes(target.type)) s += 0.08;
@@ -365,15 +278,14 @@ export function structuralSimilarity(target: Property, c: Property) {
 const typeNoun: Record<Property['type'], string> = { terraced: 'a terrace', 'semi-detached': 'a semi', detached: 'a detached house', flat: 'a flat', bungalow: 'a bungalow', commercial: 'commercial space' };
 
 /**
- * "Also in E17 · £20k cheaper · one more bedroom" (or "In Sheffield · …" for another city): how a home
- * differs from the one being viewed, built from the facts (the card already shows its type and size). Free and instant.
+ * "Also in E17 · £20k cheaper · one more bedroom": how a home differs from the one being viewed,
+ * built from the facts (the card itself already shows its town, type and size). Free and instant.
  */
 export function similarReason(target: Property, c: Property): string {
   const parts: string[] = [];
-  if (same(c.district, target.district)) parts.push(`Also in ${c.district}`);
-  else if (same(area(c), area(target))) parts.push(`Also in ${area(c)}`);
-  else if (same(city(c), city(target))) parts.push(`Also in ${city(c)}`);
-  else parts.push(`In ${city(c)}`);
+  if (c.district === target.district) parts.push(`Also in ${c.district}`);
+  else if (area(c) === area(target)) parts.push(`Also in ${area(c)}`);
+  else if (city(c) === city(target)) parts.push(`Also in ${city(c)}`);
   const rent = channelOf(target) === 'rent';
   const d = c.price - target.price;
   if (Math.abs(d) < 0.03 * target.price) parts.push('similar price');
@@ -394,7 +306,7 @@ export function toSimilarItem(p: Property, reason: string, score: number, photo:
 
 /** Rule-based similar homes (website fallback; the server blends this with embeddings). */
 export function ruleSimilar(target: Property, pool: Property[], limit = 6): SimilarItem[] {
-  return similarCandidates(target, pool)
+  return pool.filter((p) => isPublic(p) && similarOk(target, p))
     .map((p) => ({ p, s: structuralSimilarity(target, p) }))
     .sort((a, b) => b.s - a.s || Math.abs(a.p.price - target.price) - Math.abs(b.p.price - target.price))
     .slice(0, limit)

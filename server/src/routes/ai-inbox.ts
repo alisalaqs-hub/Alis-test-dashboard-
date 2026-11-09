@@ -3,15 +3,12 @@
  *   - spam/scam screen for new enquiries (setEnquiryScreener);
  *   - triage of each enquiry in the background (job 'inbox.triage', on enquiryCreated / new enquirer messages).
  *     Enquirers can't drive AI use: a refresh waits 10 minutes after the last triage, each enquiry is
- *     triaged at most 6 times a day, each lister's enquiries at most 300 times a day, and each sender
- *     sets off at most SENDER_AI_PER_DAY AI actions a day (screening and triage, across all listings).
- *     A message that arrives during the wait, or past a cap, is picked up when the lister next opens
- *     the conversation. Held-back (filtered) conversations are never triaged;
+ *     triaged at most 6 times a day and each lister's enquiries at most 300 times a day. A message
+ *     that arrives during the wait is picked up when the lister next opens the conversation;
  *   - GET  /api/ai/inbox                      triage for all of the lister's conversations (for the inbox list)
  *   - GET  /api/ai/inbox/:id                  triage for one conversation (lister only)
- *   - POST /api/ai/inbox/:id/suggest-reply    an editable, grounded reply draft (lister only; never sent;
- *                                             not for held-back conversations)
- *   - POST /api/ai/inbox/:id/unfilter         "Not spam": release a held-back conversation and email its held messages to the lister
+ *   - POST /api/ai/inbox/:id/suggest-reply    an editable, grounded reply draft (lister only; never sent)
+ *   - POST /api/ai/inbox/:id/unfilter         "Not spam": release a held-back enquiry and email it to the lister
  *   - GET  /api/ai/listings/:ref/insights     performance explained from code-computed stats (cached 12h)
  */
 import type { FastifyInstance } from 'fastify';
@@ -24,8 +21,8 @@ import { enquiryScreener } from '../ai/inbox/screen';
 import { runTriage, TRIAGE_SELECT, triageDTO, type TriageRow } from '../ai/inbox/triage';
 import { REPLY_INTENTS, REPLY_TONES, suggestReply } from '../ai/inbox/reply';
 import { computeStats, explainInsights, type ListingInsights } from '../ai/inbox/insights';
-import { listerAccess, listerEmails, senderAiAllowed, titleOf } from '../ai/inbox/shared';
-import { one, q, tx } from '../db';
+import { listerAccess, listerEmails, titleOf } from '../ai/inbox/shared';
+import { one, q } from '../db';
 import { mails } from '../services/email';
 import { audit, HttpError, parse, requireUser } from '../services/http';
 import { enforce, hit } from '../services/ratelimit';
@@ -38,8 +35,6 @@ const ReplyBody = z.object({
 });
 
 const INSIGHT_STATUSES = ['live', 'under_offer'];
-/** "Not spam" emails the held messages together; a long run of them is summarised. */
-const HELD_IN_EMAIL = 10;
 const INSIGHTS_TTL = 12 * 3600;
 
 /* Limits on background triage, which enquirers (not listers) set off by writing. */
@@ -50,10 +45,9 @@ const TRIAGES_PER_LISTER_DAY = 300;
 /**
  * Whether a triage may be queued for an enquiry now. A first triage is always allowed (within the
  * daily caps); a refresh only once the current one is 10 minutes old. No other triage may be queued
- * or running, at most 6 a day per enquiry, at most 300 a day across one lister's enquiries and, when
- * an enquirer's message set it off (senderKey), within that sender's daily AI allowance.
+ * or running, at most 6 a day per enquiry, and at most 300 a day across one lister's enquiries.
  */
-export async function triageAllowed(enquiryId: string, senderKey?: string | null): Promise<boolean> {
+export async function triageAllowed(enquiryId: string): Promise<boolean> {
   const r = await one<{ has: boolean; fresh: boolean; today: number; active: number; owner: string | null; org: string | null }>(
     `SELECT a.enquiry_id IS NOT NULL AS has, coalesce(a.updated_at > now() - interval '${TRIAGE_COOLDOWN}', false) AS fresh,
             count(j.id) FILTER (WHERE j.created_at > now() - interval '24 hours')::int AS today,
@@ -64,25 +58,19 @@ export async function triageAllowed(enquiryId: string, senderKey?: string | null
        LEFT JOIN ai_jobs j ON j.kind = 'inbox.triage' AND j.subject = 'enquiry:' || e.id::text
       WHERE e.id = $1 GROUP BY a.enquiry_id, a.updated_at, l.owner_user_id, l.organisation_id`, [enquiryId]);
   if (!r || (r.has && r.fresh) || r.active > 0 || r.today >= TRIAGES_PER_ENQUIRY_DAY) return false;
-  if (senderKey && !(await senderAiAllowed(senderKey))) return false;
   const lister = r.owner ? `u:${r.owner}` : r.org ? `o:${r.org}` : null;
   if (lister && !(await hit(`ai.inbox.triage.lister:${lister}`, TRIAGES_PER_LISTER_DAY, 86_400)).ok) return false;
   return true;
 }
 
-/**
- * Queue a triage for an enquiry if the limits allow it (quick: the job does the AI work). Never throws.
- * senderKey: the enquirer whose message set it off; their allowance is checked and the usage charged to them.
- */
-async function queueTriage(enquiryId: string, senderKey?: string | null) {
+/** Queue a triage for an enquiry if the limits allow it (quick: the job does the AI work). Never throws. */
+async function queueTriage(enquiryId: string) {
   if (!aiAvailable()) return null;
   try {
-    if (!(await triageAllowed(enquiryId, senderKey))) return null;
-    return await enqueue('inbox.triage', { enquiryId }, { subject: `enquiry:${enquiryId}`, dedupe: true, ...(senderKey ? { actor: senderKey } : {}) });
+    if (!(await triageAllowed(enquiryId))) return null;
+    return await enqueue('inbox.triage', { enquiryId }, { subject: `enquiry:${enquiryId}`, dedupe: true });
   } catch { return null; }
 }
-/** Held-back conversations are only triaged once the lister releases them. */
-const isFiltered = async (enquiryId: string) => (await one<{ filtered: boolean }>('SELECT filtered FROM enquiries WHERE id = $1', [enquiryId]))?.filtered ?? true;
 
 interface TriageJobState { id: string; status: 'queued' | 'running' | 'done' | 'failed'; stuck: boolean; retry_due: boolean; failures: number }
 /** The latest triage job for an enquiry, and whether it is stuck (never picked up, or its worker died). */
@@ -119,15 +107,13 @@ export async function aiInboxRoutes(app: FastifyInstance) {
   /* ───────── background work and hooks ───────── */
   registerJob('inbox.triage', async (job) => runTriage(String(job.input?.enquiryId ?? '')), { maxAttempts: 2, leaseSec: 120, inlineSafe: true });
   setEnquiryScreener(enquiryScreener);
-  on('enquiryCreated', async ({ enquiryId, senderKey }) => {
-    if (!aiAvailable() || (await isFiltered(enquiryId))) return;
-    await queueTriage(enquiryId, senderKey);
+  on('enquiryCreated', async ({ enquiryId }) => {
+    if (!aiAvailable()) return;
+    const e = await one<{ filtered: boolean }>('SELECT filtered FROM enquiries WHERE id = $1', [enquiryId]);
+    if (e && !e.filtered) await queueTriage(enquiryId); // held-back messages are triaged only if the lister releases them
   });
   // A follow-up from the enquirer refreshes the triage, within the limits above (the lister's own replies never do).
-  on('enquiryMessage', async ({ enquiryId, author, senderKey }) => {
-    if (author !== 'enquirer' || !aiAvailable() || (await isFiltered(enquiryId))) return;
-    await queueTriage(enquiryId, senderKey);
-  });
+  on('enquiryMessage', async ({ enquiryId, author }) => { if (author === 'enquirer') await queueTriage(enquiryId); });
 
   /* ───────── triage ───────── */
   /** Triage for every conversation the signed-in person handles as lister (no AI calls here). */
@@ -176,37 +162,22 @@ export async function aiInboxRoutes(app: FastifyInstance) {
 
   /* ───────── reply drafts ───────── */
   app.post('/api/ai/inbox/:id/suggest-reply', async (req) => {
-    const { e } = await listerAccess(req, (req.params as { id: string }).id);
-    // A held-back message is never sent to the model or drafted for (and no AI allowance is used).
-    if (e.filtered) throw new HttpError(409, 'Move this message to your inbox (choose “Not spam”) before drafting a reply.', 'filtered');
     const { userId } = await aiGuard(req, 'inbox.reply', { auth: true, perMinute: 10, perHour: 80 });
+    const { e } = await listerAccess(req, (req.params as { id: string }).id);
     const b = parse(ReplyBody, req.body ?? {});
     const out = await suggestReply(e, { intent: b.intent, tone: b.tone, notes: b.notes }, userId!);
-    return { reply: out.reply, placeholders: out.placeholders, warnings: out.warnings, aiNotes: out.aiNotes };
+    return { reply: out.reply, placeholders: out.placeholders, warnings: out.warnings };
   });
 
   /* ───────── "Not spam" ───────── */
   app.post('/api/ai/inbox/:id/unfilter', async (req) => {
     await enforce(req, 'inbox.unfilter', 30, 60, 'user');
     const { e } = await listerAccess(req, (req.params as { id: string }).id);
-    const out = await tx(async (c) => {
-      const released = await one<{ id: string }>('UPDATE enquiries SET filtered = false, filter_reason = NULL WHERE id = $1 AND filtered RETURNING id', [e.id], c);
-      if (!released) return null;
-      const held = await q<{ id: string; body: string; created_at: Date }>(`UPDATE enquiry_messages SET held = false WHERE enquiry_id = $1 AND held RETURNING id, body, created_at`, [e.id], c);
-      const first = await one<{ id: string; body: string; created_at: Date }>(`SELECT id, body, created_at FROM enquiry_messages WHERE enquiry_id = $1 AND author = 'enquirer' ORDER BY created_at LIMIT 1`, [e.id], c);
-      return { held: held.sort((a, b) => a.created_at.getTime() - b.created_at.getTime()), first };
-    });
-    if (!out) return { ok: true, filtered: false, emailed: 0 };
-    // Every message the screen held back (from the first one, or from the follow-up it caught), in one email.
-    const held = out.held.length ? out.held : out.first ? [out.first] : [];
-    const opening = !!out.first && held.some((m) => m.id === out.first!.id);
-    const shown = held.slice(0, HELD_IN_EMAIL);
-    const text = [shown.map((m) => m.body).join('\n\n'), held.length > shown.length ? `(${held.length - shown.length} more message${held.length - shown.length === 1 ? '' : 's'} in your inbox.)` : ''].filter(Boolean).join('\n\n');
+    const released = await one<{ id: string }>('UPDATE enquiries SET filtered = false, filter_reason = NULL WHERE id = $1 AND filtered RETURNING id', [e.id]);
+    if (!released) return { ok: true, filtered: false, emailed: 0 };
+    const first = await one<{ body: string }>(`SELECT body FROM enquiry_messages WHERE enquiry_id = $1 AND author = 'enquirer' ORDER BY created_at LIMIT 1`, [e.id]);
     const to = await listerEmails(e);
-    for (const addr of to) {
-      if (opening) await mails.enquiryToLister(addr, titleOf(e), e.ref, e.name, e.kind, text, e.preferred_slot);
-      else await mails.replyToLister(addr, titleOf(e), text);
-    }
+    for (const addr of to) await mails.enquiryToLister(addr, titleOf(e), e.ref, e.name, e.kind, first?.body ?? '', e.preferred_slot);
     await audit(req, 'enquiry.unfiltered', `listing:${e.ref}`, { enquiry: e.id });
     await queueTriage(e.id);
     return { ok: true, filtered: false, emailed: to.length };

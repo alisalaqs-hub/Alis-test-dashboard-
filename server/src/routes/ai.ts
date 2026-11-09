@@ -1,30 +1,26 @@
 /**
  * Design studio AI:
- *   POST /api/ai/room-image              confirmed email · photo + style → 202 {jobId, image}; poll GET /api/ai/jobs/:id
- *   GET  /api/ai/room-images             signed in       · your AI designs
- *   POST /api/ai/design/brief            anyone          · brief text → room, style, tier, materials + engine costs
- *   POST /api/ai/design/describe-photo   confirmed email · one room photo → what to keep, what to fix, suggested styles
- *
- * Image generation and photo analysis are the most expensive AI calls, so they need a confirmed
- * email address (403 'verify_email'), and redesigns have a per-person and a site-wide daily cap
- * (429 'quota' / 'site_quota'), checked under a lock so parallel uploads can't pass them together.
+ *   POST /api/ai/room-image              signed in · photo + style → 202 {jobId, image}; poll GET /api/ai/jobs/:id
+ *   GET  /api/ai/room-images             signed in · your AI designs
+ *   POST /api/ai/design/brief            anyone    · brief text → room, style, tier, materials + engine costs
+ *   POST /api/ai/design/describe-photo   signed in · one room photo → what to keep, what to fix, suggested styles
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { MultipartFile } from '@fastify/multipart';
 import { z } from 'zod';
 import { STYLES } from '../../../src/engine/design';
 import { config } from '../config';
-import { one, q, tx } from '../db';
+import { one, q } from '../db';
 import { modelFor } from '../ai/core';
 import { aiGuard } from '../ai/guard';
 import { enqueue } from '../ai/jobs';
 import { designBrief, ROOMS } from '../ai/studio/brief';
 import { ANALYSIS_LABEL, describeRoomPhoto } from '../ai/studio/describe';
-import { assertImageAllowance, imageDTO, imagesUsedToday, lockImageAllowance, recordImageConsent, registerRoomImageJob, ROOM_IMAGE_JOB, ROOM_IMAGE_LABEL, settleStaleImages, type ImageRow } from '../ai/studio/roomImage';
+import { imageDTO, imagesUsedToday, recordImageConsent, registerRoomImageJob, ROOM_IMAGE_JOB, ROOM_IMAGE_LABEL, settleStaleImages, type ImageRow } from '../ai/studio/roomImage';
 import { audit, HttpError, parse, requireUser } from '../services/http';
 import { cleanImage, sniffImage, type ImageType } from '../services/images';
 import { roomPrompt } from '../services/openai';
-import { deleteFile, newKey, putFile } from '../services/storage';
+import { newKey, putFile } from '../services/storage';
 
 const CONSENT = z.literal('true', { error: 'Please confirm you’re happy for this photo to be processed by our AI provider.' });
 const ImageFields = z.object({
@@ -76,10 +72,10 @@ export async function aiRoutes(app: FastifyInstance) {
 
   /* ───────── room redesign (background job) ───────── */
   app.post('/api/ai/room-image', async (req, reply) => {
-    const { user } = await aiGuard(req, 'studio.room_image', { auth: true, verified: true, perMinute: 6, perHour: 40 });
+    const { user } = await aiGuard(req, 'studio.room_image', { auth: true, perMinute: 6, perHour: 40 });
     const u = user!;
     await settleStaleImages(u.id);
-    await assertImageAllowance(u.id); // fail fast, before the upload is read
+    if ((await imagesUsedToday(u.id)) >= config.ai.dailyImagesPerUser) throw new HttpError(429, `You’ve used today’s ${config.ai.dailyImagesPerUser} AI designs. Try again tomorrow.`, 'quota');
     const { file, fields } = await readPhotoForm(req, config.storage.maxPhotoBytes);
     const f = parse(ImageFields, fields);
     const photo = requirePhoto(file);
@@ -91,21 +87,9 @@ export async function aiRoutes(app: FastifyInstance) {
     });
     const clean = cleanImage(photo.buf, photo.type); // location and camera metadata removed before storing or sending
     const source = await putFile(newKey('ai/source', photo.type), clean, photo.type);
-    const model = await modelFor('image');
-    // The upload may have taken a while: re-check the allowances and reserve the design under a lock.
-    let row: ImageRow;
-    try {
-      row = await tx(async (c) => {
-        await lockImageAllowance(u.id, c);
-        await assertImageAllowance(u.id, c);
-        return (await one<ImageRow>(`INSERT INTO ai_images (user_id, room, style, brief, prompt, source_key, model, status) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running') RETURNING *`,
-          [u.id, f.room, style?.name ?? f.style, f.brief ?? null, prompt, source.key, model], c))!;
-      });
-    } catch (e) {
-      await deleteFile(source.key).catch(() => {}); // no design row points at the stored photo
-      throw e;
-    }
     await recordImageConsent(u.id);
+    const row = (await one<ImageRow>(`INSERT INTO ai_images (user_id, room, style, brief, prompt, source_key, model, status) VALUES ($1, $2, $3, $4, $5, $6, $7, 'running') RETURNING *`,
+      [u.id, f.room, style?.name ?? f.style, f.brief ?? null, prompt, source.key, await modelFor('image')]))!;
     const job = await enqueue(ROOM_IMAGE_JOB, { imageId: row.id }, { userId: u.id, subject: `ai_image:${row.id}` });
     await audit(req, 'ai.room_image', `ai_image:${row.id}`, { room: f.room, style: style?.name ?? f.style });
     const now = (await one<ImageRow>('SELECT * FROM ai_images WHERE id = $1', [row.id]))!;
@@ -130,7 +114,7 @@ export async function aiRoutes(app: FastifyInstance) {
 
   /* ───────── analyse one room photo ───────── */
   app.post('/api/ai/design/describe-photo', async (req) => {
-    const { user } = await aiGuard(req, 'design.describe_photo', { auth: true, verified: true, perMinute: 6, perHour: 30 });
+    const { user } = await aiGuard(req, 'design.describe_photo', { auth: true, perMinute: 6, perHour: 30 });
     const { file, fields } = await readPhotoForm(req, DESCRIBE_MAX_BYTES);
     const f = parse(DescribeFields, fields);
     const photo = requirePhoto(file);

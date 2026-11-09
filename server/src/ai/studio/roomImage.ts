@@ -8,8 +8,7 @@
  */
 import type { AiImageDTO } from '../../../../src/lib/apiTypes';
 import { config } from '../../config';
-import { one, pool, q, type Q } from '../../db';
-import { HttpError } from '../../services/http';
+import { one, q } from '../../db';
 import { sniffImage } from '../../services/images';
 import { editRoomImage } from '../../services/openai';
 import { getFile, newKey, putFile } from '../../services/storage';
@@ -31,51 +30,8 @@ export const imageDTO = (r: ImageRow): AiImageDTO => ({
 });
 
 /** Designs that count towards today's limit (running or done in the last 24 hours). */
-export async function imagesUsedToday(userId: string, db: Q = pool) {
-  return (await one<{ n: number }>(`SELECT count(*)::int n FROM ai_images WHERE user_id = $1 AND status <> 'failed' AND created_at > now() - interval '24 hours'`, [userId], db))!.n;
-}
-
-/** Designs started across the whole site in the last 24 hours (failed ones don't count). */
-export async function imagesUsedSite(db: Q = pool) {
-  return (await one<{ n: number }>(`SELECT count(*)::int n FROM ai_images WHERE status <> 'failed' AND created_at > now() - interval '24 hours'`, [], db))!.n;
-}
-
-/** Seconds until the oldest design counted in a 24-hour window drops out of it (at least a minute). */
-async function secondsUntilFree(userId: string | null, db: Q) {
-  const r = await one<{ s: number | null }>(`SELECT ceil(extract(epoch FROM min(created_at) + interval '24 hours' - now()))::int s FROM ai_images
-    WHERE ($1::uuid IS NULL OR user_id = $1) AND status <> 'failed' AND created_at > now() - interval '24 hours'`, [userId], db);
-  return Math.max(60, r?.s ?? 3600);
-}
-const inAbout = (sec: number) => {
-  const mins = Math.ceil(sec / 60);
-  return mins < 60 ? `in about ${mins} minute${mins === 1 ? '' : 's'}` : `in about ${Math.ceil(mins / 60)} hour${Math.ceil(mins / 60) === 1 ? '' : 's'}`;
-};
-
-/**
- * Throws 429 when this person has used today's designs ('quota') or the whole site has
- * ('site_quota', a cost safety net), with retryAfter in seconds. Returns the person's count.
- */
-export async function assertImageAllowance(userId: string, db: Q = pool) {
-  const used = await imagesUsedToday(userId, db);
-  const limit = config.ai.dailyImagesPerUser;
-  if (used >= limit) {
-    const s = await secondsUntilFree(userId, db);
-    throw new HttpError(429, `You’ve used today’s ${limit} AI designs. You can create another ${inAbout(s)}.`, 'quota', { retryAfter: String(s) });
-  }
-  if (config.ai.dailyImagesSite > 0 && (await imagesUsedSite(db)) >= config.ai.dailyImagesSite) {
-    const s = await secondsUntilFree(null, db);
-    throw new HttpError(429, `Streetkey’s AI designer has reached its limit for today across the whole site. Please try again ${inAbout(s)}. The colour preview and costs still work.`, 'site_quota', { retryAfter: String(s) });
-  }
-  return used;
-}
-
-/**
- * Inside a transaction: serialise "count, then insert" for this person (and for the whole site
- * while the site-wide cap is on), so parallel uploads can't all pass the daily limits together.
- */
-export async function lockImageAllowance(userId: string, db: Q) {
-  await db.query(`SELECT pg_advisory_xact_lock(hashtextextended('ai_images:u:' || $1::text, 0))`, [userId]);
-  if (config.ai.dailyImagesSite > 0) await db.query(`SELECT pg_advisory_xact_lock(hashtextextended('ai_images:site', 0))`);
+export async function imagesUsedToday(userId: string) {
+  return (await one<{ n: number }>(`SELECT count(*)::int n FROM ai_images WHERE user_id = $1 AND status <> 'failed' AND created_at > now() - interval '24 hours'`, [userId]))!.n;
 }
 
 /**

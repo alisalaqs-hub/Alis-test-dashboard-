@@ -93,30 +93,17 @@ const most = <T extends string>(rank: Record<T, number>, first: T, ...rest: T[])
 /** A possible defect never lowers the estimate: the condition-based allowance stays until someone inspects it. */
 const KEPT = 'Allowance kept until a professional inspects it.';
 
-const worse = (a: Condition, b: Condition | undefined) => (b && SEV[b] > SEV[a] ? b : a);
-
 /**
  * Observations + the person's facts → the cost engine's input, with a note of how each part was decided.
- * Elements nobody photographed fall back to Streetkey's condition-based defaults (refurbInputFor), and are
- * never assumed to be in better condition than the person said the home is: a photo of a smart kitchen
- * says nothing about the wiring or the roof. When the photos are few or unclear (low confidence, or fewer
- * than half of them usable) the person's condition also caps the overall condition.
+ * Elements nobody photographed fall back to Streetkey's condition-based defaults (refurbInputFor).
  * An element marked "investigate" (a possible defect) keeps at least that default allowance: spotting a
  * possible problem must never make the estimate cheaper than not photographing it at all.
  */
 export function mapObservations(obs: PhotoObservation[], facts: RefurbPhotoFacts) {
-  const used = obs.filter(usable);
-  const fromPhotos = overallCondition(obs) ?? facts.condition ?? 'fair';
-  const confidence = overallConfidence(obs);
-  const weakEvidence = confidence === 'low' || used.length * 2 < obs.length;
-  const condition = weakEvidence ? worse(fromPhotos, facts.condition) : fromPhotos;
-  const conditionFrom: 'photos' | 'yours' = condition !== fromPhotos ? 'yours' : 'photos';
-  /** What anything nobody photographed is priced from. */
-  const unseenCondition = worse(condition, facts.condition);
+  const condition = overallCondition(obs) ?? 'fair';
   const heavy = condition === 'poor' || condition === 'derelict';
-  const heavyUnseen = unseenCondition === 'poor' || unseenCondition === 'derelict';
-  const base = refurbInputFor(factsProperty({ postcode: facts.postcode, type: facts.propertyType, beds: facts.bedrooms, baths: facts.bathrooms, area: facts.floorArea, storeys: facts.storeys, era: facts.era, condition: unseenCondition }));
-  const unseenFrom = unseenCondition !== condition ? `the ${unseenCondition} condition you gave` : `the overall ${condition} condition`;
+  const base = refurbInputFor(factsProperty({ postcode: facts.postcode, type: facts.propertyType, beds: facts.bedrooms, baths: facts.bathrooms, area: facts.floorArea, storeys: facts.storeys, era: facts.era, condition }));
+  const used = obs.filter(usable);
   const worst = new Map<PhotoElement, PhotoAction>();
   const flagged = new Set<PhotoElement>(); // marked "investigate" in at least one photo
   for (const o of used) for (const it of o.items) {
@@ -133,7 +120,7 @@ export function mapObservations(obs: PhotoObservation[], facts: RefurbPhotoFacts
   const basis: ScopeBasis[] = [];
   const notes = (...n: (string | null | false)[]) => n.filter(Boolean).join(' ') || null;
   const photos = (item: string, value: string, note: string | null = null) => basis.push({ item, value, source: 'photos', note });
-  const assumed = (item: string, value: string) => basis.push({ item, value, source: 'assumed', note: `Not seen in the photos: assumed from ${unseenFrom}.` });
+  const assumed = (item: string, value: string) => basis.push({ item, value, source: 'assumed', note: `Not seen in the photos: assumed from the overall ${condition} condition.` });
   /** A yes/no item: replace (or the listed actions) prices it; "investigate" keeps the condition-based default. */
   const yes = (els: PhotoElement[], baseValue: boolean, acts: PhotoAction[] = ['replace']) => {
     const fromPhotos = any(els, acts);
@@ -155,16 +142,16 @@ export function mapObservations(obs: PhotoObservation[], facts: RefurbPhotoFacts
     const has = (o: PhotoObservation, a: PhotoAction) => o.items.some((i) => i.element === 'bathroom suite' && i.likelyAction === a);
     const toReplace = bathPhotos.filter((o) => has(o, 'replace')).length;
     const toCheck = heavy ? bathPhotos.filter((o) => !has(o, 'replace') && has(o, 'investigate')).length : 0;
-    const unseen = heavyUnseen && facts.bathrooms > 0 ? Math.max(0, facts.bathrooms - bathPhotos.length) : 0;
+    const unseen = heavy && facts.bathrooms > 0 ? Math.max(0, facts.bathrooms - bathPhotos.length) : 0;
     const n = toReplace + toCheck + unseen;
     bathrooms = facts.bathrooms > 0 ? Math.min(n, facts.bathrooms) : n;
     photos('Bathrooms to refit', String(bathrooms), notes(
       act('bathroom suite') === 'refresh' && 'Bathrooms shown needing only a refresh aren’t priced as a refit.',
       toCheck > 0 && KEPT,
-      unseen > 0 && `${unseen} not photographed: assumed from ${unseenFrom}.`,
+      unseen > 0 && `${unseen} not photographed: assumed from the overall ${condition} condition.`,
     ));
   } else {
-    bathrooms = heavyUnseen ? facts.bathrooms : 0;
+    bathrooms = heavy ? facts.bathrooms : 0;
     assumed('Bathrooms to refit', String(bathrooms));
   }
 
@@ -232,9 +219,6 @@ export function mapObservations(obs: PhotoObservation[], facts: RefurbPhotoFacts
   // Strip-out: heavy condition or several elements to replace
   const replacing = [...worst.values()].filter((a) => a === 'replace').length;
   s.stripOut = heavy || replacing >= 3;
-  if (conditionFrom === 'yours') {
-    basis.unshift({ item: 'Overall condition', value: condition, source: 'yours', note: `The photos suggested ${fromPhotos}, but ${used.length < obs.length ? `only ${used.length} of ${obs.length} could be used` : 'they weren’t clear enough'}, so the ${condition} condition you gave is kept.` });
-  }
   photos('Strip-out & waste', yesNo(s.stripOut), `From the overall condition (${condition}) and ${replacing} element${replacing === 1 ? '' : 's'} to replace.`);
 
   // Decoration follows any works that disturb finishes
@@ -256,7 +240,7 @@ export function mapObservations(obs: PhotoObservation[], facts: RefurbPhotoFacts
     postcode: facts.postcode.toUpperCase(), propertyType: facts.propertyType, floorArea: facts.floorArea, bedrooms: facts.bedrooms, bathrooms, storeys: facts.storeys,
     era: facts.era, condition, access: facts.access, spec: facts.spec, scope: s, vat: facts.vat, includeProfessionalFees: facts.includeProfessionalFees,
   };
-  return { scope, basis, condition, conditionFrom, confidence, worst };
+  return { scope, basis, condition, worst };
 }
 
 /* ───────────────────────── guidance written in code ───────────────────────── */
@@ -326,19 +310,17 @@ export async function runPhotosJob(job: JobRow, ctx: JobCtx): Promise<RefurbPhot
     if (!used.length) throw new AiError('no property photos', 'We couldn’t see a room or building in these photos. Try clear photos of each room and the outside.', 422, 'ai_no_property');
 
     await ctx.progress('Working out the scope and costs');
-    const { scope, basis, condition, conditionFrom, confidence, worst } = mapObservations(observations, facts);
+    const { scope, basis, condition, worst } = mapObservations(observations, facts);
     const estimate = estimateRefurb(scope);
     const ignored = observations.filter((o) => o.analysed && !o.isProperty).length;
     const missed = observations.filter((o) => !o.analysed).length;
     const result: RefurbPhotosResult = {
       observations,
-      overall: { condition, confidence, photosUsed: used.length, photosSent: observations.length, conditionFrom },
+      overall: { condition, confidence: overallConfidence(observations), photosUsed: used.length, photosSent: observations.length },
       scope, estimate, basis,
       assumptions: [
-        conditionFrom === 'yours'
-          ? `Overall condition kept at ${condition}, as you gave it: the ${used.length} usable photo${used.length === 1 ? ' wasn’t' : 's weren’t'} enough to judge it.`
-          : `Overall condition judged ${condition} from ${used.length} photo${used.length === 1 ? '' : 's'}.`,
-        ...basis.filter((b) => b.source === 'assumed' && b.note?.startsWith('Not seen')).map((b) => `${b.item}: ${b.value.toLowerCase()} (not seen in the photos, assumed from the ${facts.condition && SEV[facts.condition] > SEV[condition] ? 'condition you gave' : 'overall condition'}).`),
+        `Overall condition judged ${condition} from ${used.length} photo${used.length === 1 ? '' : 's'}.`,
+        ...basis.filter((b) => b.source === 'assumed').map((b) => `${b.item}: ${b.value.toLowerCase()} (not seen in the photos, assumed from the overall condition).`),
         `Quantities come from the ${facts.floorArea} m² floor area you entered, not from the photos.`,
       ],
       caveats: [

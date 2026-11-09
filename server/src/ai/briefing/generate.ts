@@ -4,14 +4,12 @@
  * words it. It never supplies figures: every £ or % it writes is checked against the same
  * kind of figure in the snapshot (see grounding.ts) and anything it can't back up is removed.
  */
-import { normTitle } from '../../../../src/ai/agents';
 import { chatJSON, HOUSE_RULES, untrusted } from '../core';
 import { S, type Infer } from '../schema';
 import { Grounding } from './grounding';
 import { clip, itemIds, LIMITS, type SnapshotT } from './snapshot';
 
 export type BriefingKind = 'agent' | 'landlord' | 'developer' | 'my-agency';
-export interface GroundingReport { checked: number; dropped: number; withheld: number }
 export const CLIENT_KINDS = ['agent', 'landlord', 'developer'] as const;
 
 /* ───────────────────────── briefing ───────────────────────── */
@@ -44,11 +42,8 @@ export interface Briefing {
   questions: string[];
   /** Labels of the snapshot items the priorities refer to (id → label), for display. */
   labels: Record<string, string>;
-  /**
-   * How many £/% figures were checked, how many statements were removed because a figure wasn't in
-   * the data, and how many were withheld under the content rules (guarantees, protected characteristics).
-   */
-  grounding: GroundingReport;
+  /** How many £/% figures were checked, and how many statements were removed because a figure wasn't in the data. */
+  grounding: { checked: number; dropped: number };
   source: 'dashboard' | 'live';
   generatedAt: string;
 }
@@ -89,7 +84,6 @@ const RULES = [
   'priorities: 3 to 5, most important first; impact is high, medium or low; relatedIds lists the ids of snapshot items each one concerns (an empty list if it is portfolio-wide).',
   'Keep every string short and plain: no markdown, no lists inside strings, no emojis.',
   'Never promise outcomes (no guarantees), and never call anything a valuation, survey, or financial, legal or tax advice.',
-  'Never describe, rank or target areas, homes or people by who they are or who lives nearby (race, ethnicity, nationality, religion, sexual orientation, gender reassignment, age, disability), and never suggest marketing to or away from any group. Statements that do are removed automatically.',
 ].join('\n');
 
 /**
@@ -170,9 +164,7 @@ const RISKY_VERBS = [
   'book', 'arrange', 'instruct', 'hire', 'appoint', 'engage', 'assign', 'allocate', 'dispatch', 'inspect',
   // spending, agreeing, legal steps
   'pay', 'spend', 'invest', 'accept', 'reject', 'approve', 'authorise', 'authorize', 'renew', 'submit', 'serve', 'lodge', 'evict', 'terminate',
-  'cancel', 'withdraw', 'proceed', 'execute', 'implement', 'deduct', 'withhold', 'retain', 'distribute', 'circulate', 'syndicate',
-  // choosing between people or options on someone's behalf
-  'pick', 'choose', 'select', 'shortlist',
+  'cancel', 'withdraw', 'proceed', 'execute', 'implement',
   // changing records or listings
   'amend', 'edit', 'modify', 'alter', 'adjust', 'replace', 'remove', 'delete', 'archive', 'rename', 'refresh', 'swap', 'install',
 ];
@@ -183,7 +175,7 @@ const RISKY_WITH_OBJECT = [
   'register', 'protect', 'request', 'change', 'update', 'lower', 'reduce', 'cut', 'increase', 'raise', 'decrease', 'complete', 'add', 'mark',
   'upgrade', 'downgrade', 'switch', 'fix', 'repair',
 ];
-const IRREGULAR = ['sent', 'paid', 'bought', 'spent', 'sold', 'told', 'rang', 'rung', 'chose', 'chosen', 'withheld'];
+const IRREGULAR = ['sent', 'paid', 'bought', 'spent', 'sold', 'told', 'rang', 'rung'];
 const OBJECT = String.raw`(?:the|a|an|it|this|that|these|those|them|its|their|his|her|your|our|all|any|each|every|both|some|more|new|missing|U\d+|\d|to|by|on|as|with|price|prices|rent|rents|asking|listings?|descriptions?|photos?|images?|status|records?|tenanc(?:y|ies)|deposits?|notices?|section|lead|licen[cs]es?|quotes?|contracts?|viewings?|slots?|appointments?|works?|repairs?|engineers?|contractors?|tenants?|vendors?|buyers?|landlords?|applicants?|replacements?)`;
 const PEOPLE = 'vendors?|sellers?|buyers?|purchasers?|tenants?|landlords?|applicants?|enquirers?|contractors?|engineers?|owners?|clients?|lenders?|solicitors?|conveyancers?|councils?|agents?|surveyors?|occupiers?|sharers?|residents?|neighbours?';
 const alt = (xs: string[]) => [...new Set(xs)].map(esc).join('|');
@@ -198,10 +190,6 @@ export const RISKY = new RegExp([
   String.raw`\bappl(?:y|ies|ied|ying)\s+for\b|\bwrit(?:e|es|ing)\s+to\b|\bwrote\s+to\b|\bfollow(?:s|ed|ing)?[- ]?up\s+(?:with|on)\b|\bput\s+(?:it|the|this|them)\s+(?:\w+\s+){0,3}?(?:on|up)\b`,
   // talking with someone: "review price with the vendor", "an update to the tenant"
   String.raw`\b(?:with|to)\s+(?:the\s+|your\s+|a\s+|an\s+|each\s+|every\s+|all\s+|both\s+)?(?:[A-Za-z0-9]+\s+)?(?:${PEOPLE})\b`,
-  // putting a listing live: "go live", "prepare the go-live", "make the listing live"
-  String.raw`\bgo(?:es|ing)?[- ]?live\b|\bwent[- ]live\b|\bmak(?:e|es|ing)\s+(?:it|them|this|that|U\d+|(?:the|your|its|their)\s+(?:\w+\s+){0,2}?(?:listings?|ads?|adverts?|advertisements?|homes?|propert(?:y|ies)|units?|rooms?|flats?))\s+live\b|\bput\s+(?:\w+\s+){0,3}?live\b`,
-  // legal steps and money taken from a deposit, whatever the wording: "an eviction plan", "a deposit deduction"
-  String.raw`\bevict(?:ion|ions)?\b|\bpossession\s+(?:claims?|orders?|proceedings?|notices?|hearings?)\b|\bsection\s?(?:8|13|21)\b|\bdeductions?\b|\bwithholding\b`,
 ].join('|'), 'i');
 /** Read-only starts: work that only prepares something for a person to look at. */
 const READ_ONLY_START = /^(?:summari[sz](?:e|ing)|compar(?:e|ing)|(?:re-?)?check(?:ing)?|review(?:ing)?|prepar(?:e|ing)|draft(?:ing)?|generat(?:e|ing)|compil(?:e|ing)|collat(?:e|ing)|analy[sz](?:e|ing)|assess(?:ing)?|estimat(?:e|ing)|calculat(?:e|ing)|identif(?:y|ying)|highlight(?:ing)?|monitor(?:ing)?|track(?:ing)?|watch(?:ing)?|read(?:ing)?|outlin(?:e|ing)|research(?:ing)?)\b/i;
@@ -213,22 +201,6 @@ export function needsApproval(title: string, detail: string): boolean {
   return !READ_ONLY_START.test(t) || RISKY.test(`${t} | ${detail}`);
 }
 
-/**
- * Choosing, ranking, accepting or turning down applicants or tenants. Agents never make these
- * decisions, so such proposals are withheld outright rather than queued for approval (an approval
- * would make the AI's pick look like a recommendation). Repairs or requests from a tenant don't match:
- * "approve the tenant's repair request" is about the request, not the person.
- */
-const PICK_VERB = String.raw`(?:pick|choos|chose|select|shortlist|accept|reject|refus|decline|approv|rank|vet|prefer|favou?r|turn(?:s|ed|ing)?\s+down|rule(?:s|d)?\s+out)\w*`;
-const APPLICANT = String.raw`(?:applicants?|applications?|candidates?|tenants?|prospective\s+tenants?|renters?|households?|occupiers?|lodgers?|sharers?)(?!['’]s)`;
-const SELECTS_PEOPLE = new RegExp([
-  String.raw`\b${PICK_VERB}\s+(?:(?:the|a|an|one|which|this|that|these|those|best|strongest|weakest|top|preferred|successful|unsuccessful|new|prospective|suitable|unsuitable|right|most|least|ideal|tenancy|rental|their|your)\s+){0,3}${APPLICANT}\b`,
-  // offering the home to one particular applicant
-  String.raw`\b(?:offer|let|rent|give)(?:s|ed|ing)?\s+(?:(?:it|them|the\s+\w+|U\d+)\s+)?to\s+(?:the\s+|an?\s+)?(?:applicant|candidate|household)s?\b`,
-  String.raw`\b(?:who|which\s+(?:applicant|tenant|household)s?)\s+(?:to|should)\s+(?:let|rent|offer|accept|choose|pick|select)\b`,
-].join('|'), 'i');
-export const selectsPeople = (title: string, detail: string, rationale = '') => SELECTS_PEOPLE.test(`${title} | ${detail} | ${rationale}`);
-
 export async function generateProposals(agent: AgentContext, context: SnapshotT | null, meta: { userId?: string | null }) {
   const system = [
     HOUSE_RULES,
@@ -238,7 +210,6 @@ export async function generateProposals(agent: AgentContext, context: SnapshotT 
     'userContext, when present, is extra data from the signed-in person (for example proposals already awaiting their approval): do not repeat proposals that are already waiting.',
     'Propose one to four actions, most useful first. Plain British English, no markdown.',
     'Never propose discriminating between people, pressuring buyers or tenants, unlawful eviction steps, banned tenant fees, or misleading listing claims.',
-    'Never propose choosing, ranking, accepting or rejecting applicants or tenants: those decisions are made by people, never by agents. Proposals that do are removed automatically.',
   ].join('\n');
   const data = { agent: { id: agent.id, name: agent.name, permissions: agent.permissions, toolsCalled: agent.toolsCalled }, findings: agent.findings, ruleBasedProposals: agent.ruleProposals, ...(context ? { userContext: context } : {}) };
   const out = await chatJSON<ProposalsOutT>([
@@ -248,36 +219,16 @@ export async function generateProposals(agent: AgentContext, context: SnapshotT 
   return groundProposals(agent, context, out);
 }
 
-export interface ProposalsResult { proposals: AiProposal[]; grounding: GroundingReport }
-
-export function groundProposals(agent: AgentContext, context: SnapshotT | null, out: ProposalsOutT): ProposalsResult {
+export function groundProposals(agent: AgentContext, context: SnapshotT | null, out: ProposalsOutT) {
   const g = new Grounding({ findings: agent.findings, rules: agent.ruleProposals, context });
   const stamp = Date.now().toString(36);
-  const seen = new Set<string>();
-  const shaped = out.proposals.map((p) => ({ title: clip(p.title, 120), detail: clip(p.detail, 400), rationale: clip(p.rationale, 400), consequential: p.consequential })).filter((p) => {
-    if (!p.title) return false;
-    // The same proposal twice in one run (case, punctuation and articles aside) is shown once.
-    const k = normTitle(p.title);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    // Agents never choose or reject applicants or tenants: withheld, not queued for approval.
-    if (selectsPeople(p.title, p.detail, p.rationale)) { g.withhold(); return false; }
-    return true;
-  });
-  const proposals: AiProposal[] = g.list(shaped, (p) => [p.title, p.detail, p.rationale]).slice(0, 4).map((p, i) => ({
+  const proposals: AiProposal[] = g.list(
+    out.proposals.map((p) => ({ title: clip(p.title, 120), detail: clip(p.detail, 400), rationale: clip(p.rationale, 400), consequential: p.consequential })).filter((p) => p.title),
+    (p) => [p.title, p.detail, p.rationale],
+  ).slice(0, 4).map((p, i) => ({
     id: `ai-${agent.id}-${stamp}-${i}`, agent: agent.id, title: p.title, detail: p.detail, rationale: p.rationale,
     // Approval by default: the model may add caution, never remove it.
     consequential: p.consequential || needsApproval(p.title, p.detail),
   }));
   return { proposals, grounding: g.report };
-}
-
-/**
- * Proposals that are already waiting for approval (the titles the website sends as context) are
- * left out, whether or not the AI saw that context, so repeated runs never queue the same thing twice.
- */
-export function withoutWaiting<T extends { title: string }>(proposals: T[], waitingTitles: string[]): { kept: T[]; repeats: number } {
-  const waiting = new Set(waitingTitles.map(normTitle).filter(Boolean));
-  const kept = proposals.filter((p) => !waiting.has(normTitle(p.title)));
-  return { kept, repeats: proposals.length - kept.length };
 }

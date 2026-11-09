@@ -23,40 +23,13 @@ interface ServerCtx {
 }
 const Ctx = createContext<ServerCtx | null>(null);
 
-/**
- * Fired on `window` when the person using this tab changes: they signed out, or the session now
- * belongs to someone else (or no one). Anything kept in memory for one person (the Ask Streetkey
- * conversation, assistant answers) listens and forgets it.
- */
-export const ACCOUNT_CHANGED_EVENT = 'streetkey:account-changed';
-/** sessionStorage keys starting with this hold one person's Ask Streetkey conversation (src/lib/ai/assistant.ts). */
-const PERSONAL_SESSION_PREFIX = 'streetkey-ask';
-/** Who the conversation in this tab belongs to: a user id, or '' for a visitor. */
-const OWNER_KEY = 'streetkey-ask-owner';
-
-/** Forgets this tab's per-person session state (the AI conversation) and tells listeners. */
-function forgetSession() {
-  try {
-    const keys: string[] = [];
-    for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); if (k?.startsWith(PERSONAL_SESSION_PREFIX)) keys.push(k); }
-    for (const k of keys) sessionStorage.removeItem(k);
-  } catch { /* storage unavailable: nothing was kept */ }
-  if (typeof window !== 'undefined') window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT));
-}
-const readOwner = (): string | null => { try { return sessionStorage.getItem(OWNER_KEY); } catch { return null; } };
-const writeOwner = (id: string) => { try { sessionStorage.setItem(OWNER_KEY, id); } catch { /* storage unavailable */ } };
-
 export function ServerProvider({ children }: { children: ReactNode }) {
   const store = useStore();
   const [status, setStatus] = useState<ServerCtx['status']>('checking');
   const [health, setHealth] = useState<HealthDTO | null>(null);
   const [user, setUser] = useState<UserDTO | null>(null);
-  /** True once we know who is signed in (or that there is no server). */
-  const [known, setKnown] = useState(false);
   const searchIds = useRef(new Map<string, string>());
   const synced = useRef<{ saved: Set<string>; searches: Set<string> } | null>(null);
-  const storeRef = useRef(store);
-  storeRef.current = store;
 
   const refreshListings = useCallback(async () => {
     const r = await api.listings.search({ pageSize: 200 }).catch(() => null);
@@ -69,28 +42,14 @@ export function ServerProvider({ children }: { children: ReactNode }) {
     (async () => {
       const h = await api.health();
       if (!live) return;
-      if (!h) { setStatus('offline'); setKnown(true); return; }
+      if (!h) { setStatus('offline'); return; }
       setHealth(h); setStatus('online');
       const me = await api.auth.me().catch(() => ({ user: null }));
-      if (live) { setUser(me.user); setKnown(true); }
+      if (live) setUser(me.user);
       await refreshListings();
     })();
     return () => { live = false; };
   }, [refreshListings]);
-
-  // The AI conversation in this tab belongs to whoever was signed in when it was had. When that
-  // account signs out, or the tab now has a different account (or none: an expired session), it is
-  // forgotten, so the next person never sees it or sends it to the AI. A visitor keeps theirs on sign-in.
-  useEffect(() => {
-    if (!known) return;
-    const now = user?.id ?? '';
-    const before = readOwner();
-    if (before && before !== now) {
-      forgetSession();
-      storeRef.current.clearPersonal();
-    }
-    writeOwner(now);
-  }, [known, user?.id]);
 
   // On sign-in: merge what was saved on this device into the account, then keep them in step.
   useEffect(() => {
@@ -141,14 +100,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sign-out ends the session, then forgets this person's conversation and everything personal kept on the device.
-  const signOut = useCallback(async () => {
-    await api.auth.logout().catch(() => {});
-    forgetSession();
-    writeOwner('');
-    setUser(null);
-    storeRef.current.clearPersonal();
-  }, []);
+  const signOut = useCallback(async () => { await api.auth.logout().catch(() => {}); setUser(null); }, []);
 
   const value = useMemo<ServerCtx>(() => ({ status, online: status === 'online', health, user, setUser, signOut, refreshListings, loadListing }), [status, health, user, signOut, refreshListings, loadListing]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

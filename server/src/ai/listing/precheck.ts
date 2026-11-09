@@ -14,11 +14,7 @@ import { clip, reviewText, type Reason } from './wording';
 export const FIELDS = ['title', 'description', 'price', 'postcode', 'tenure', 'leaseYears', 'serviceCharge', 'groundRent', 'councilTax', 'epc', 'beds', 'baths', 'floorArea', 'features', 'photos', 'general'] as const;
 export type Field = (typeof FIELDS)[number];
 export type Severity = 'block' | 'warn' | 'tip';
-/**
- * One point for the lister. Rule-based 'block' items (source 'checks', and 'wording' items, which use the same
- * patterns as the checks) stop a listing being published; the AI's own 'block' items are advice (`enforced: false`).
- */
-export interface Issue { severity: Severity; field: Field; message: string; source: 'checks' | 'wording' | 'ai'; checkId?: string; reason?: Reason; enforced?: boolean }
+export interface Issue { severity: Severity; field: Field; message: string; source: 'checks' | 'wording' | 'ai'; checkId?: string }
 
 export const PrecheckBody = z.object({
   facts: FactsSchema,
@@ -27,10 +23,7 @@ export const PrecheckBody = z.object({
 });
 export type PrecheckIn = z.infer<typeof PrecheckBody>;
 
-const CHECK_FIELD: Record<string, Field> = {
-  price: 'price', postcode: 'postcode', tenure: 'tenure', lease: 'leaseYears', charges: 'serviceCharge', ctax: 'councilTax', epc: 'epc', 'epc-let': 'epc',
-  photos: 'photos', 'photo-min': 'photos', discrim: 'description', bidding: 'description', fees: 'description', contact: 'description', payment: 'description', scam: 'description',
-};
+const CHECK_FIELD: Record<string, Field> = { price: 'price', postcode: 'postcode', tenure: 'tenure', lease: 'leaseYears', charges: 'serviceCharge', ctax: 'councilTax', epc: 'epc', 'epc-let': 'epc', photos: 'photos', discrim: 'description', bidding: 'description' };
 
 /** Streetkey's own compliance checks (the same ones the form and the server use) for these facts. */
 export function ruleChecks(f: Facts, description: string, photoCount: number) {
@@ -41,12 +34,11 @@ export function ruleChecks(f: Facts, description: string, photoCount: number) {
     serviceChargeAnnual: f.serviceCharge ?? undefined, groundRentAnnual: f.groundRent ?? undefined, features: f.features, description,
     photos: Array.from({ length: photoCount }, () => ''), source: { kind: f.channel === 'rent' ? 'landlord' : 'owner', name: '', licence: '', verified: false },
   };
-  return complianceChecks(input, { minPhotos: 1 });
+  return complianceChecks(input);
 }
 
 const WORDING: Record<Reason, { severity: Severity; text: string }> = {
-  discrimination: { severity: 'block', text: 'could discriminate against people, which is unlawful in a rental advert. Describe the home, not who should live there.' },
-  steering: { severity: 'warn', text: 'could discriminate or steer people. Describe the home, not who should live there.' },
+  discrimination: { severity: 'block', text: 'could discriminate or steer people. Describe the home, not who should live there.' },
   bidding: { severity: 'block', text: 'invites offers or bids. A rental advert must state one fixed rent.' },
   fees: { severity: 'block', text: 'mentions tenant fees, which are banned under the Tenant Fees Act 2019 (apart from permitted payments).' },
   pets: { severity: 'warn', text: 'is a blanket “no pets” line. Tenants can ask to keep a pet and landlords must not unreasonably refuse.' },
@@ -87,7 +79,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 export async function precheck(input: PrecheckIn, meta: { userId?: string | null }) {
   const f = input.facts;
   const checks = ruleChecks(f, input.description, input.photoCount);
-  const issues: Issue[] = checks.filter((c) => !c.ok).map((c) => ({ severity: c.severity, field: CHECK_FIELD[c.id] ?? 'general', message: c.message, source: 'checks', checkId: c.id, enforced: c.severity === 'block' }));
+  const issues: Issue[] = checks.filter((c) => !c.ok).map((c) => ({ severity: c.severity, field: CHECK_FIELD[c.id] ?? 'general', message: c.message, source: 'checks', checkId: c.id }));
 
   // Wording rules on the seller's own title and description (flagged, never changed).
   const seen = new Set<string>();
@@ -97,7 +89,7 @@ export async function precheck(input: PrecheckIn, meta: { userId?: string | null
       if (seen.has(k)) continue;
       seen.add(k);
       const w = WORDING[p.reason];
-      issues.push({ severity: w.severity, field, message: `“${clip(p.sentence, 90)}” ${w.text}`, source: 'wording', reason: p.reason, enforced: w.severity === 'block' });
+      issues.push({ severity: w.severity, field, message: `“${clip(p.sentence, 90)}” ${w.text}`, source: 'wording' });
     }
   }
 
@@ -116,7 +108,7 @@ export async function precheck(input: PrecheckIn, meta: { userId?: string | null
         const message = clip(i.message, 300);
         if (!message || have.has(norm(message))) continue;
         have.add(norm(message));
-        issues.push({ severity: i.severity, field: (FIELDS as readonly string[]).includes(i.field) ? i.field : 'general', message, source: 'ai', enforced: false });
+        issues.push({ severity: i.severity, field: (FIELDS as readonly string[]).includes(i.field) ? i.field : 'general', message, source: 'ai' });
       }
     } catch (e) {
       if (!(e instanceof AiError)) throw e;
@@ -125,5 +117,5 @@ export async function precheck(input: PrecheckIn, meta: { userId?: string | null
   } else aiNote = 'Add a description to get an AI review of the wording.';
 
   issues.sort((a, b) => ORDER[a.severity] - ORDER[b.severity]);
-  return { ready: !issues.some((i) => i.severity === 'block' && i.enforced), issues, checks, aiUsed, aiNote };
+  return { ready: !issues.some((i) => i.severity === 'block'), issues, checks, aiUsed, aiNote };
 }

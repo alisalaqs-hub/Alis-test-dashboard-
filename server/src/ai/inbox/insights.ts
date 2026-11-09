@@ -1,16 +1,14 @@
 /**
  * Listing performance insights for listers. Every figure is computed here, in code, from the
  * database (consented analytics, saves, enquiries, photos) and Streetkey's own area evidence
- * engine; the model only explains and prioritises. Its text is checked: any point that uses a
- * number not in the stats, predicts results, or talks about who should live there (protected
- * characteristics, "young families") is dropped (and replaced by the rule-based version where needed).
+ * engine; the model only explains and prioritises. Its text is checked: any sentence that uses a
+ * number not in the stats is dropped (and replaced by the rule-based version where needed).
  */
 import { areaEvidence } from '../../../../src/engine/listings';
 import { chatJSON, HOUSE_RULES, modelFor, untrusted } from '../core';
 import { S, type Infer } from '../schema';
 import { one, q } from '../../db';
 import { checksFor, type ListingRow } from '../../services/listings';
-import { mentionsProtected } from '../../../../src/lib/ai/search';
 import { clip } from './shared';
 
 export interface PhotoQuality { analysed: number; averageScore: number | null; weak: number; issues: string[] }
@@ -232,8 +230,8 @@ export async function explainInsights(row: ListingRow, stats: InsightStats, user
   ], InsightSchema, 'listing_insights', { purpose: 'inbox.insights', userId, role: 'main', maxTokens: 1800, effort: 'low' });
 
   const allowed = allowedNumbers(stats);
-  /** Every number comes from the stats, nothing predicts results or compares with other listings, and nothing is about who should live there. */
-  const ok = (t: string) => numbersOk(t, allowed) && !speculative(t) && !mentionsProtected(t);
+  /** Every number comes from the stats, and nothing predicts results or compares with other listings. */
+  const ok = (t: string) => numbersOk(t, allowed) && !speculative(t);
   const working = out.whatsWorking.map((x) => clip(x, 200)).filter((x) => x && ok(x)).slice(0, 4);
   const improve = out.whatToImprove
     .map((x) => ({ action: clip(x.action, 120), why: clip(x.why, 260), impact: x.impact }))

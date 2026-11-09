@@ -4,11 +4,9 @@
  * how a conversation names the home (never with a private seller's house number).
  */
 import type { FastifyRequest } from 'fastify';
-import { mentionsProtected } from '../../../../src/lib/ai/search';
 import { one, q } from '../../db';
 import { forbidden, notFound, requireUser } from '../../services/http';
 import { streetOnly } from '../../services/listings';
-import { hit } from '../../services/ratelimit';
 import { orgIdsFor } from '../../routes/listings';
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,35 +58,3 @@ export const normaliseText = (s: string) => s.replace(/\s+/g, ' ').trim().toLowe
 export const redactContacts = (s: string) => s
   .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]')
   .replace(/(?<![\w£])(?:\+44\s?|0)(?:\d[\s-]?){8,9}\d(?!\d)/g, '[phone]');
-
-/* ───────── per-sender AI allowance ───────── */
-/**
- * How many AI actions one enquirer can set off in a day, across every listing: model screening of
- * their messages and background triage of their conversations. Past it, their messages are
- * screened by the rules alone and triage waits until the lister opens the conversation.
- */
-export const SENDER_AI_PER_DAY = 20;
-/** Counts one AI action for this sender ('u:<id>' or anonId(ip)) and says whether it's within the daily allowance. */
-export async function senderAiAllowed(senderKey: string | null | undefined): Promise<boolean> {
-  if (!senderKey) return true;
-  try { return (await hit(`ai.inbox.sender:${senderKey}`, SENDER_AI_PER_DAY, 86_400)).ok; } catch { return false; }
-}
-
-/* ───────── cleaning model-written text ───────── */
-/** Web addresses and bare domains ("secure-deposit-uk.com/pay"): never repeated in AI summaries or notes. */
-const LINK_RE = /\b(?:https?:\/\/|www\.)[^\s<>"']+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|net|org|info|biz|xyz|top|site|online|club|shop|io|co|uk|ru|cn|tk|ml|ga|cf|gq|link|click|app|me)(?:\/[^\s<>"']*)?\b/gi;
-export const stripLinks = (s: string) => s.replace(LINK_RE, '[link]');
-/** A claim that Streetkey checked, verified or approved someone or something: Streetkey makes no such checks on enquirers. */
-const STREETKEY_CLAIM_RE = /\b(?:verified|checked|confirmed|approved|vetted|validated|guaranteed)\b[^.!?\n]{0,40}\bstreetkey\b|\bstreetkey\b[^.!?\n]{0,40}\b(?:verified|checked|confirmed|approved|vetted|validated|guaranteed|has verified|has checked)\b/i;
-export const claimsStreetkeyCheck = (s: string) => STREETKEY_CLAIM_RE.test(s);
-/**
- * Words about who someone is (protected characteristics, family or marital status, pregnancy,
- * benefits, age, immigration status). The triage never records these, so a summary sentence that
- * mentions them is dropped.
- */
-const PERSONAL_RE = /\b(?:child(?:ren)?|kids?|bab(?:y|ies)|pregnan\w*|expecting a baby|married|marriage|divorc\w*|widow\w*|single (?:mum|mom|dad|parent|man|woman)|benefits?|universal credit|dss|disab\w*|wheelchair|pensioners?|retired|elderly|\d{1,3}[- ]years?[- ]old|aged \d{1,3}|religio\w*|church|mosque|synagogue|temple|gurdwara|nationality|citizenship|visa|asylum)\b/i;
-export const aboutThePerson = (s: string) => mentionsProtected(s) || PERSONAL_RE.test(s);
-/** Splits into sentences without breaking "£1.2m", "e.g." or web addresses. */
-export const sentencesOf = (s: string) => s.match(/(?:[^.!?\n]|[.!?](?=[^\s.!?]))+[.!?]*[ \t]*|[.!?]+[ \t]*|\n+/g) ?? [s];
-/** Drops the sentences for which drop() is true. */
-export const dropSentences = (s: string, drop: (sentence: string) => boolean) => sentencesOf(s).filter((x) => !x.trim() || !drop(x)).join('').replace(/[ \t]{2,}/g, ' ').trim();
