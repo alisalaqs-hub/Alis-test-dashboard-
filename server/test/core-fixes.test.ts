@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SAMPLE_BLM } from '../../src/data/sampleFeed';
 import { untrusted } from '../src/ai/core';
 import { q } from '../src/db';
+import { migrate } from '../src/migrate';
 import { getApp, jpegWithExif, LISTING, makeAdmin, multipart, signUp } from './helpers';
 
 describe('core fixes', () => {
@@ -53,5 +54,12 @@ describe('core fixes', () => {
     const w = untrusted('note', 'a >><<<> b <<>>>< c >>>>>> d <<<<<<');
     const inner = w.slice(w.indexOf('\n') + 1, w.lastIndexOf('\n'));
     expect(inner).not.toMatch(/<<|>>/);
+  });
+
+  it('refuses to run when an applied migration has been edited', async () => {
+    await q(`UPDATE schema_migrations SET checksum = 'tampered' WHERE name = '001_init.sql'`);
+    await expect(migrate()).rejects.toThrow(/was changed after it was applied/);
+    await q(`UPDATE schema_migrations SET checksum = NULL WHERE name = '001_init.sql'`);
+    await expect(migrate()).resolves.toBeUndefined();
   });
 });

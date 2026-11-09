@@ -67,5 +67,5 @@ CREATE INDEX ON ai_cache (expires_at);
 
 -- Enquiries an automated screen judged to be spam or a scam are kept (for the record and appeals)
 -- but not emailed to the lister and shown under "Filtered" in their inbox.
-ALTER TABLE enquiries ADD COLUMN filtered boolean NOT NULL DEFAULT false;
-ALTER TABLE enquiries ADD COLUMN filter_reason text;
+ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS filtered boolean NOT NULL DEFAULT false;
+ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS filter_reason text;

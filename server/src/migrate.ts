@@ -11,6 +11,7 @@
 import fs from 'node:fs/promises';
 import fss from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { config, ROOT } from './config';
 import { EMBEDDED_MIGRATIONS } from './migrations.generated';
@@ -23,6 +24,8 @@ export async function loadMigrations(): Promise<{ name: string; sql: string }[]>
   }
   return [...EMBEDDED_MIGRATIONS].sort((a, b) => a.name.localeCompare(b.name));
 }
+
+const checksum = (sql: string) => createHash('sha256').update(sql.replace(/\r\n/g, '\n')).digest('hex');
 
 let done: Promise<void> | null = null;
 /** Run once per process (cheap when up to date: one query). */
@@ -37,7 +40,20 @@ export async function migrate(log: (m: string) => void = () => {}) {
   await client.connect();
   try {
     await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-    const applied = new Set((await client.query<{ name: string }>('SELECT name FROM schema_migrations')).rows.map((r) => r.name));
+    await client.query('ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum text');
+    const rows = (await client.query<{ name: string; checksum: string | null }>('SELECT name, checksum FROM schema_migrations')).rows;
+    const applied = new Set(rows.map((r) => r.name));
+    // An applied migration must never change: new schema goes in a new numbered file.
+    for (const r of rows) {
+      const m = migrations.find((x) => x.name === r.name);
+      if (!m) continue;
+      const sum = checksum(m.sql);
+      if (!r.checksum) await client.query('UPDATE schema_migrations SET checksum = $2 WHERE name = $1', [r.name, sum]);
+      else if (r.checksum !== sum) {
+        const msg = `Migration ${r.name} was changed after it was applied. Put schema changes in a new numbered migration instead.`;
+        if (config.isProd) console.error(`[migrate] ${msg}`); else throw new Error(msg);
+      }
+    }
     for (const m of migrations) {
       if (applied.has(m.name)) continue;
       await client.query('BEGIN');
@@ -46,7 +62,7 @@ export async function migrate(log: (m: string) => void = () => {}) {
         const again = await client.query('SELECT 1 FROM schema_migrations WHERE name = $1', [m.name]);
         if (!again.rowCount) {
           await client.query(m.sql);
-          await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [m.name]);
+          await client.query('INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)', [m.name, checksum(m.sql)]);
           log(`applied ${m.name}`);
         }
         await client.query('COMMIT');
