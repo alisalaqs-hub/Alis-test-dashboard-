@@ -86,25 +86,30 @@ Design principle: **one property, one profile, many views.** The consumer sees t
 | Virtual staging / AI design apps | Pretty images | Every design is costed, scheduled, quotable and investable |
 | Lettings software (Goodlord, Arthur) | Admin | Portfolio intelligence + maintenance prediction + compliance |
 
-## 5. Feature set & status in this prototype
+## 5. Feature set & status (November 2026)
 
-| Part | Feature | Prototype status |
+"AI" below means OpenAI, called from Streetkey's server; figures always come from Streetkey's engines or database, and every AI feature falls back to the built-in rules when AI is off or paused.
+
+| Part | Feature | Status |
 |---|---|---|
-| 1 | Marketplace: search buy/rent/commercial/development, filters, map, compare, save, viewings, contact, documents | **Working** on 15 fictional listings |
-| 1 | Conversational AI search incl. all three example queries | **Working** (rule-based interpreter → same structured query an LLM would emit) |
-| 2 | Per-property AI intelligence with Q&A (overpriced? rent? costs? kitchen? extend? risks? compare? invest?) | **Working**, grounded skills with evidence/assumptions/verify |
-| 3 | Engagement engine: 20 signals, observed vs inferred, CIs, k-anonymity | **Working** on simulated, seeded data; consent-gated client tracking demonstrated |
-| 4 | Owner dashboard + owner AI + weekly report | **Working** (Markdown report download) |
-| 5 | Agent command centre, alerts, quality scores, AI copy, seller reports, approval queue | **Working** (approval records decisions; nothing is sent) |
-| 6 | Design studio: 9 styles, kitchen/bath finishes, staging watermark, layout planner, materials, budget designer, before/after, save/share, design-to-cost, design engagement | **Working**; images are illustrations / colour-grade previews (image model not connected) |
-| 7 | Regional refurb engine incl. commercial fit-out, office-to-resi, groundworks, BoQ, labour/materials, defect risks | **Working**, demo rate library |
-| 8 | Investment analyser incl. commercial, break-evens, scenarios, sensitivity, linked to design & refurb | **Working** |
+| 1 | Marketplace: search buy/rent/commercial/development, filters, map, compare, save, viewings, contact, documents | **Working**: demo listings plus real owner listings and agent-feed listings stored on the server; saved homes and searches sync to the account |
+| 1 | Conversational AI search incl. all three example queries | **Working**: AI reads plain English into the structured search ("AI understood" chips you can remove), semantic re-ranking and *Similar homes*; refuses demographic filtering; built-in interpreter as fallback |
+| 2 | Per-property AI intelligence with Q&A (overpriced? rent? costs? kitchen? extend? risks? compare? invest?) | **Working**: *Ask Streetkey* assistant with tools wired to the engines; figures checked against tool results; lister-written text is never treated as evidence |
+| 3 | Engagement engine: 20 signals, observed vs inferred, CIs, k-anonymity | **Working** on simulated, seeded data; live listings record real views, saves and enquiries |
+| 4 | Owner dashboard + owner AI + weekly report | **Working**, with AI performance insights per listing |
+| 5 | Agent command centre, alerts, quality scores, AI copy, seller reports, approval queue | **Working**, with AI briefings grounded in the page's figures or the agency's live listings (nothing is sent automatically) |
+| 5 | Inbox for listers | **Working**: enquiries screened for spam and scams, AI triage (buyer position, questions, urgency) and an editable suggested reply (never sent automatically) |
+| 5 | Trust & safety | **Working**: every submitted or edited private listing is reviewed (moderation, scam signals, missing material information, discriminatory wording) with a risk score for the admin |
+| 6 | Design studio: 9 styles, kitchen/bath finishes, staging watermark, layout planner, materials, budget designer, before/after, save/share, design-to-cost, design engagement | **Working**: photo-real AI room redesign (OpenAI image model) as a background job with consent, daily limits and labelling; *Analyse this room*; brief reader with costs from the design engine |
+| 7 | Regional refurb engine incl. commercial fit-out, office-to-resi, groundworks, BoQ, labour/materials, defect risks | **Working**, demo rate library; estimate from photos (AI reads the photos, the engine prices the scope) |
+| 8 | Investment analyser incl. commercial, break-evens, scenarios, sensitivity, linked to design & refurb | **Working**, with an AI verdict that is never more optimistic than the rules |
 | 9 | Development potential (loft, rear/side, subdivision, Class MA, energy) | **Working** rules-based screening |
 | 10 | Landlord management + landlord AI + predictive maintenance | **Working** on demo portfolio |
 | 11 | Demand prediction / unit mix for developers | **Working** scenario tool on labelled demo inputs (no trained model) |
-| 12 | Multi-agent system with permissions, approvals, audit | **Working** deterministic agents (no scheduler/LLM) |
+| 12 | Multi-agent system with permissions, approvals, audit | **Working**: deterministic agents plus AI proposals that always need human approval |
 | 13 | Knowledge graph | Visualised per property; schema designed (`db/schema.sql`) |
-| 14 | API, widgets, plans, RBAC | Console + live estimate demo; API server not built |
+| 14 | API, widgets, plans, RBAC | Full API behind the website (Fastify on Netlify Functions) and a BLM agent-feed endpoint with per-branch keys; public partner API, widgets and billing not built |
+| — | List a property, check any listing from another site | **Working**: guided listing with compliance checks that block publishing, AI description writer, photo checks, price-guide explanation and pre-submission check; *Check any listing* reads pasted listing text (links are never visited) |
 
 ## 6. Twenty-plus further AI features (prioritised by problem × data reliability)
 

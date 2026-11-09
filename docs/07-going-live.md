@@ -1,31 +1,26 @@
 # Streetkey — Going Live
 
-## Stage 1 · Public preview (now)
-The site publishes automatically to **GitHub Pages** whenever this repository's default branch changes
-(`.github/workflows/deploy.yml`: install → 49 tests → type-check & build → publish; a failing test blocks the release).
-
-**One-time step (repository owner):** GitHub → this repository → **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-Then open **Actions → Deploy site → Run workflow** (or push any change).
-
-Preview address: `https://alisalaqs-hub.github.io/Alis-test-dashboard-/`
-
-What the preview includes: “Public preview” banner, `noindex` (search engines won't list the demo data), self-hosted fonts (no third-party requests), draft Privacy / Terms / Accessibility pages.
-
-## Stage 1b · The live site on Netlify (accounts, listings, AI)
+## Stage 1 · The live site on Netlify (accounts, listings, AI)
 Accounts, real listings with photos, enquiries, alerts, agent feeds, admin and every AI feature run as Netlify
 Functions next to the website. Follow **[08 · The back end](08-backend.md) → Put it live on Netlify**:
-import the repository from GitHub (not drag-and-drop), add Netlify Database, set `OPENAI_API_KEY` and
-`ADMIN_EMAIL`, deploy, then confirm your admin account. GitHub Pages can stay as a free static demo.
+import the repository from GitHub (**not** drag-and-drop, which uploads only the website), add Netlify Database
+in a London or Frankfurt region, set `OPENAI_API_KEY` (with credit and a monthly limit in your OpenAI account) and
+`ADMIN_EMAIL`, deploy, then confirm your admin account. Netlify redeploys automatically on every push to the branch.
+
+The site keeps its preview safeguards until the checklist below is done: “Public preview” banner, `noindex`
+(search engines won't list the demo data), self-hosted fonts (no third-party requests), draft Privacy / Terms /
+Accessibility pages.
+
+## Optional · Static preview on GitHub Pages
+`.github/workflows/deploy.yml` can publish the website alone (no accounts or AI; everything falls back to the
+built-in rules) to `https://alisalaqs-hub.github.io/Alis-test-dashboard-/`. It runs only when started by hand:
+**Actions → Deploy site → Run workflow** (one-time: **Settings → Pages → Source: GitHub Actions**).
 
 ## Stage 2 · Your own domain (e.g. streetkey.co.uk)
 1. Check the name: UKIPO trade mark search (classes 9, 35, 36, 37, 42) and Companies House.
 2. Buy the domain from any registrar (≈ £10–15/yr for .co.uk).
-3. GitHub → Settings → Pages → **Custom domain** → enter `www.yourdomain.co.uk` → Save.
-4. At your registrar add DNS records:
-   - `CNAME` `www` → `alisalaqs-hub.github.io`
-   - `A` records for the bare domain → `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`
-5. When the certificate is issued, tick **Enforce HTTPS**.
-(Netlify or Vercel work too: connect the repo; `netlify.toml` is included.)
+3. Netlify → **Domain management → Add a domain** → enter `www.yourdomain.co.uk` and follow the DNS steps it shows (Netlify DNS, or a `CNAME` for `www` at your registrar). Netlify issues the HTTPS certificate automatically.
+4. Set `PUBLIC_URL` to `https://www.yourdomain.co.uk` in Netlify's environment variables and redeploy (it's used in emails).
 
 ## Before removing the “Public preview” label
 | Item | Owner |
@@ -35,7 +30,8 @@ import the repository from GitHub (not drag-and-drop), add Netlify Database, set
 | Replace fictional listings with real ones (agent feeds / verified owner listings) | Dev |
 | Connect official data: HM Land Registry Price Paid, EPC register, EA flood, postcodes | Dev |
 | QS review of refurbishment rate library | QS consultant |
-| Backend: accounts, database, image storage, moderation | Done: see 08-backend; deploy it and set the keys |
+| Backend: accounts, database, image storage, moderation, AI | Done: see 08-backend; deploy it and set the keys |
+| OpenAI: add credit, set a monthly limit, use a fresh API key | You |
 | If introducing buyers/tenants for owners: redress scheme + HMRC AML supervision | You + solicitor |
 | Professional indemnity & cyber insurance; security test before taking personal data or payments | You |
 | Remove `<meta name="robots" content="noindex">` from `index.html`; remove preview banner | Dev |

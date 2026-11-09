@@ -38,6 +38,9 @@ Additional supply to pursue: auction houses (lot feeds + legal packs), new-homes
 * **Compliance checks that block publishing**: missing price/postcode/tenure/council tax/EPC; lease details for leaseholds; EPC below E for lettings; discriminatory rental wording ("No DSS", "no children"); inviting rental bids
 * Owner declarations; listing management (live / under offer / withdrawn); owner dashboard; enquiries via STREETKEY messaging (contact details private)
 * Merging: if an agent later lists the same home, the records merge ("also listed by")
+* Stored on the server with admin review: every submission gets an AI trust review (moderation, scam signals such as payment before viewing, price far below the area, contact details in the text, missing material information) and an admin approves it; edits to a live private listing are checked again and can send it back to review
+* Agent feeds: BLM upload endpoint with one key per branch; each upload is that branch's full stock, so withdrawn homes disappear automatically
+* Enquiries screened for spam and scams before they reach the lister
 
 ### Needed before launch (production)
 | Area | Requirement |
@@ -53,7 +56,7 @@ Additional supply to pursue: auction houses (lot feeds + legal packs), new-homes
 Private sellers cannot list directly on Rightmove (it only accepts estate agents). If STREETKEY registers as an online estate agent (fixed-fee model), it could **syndicate owner listings to the major portals** via a feed — giving owners full reach while STREETKEY keeps the intelligence layer. This needs the agency registrations above.
 
 ## 3. What is real vs demo
-* Real code: BLM parsing, validation, de-duplication, extraction, compliance checks, wizard, deep links (49 tests).
+* Real code: BLM parsing, validation, de-duplication, extraction, compliance checks, the listing wizard, the feed endpoint, moderation and admin review, all covered by the website and server tests.
+* Listings, photos and feeds are stored on the server (PostgreSQL and Netlify Blobs) once the back end is deployed; the static preview keeps them in the browser.
 * The sample feed agency, demo listings and comparables are fictional.
-* postcodes.io lookups run from the user's browser (blocked in this build environment, so the fallback path was tested).
-* Listings, photos and feeds are stored in the browser for the prototype; production stores them server-side with moderation.
+* postcodes.io lookups use open (OGL) data, with an offline fallback.

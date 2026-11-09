@@ -39,7 +39,7 @@ Browser ── static site (dist/, from Netlify's CDN)
    - `OPENAI_API_KEY`: from platform.openai.com → API keys. Add credit and set a monthly limit there.
    - `ADMIN_EMAIL`: your email address (see step 5).
    - `RESEND_API_KEY` and `EMAIL_FROM` (e.g. `Streetkey <hello@yourdomain.co.uk>`): from resend.com after verifying your domain. Optional at first.
-   - Optional: `AI_DAILY_TOKEN_BUDGET`, `AI_DAILY_IMAGES_PER_USER`, `AI_DAILY_REQUESTS_PER_USER`, `AI_DAILY_REQUESTS_PER_IP`, `AI_AUTO_APPROVE_LOW_RISK`, `AI_DISABLED`.
+   - Optional: `AI_DAILY_TOKEN_BUDGET`, `AI_DAILY_TOKENS_PER_USER`, `AI_DAILY_TOKENS_PER_IP`, `AI_DAILY_IMAGES_PER_USER`, `AI_DAILY_IMAGES_SITE`, `AI_DAILY_REQUESTS_PER_USER`, `AI_DAILY_REQUESTS_PER_IP`, `AI_AUTO_APPROVE_LOW_RISK`, `AI_DISABLED` (defaults and meanings in `.env.example`).
 4. **Redeploy** (Deploys → *Trigger deploy*). The build applies the database migrations.
 5. **Make yourself admin.** Open the site, *Sign in → Create account* with the same address as `ADMIN_EMAIL`, then click the confirmation link in the email (or, if email isn't set up yet, find the link in Netlify → *Logs → Functions → api*). Once confirmed you're the admin (this only works while no admin exists).
 6. **Check it.** Visit `/api/health` (should say `"ok": true` and `"ai": true`), then *Admin → AI* to see which OpenAI models were selected and today's usage.

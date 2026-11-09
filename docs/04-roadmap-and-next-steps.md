@@ -81,13 +81,19 @@ Costs assume a blended UK fully loaded rate of ~£110k per engineer-year (~£9.2
 5. **Contractor-led growth:** contractors invite their clients to receive scoped quotes via STREETKEY.
 6. **Data PR:** quarterly STREETKEY Refurbishment Cost Index from verified quotes.
 
+## Done (November 2026)
+
+* **Back end:** accounts, listings with photos, enquiries, saved searches and alerts, agent BLM feeds, admin, trust & safety, UK GDPR export and erasure, on Netlify Functions + PostgreSQL (see [08](08-backend.md)).
+* **AI across the site** on OpenAI, grounded in the engines: assistant with tools, conversational search, listing tools, inbox screening and triage, trust review, photo-real room redesign, estimates from photos, investment verdicts, dashboard briefings. Cost controls (site budget with a safety reserve, per-person caps, automatic pause when out of credit) and a fake OpenAI for testing.
+* **Quality pass:** an end-to-end and adversarial review found about 180 issues across security, cost, accessibility and correctness; all confirmed ones were fixed and re-checked.
+
 ## Next implementation steps (next 6 weeks)
 
-1. **Repo structure:** move to a Next.js monorepo (`apps/web`, `packages/engines`, `packages/ui`, `services/api`, `services/ingest`); keep the 41 engine tests as the contract.
-2. **Real LLM routing:** replace pattern routing with Claude tool-calling over the existing skills; implement `ungroundedFigures()` as a hard gate; build a 500-question eval set from the chips in this prototype.
-3. **Data foundations:** ingest Land Registry PPD + EPC + flood + conservation areas for 3 launch regions; UPRN matching; replace demo comparables in `valuation.ts`.
-4. **Event pipeline:** consent manager + first-party collector + daily aggregation; port `engagement.ts` statistics to SQL/dbt with the same tests.
-5. **Image model integration:** structure-preserving edit endpoint, watermarking, consent and retention controls for uploaded photos.
-6. **Postgres + RLS:** apply `db/schema.sql`, approvals and audit tables, seed with demo data; auth with passkeys.
+1. **Go live:** deploy from GitHub to Netlify, add Netlify Database (London or Frankfurt, functions in the same region), set `OPENAI_API_KEY` with credit and a monthly limit, `ADMIN_EMAIL`, Resend and the domain. Remove the preview label only after the checklist in [07](07-going-live.md).
+2. **Data foundations:** ingest HM Land Registry Price Paid, the EPC register, flood risk and conservation areas for 3 launch regions; UPRN matching; replace demo comparables in `valuation.ts`.
+3. **Real listing supply:** sign the first agent feed agreements (per-branch keys are ready); invite private sellers in one launch area.
+4. **Verified owner:** identity check (certified IDSP) and HM Land Registry title match before the "Verified owner" badge.
+5. **Payments:** Stripe for listing upgrades, agency subscriptions and API plans.
+6. **AI evaluation:** a fixed question set for the assistant and search (grounding, refusal, routing accuracy) run against the live models before each model change; review `ai_usage` costs weekly.
 7. **QS calibration sprint:** collect ≥300 consented quote lines; publish `streetkey-rates-2027.01` with sign-off.
-8. **Design-partner programme:** 5 agents, 20 investors, 10 contractors using the prototype weekly; measure estimate accuracy and report usefulness.
+8. **Design-partner programme:** 5 agents, 20 investors, 10 contractors using the live site weekly; measure estimate accuracy and report usefulness.

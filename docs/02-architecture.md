@@ -2,6 +2,23 @@
 
 ## 1. Stack
 
+### Built today (November 2026)
+
+| Layer | What runs | Notes |
+|---|---|---|
+| Website | Vite + React 19 + TypeScript, plain CSS tokens | Static files from Netlify's CDN; also runs as a static preview with built-in rules only. |
+| Engines | `src/engine/*`, pure TypeScript, unit-tested | The same code runs in the browser and on the server, so figures match everywhere. |
+| API | Fastify 5 on **Netlify Functions** (`netlify/functions/api.mts`) | Accounts, listings, photos, enquiries, saved searches and alerts, agent feeds, admin, AI. Also runs as one Node server (`render.yaml`, `Dockerfile`). |
+| Data | **PostgreSQL** (Netlify Database or Neon), migrations in `server/migrations/` | Database-backed rate limits and AI usage records, so limits hold across serverless instances. |
+| Files | **Netlify Blobs** served at `/media/*` (or local disk / S3-compatible) | Uploads type-checked from their bytes; location data removed from photos. |
+| Background work | Netlify Background Function (up to 15 min) for AI jobs; hourly Scheduled Function | Alerts, job recovery and clean-up run hourly. |
+| AI | **OpenAI** via `server/src/ai/core.ts` only | Models picked automatically from the account; structured outputs; per-person and site-wide budgets; automatic pause if the account runs out of credit. |
+| Email | Resend | Without a key, emails go to the function log. |
+
+Full detail: [08 · The back end](08-backend.md).
+
+### Target stack at scale
+
 | Layer | Choice | Notes |
 |---|---|---|
 | Web | **Next.js (App Router) + React + TypeScript**; Tailwind CSS with STREETKEY tokens | This prototype is Vite + React + plain CSS tokens; screens port directly. SSR for SEO on listing/intelligence pages. |
@@ -10,7 +27,7 @@
 | Data | **PostgreSQL 16 + PostGIS + pgvector**; ClickHouse (or BigQuery) for event analytics | Postgres for truth; columnar store for engagement aggregates. |
 | Events | First-party collector → Kafka/Kinesis → stream aggregation (Flink or dbt incremental) → aggregates in Postgres | Raw events retained ≤ 13 months; dashboards read aggregates only. |
 | Jobs / agents | **Temporal** workflows for agents, reports, ingestion | Durable, retryable, auditable. |
-| AI | Claude via Anthropic API for tool-calling orchestration, document understanding and explanation; an image model API for design concepts (structure-preserving editing) | Provider-abstracted; zero-retention terms. |
+| AI | OpenAI today (chat, vision, embeddings, moderation and image editing) behind one module, `server/src/ai/core.ts` | Provider-abstracted, so another provider can be added; API data isn't used for training by default. |
 | Search | Postgres filters + PostGIS + pgvector (semantic recall on descriptions) | OpenSearch only when scale demands. |
 | Maps | OS Data Hub (UPRN, maps) + Mapbox GL rendering | Licensed. |
 | Auth | OIDC (passkeys, magic link, Google/Apple); SAML SSO for enterprise; API keys + OAuth2 client credentials | |
@@ -119,14 +136,15 @@ Implemented relationally (Postgres) with an edge table, not a separate graph DB,
 * Versioned releases of rate libraries and tax tables with QS / tax-specialist sign-off.
 * Targets: 99.9% (99.95% enterprise); p95 < 300 ms for engine endpoints; LLM answers < 4 s p95.
 
-## 11. What is real in this prototype
+## 11. What is real today
 
 | Area | Status |
 |---|---|
-| Refurb, design-to-cost, tax (resi + non-resi), investment, valuation scenarios, development screening, residual appraisal, engagement statistics, reports | Deterministic code, **41 unit tests** |
-| AI assistants | Pattern-routed skills over engines (no LLM call) |
-| AI agents | Deterministic runs; approval queue & audit log in browser storage |
-| Engagement data | **Simulated** (seeded) — no real users; client-side consent-gated tracking demo only |
-| Listings, comparables, market inputs, portfolio | **Fictional demonstration data** |
-| Images, maps | Illustrations / schematic SVG; no image model or tile provider connected |
-| Backend, auth, API server, billing | Designed, not implemented |
+| Refurb, design-to-cost, tax (resi + non-resi), investment, valuation scenarios, development screening, residual appraisal, engagement statistics, reports | Deterministic code, unit-tested (69 website and engine tests) |
+| Back end: accounts, listings, photos, enquiries, saved searches and alerts, agent feeds, admin, trust & safety | **Built** on Netlify Functions + PostgreSQL; 342 server tests against a real database |
+| AI assistants, search, listing tools, inbox, design studio, estimates, briefings | **Built** on OpenAI, grounded in the engines, with built-in rules as fallback; tested with a fake OpenAI |
+| AI agents | Deterministic runs plus AI proposals that need human approval; approval queue and audit log in browser storage |
+| Engagement data | **Simulated** (seeded) for the demo listings; real views, saves and enquiries are recorded for live listings |
+| Demo listings, comparables, market inputs, portfolio | **Fictional demonstration data** |
+| Official data (HM Land Registry, EPC register, flood, Ofsted, journey times), maps | Not connected yet; maps are schematic SVG |
+| Payments, identity and title checks, public partner API, billing | Not built |

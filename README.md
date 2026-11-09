@@ -4,21 +4,21 @@
 
 STREETKEY connects property discovery, valuation, refurbishment costing, interior design, investment analysis, market-response analytics and management in one AI-first platform — and exposes the same intelligence to agents, landlords, developers and partners via API.
 
-**Status:** interactive prototype. Engines are real and unit-tested (49 tests). **Listings, people, engagement data and market inputs are simulated demonstration data**, labelled throughout the UI. No live data integrations, trained prediction models, LLM calls or backend services are running — see [what is real](docs/02-architecture.md#11-what-is-real-in-this-prototype).
+**Status:** a working platform, ready to deploy on Netlify. The website, the calculation engines and a full back end (accounts, listings with photos, enquiries, saved searches and alerts, agent feeds, admin and trust & safety) are built and tested: 69 website tests and 342 server tests against a real PostgreSQL database. AI features run on OpenAI once a key with credit is set, and every one falls back to Streetkey's built-in rules when AI is off. **The demo listings, comparables, engagement data and market inputs are still simulated demonstration data**, labelled throughout the UI; official data (HM Land Registry, EPC register, flood risk) isn't connected yet. See [what is real](docs/02-architecture.md#11-what-is-real-today).
 
 ## Run
 
 ```bash
 npm install
 npm run dev          # http://localhost:5173
-npm test             # engine/assistant/agent/listing tests
+npm test             # website and engine tests
 npm run build        # production build → dist/
 npm run build:single # single self-contained HTML → dist-single/index.html
 
 # The back end (accounts, listings, enquiries, AI) runs on Netlify Functions; locally it needs PostgreSQL.
 # Full guide, including Netlify deployment: docs/08-backend.md
 npm run server:dev   # website + API on http://localhost:8787
-npm run server:test  # API tests against a real database
+npm run server:test  # API and AI tests against a real database (fake OpenAI)
 ```
 
 ## The 14 screens (+ compare & saved)
@@ -70,7 +70,7 @@ src/engine/   refurb · tax · investment · valuation · development · design 
 src/ai/       assistant (grounded answer framework) · skills · landlordSkills · agents (multi-agent runtime)
 src/components/ Brand · Layout · Assistant · KnowledgeGraph · ui
 src/pages/    the screens
-src/store.tsx saved/compare/designs/approvals/audit (browser storage in prototype)
+src/store.tsx saved/compare/designs/approvals/audit (browser storage; saved homes and searches sync to the account when signed in)
 db/schema.sql PostgreSQL + PostGIS + pgvector schema incl. engagement, designs, agents, knowledge graph
 docs/         strategy & brand · architecture · commercial model · roadmap & next steps
 ```
@@ -84,6 +84,7 @@ docs/         strategy & brand · architecture · commercial model · roadmap & 
 5. [Listing supply: other websites, agent feeds & owner listings (incl. legal position)](docs/05-listing-sources.md)
 6. [Brand system & accessibility (WCAG 2.2 AA, axe-audited)](docs/06-brand-and-accessibility.md)
 7. [Going live: hosting, domain & launch checklist](docs/07-going-live.md)
+8. [The back end on Netlify, every AI feature, cost controls and security](docs/08-backend.md)
 
 ## Caveats
 
