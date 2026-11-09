@@ -1,6 +1,6 @@
 /* ===== Homepage journey: the street as a living background =====
    A fine-line elevation of a Victorian terrace; callouts are hairline annotations.
-   Motion is slow and purposeful and only animates transform / opacity.
+   Motion is brisk (a 3.6 s chapter) and only animates transform / opacity.
    (Moved from styles.css "v0.7 · Homepage journey" and redrawn.) */
 
 .journey { position: absolute; inset: 0; z-index: 0; overflow: hidden; background: var(--paper); }
@@ -16,35 +16,32 @@
 .j-mid { transform: translateX(calc(var(--mx, 0) * -6px)); transition: transform 1400ms cubic-bezier(.2, .7, .2, 1); }
 
 /* window light: warms in sequence along the house */
-.j-lw { opacity: 0; transition: opacity 1100ms ease calc(var(--n, 0) * 120ms); }
+.j-lw { opacity: 0; transition: opacity 600ms ease calc(var(--n, 0) * 60ms); }
 .j-lw.on { opacity: 0.82; }
 .journey.night .j-lw.on { opacity: 1; }
-.j-house.is-hover .j-lw { transition-delay: 0ms; transition-duration: 500ms; }
+.j-house.is-hover .j-lw { transition-delay: 0ms; transition-duration: 300ms; }
 
 /* story elements fade in and out */
-.j-board, .j-grow, .j-scaffold, .j-family, .j-kid, .j-tenants, .j-buyer, .j-van, .j-train, .j-dot, .j-doorway { opacity: 0; transition: opacity 700ms ease; }
-.j-board.on, .j-grow.on, .j-scaffold.on, .j-family.on, .j-kid.on, .j-tenants.on, .j-buyer.on, .j-van.on, .j-train.on, .j-dot.on, .j-doorway.on { opacity: 1; }
-.j-buyer.on, .j-family.on, .j-kid.on, .j-tenants.on { transition-delay: 300ms; }
-.j-grow { transform: translateY(5px); transition: opacity 900ms ease, transform 1400ms cubic-bezier(.2, .7, .2, 1); }
-.j-grow.on { transform: none; transition-delay: 450ms; }
-.j-scaffold { transform: translateY(10px); transition: opacity 800ms ease, transform 1400ms cubic-bezier(.2, .7, .2, 1); }
-.j-scaffold.on { transform: none; }
-.j-van { transform: translateX(46px); transition: opacity 800ms ease, transform 2200ms cubic-bezier(.16, .8, .24, 1); }
+.j-board, .j-grow, .j-family, .j-kid, .j-buyer, .j-van, .j-train, .j-dot, .j-doorway { opacity: 0; transition: opacity 400ms ease; }
+.j-board.on, .j-grow.on, .j-family.on, .j-kid.on, .j-buyer.on, .j-van.on, .j-train.on, .j-dot.on, .j-doorway.on { opacity: 1; }
+.j-buyer.on, .j-family.on, .j-kid.on { transition-delay: 150ms; }
+.j-grow { transform: translateY(5px); transition: opacity 500ms ease, transform 800ms cubic-bezier(.2, .7, .2, 1); }
+.j-grow.on { transform: none; transition-delay: 200ms; }
+.j-van { transform: translateX(46px); transition: opacity 450ms ease, transform 1200ms cubic-bezier(.16, .8, .24, 1); }
 .j-van.on { transform: none; }
 /* the front door opens onto a lit hall */
-.j-leaf { transform-box: fill-box; transform-origin: 0 50%; transition: transform 1500ms cubic-bezier(.55, 0, .2, 1) 700ms; }
+.j-leaf { transform-box: fill-box; transform-origin: 0 50%; transition: transform 900ms cubic-bezier(.55, 0, .2, 1) 300ms; }
 .j-leaf.m { transform-origin: 100% 50%; }
 .j-doorway.on .j-leaf { transform: scaleX(0.14); }
 
 /* motion (all paused together; reduced motion shows the end state) */
-.j-dot.hop { animation: j-hop 6.5s linear forwards; }
-.j-dot.scan { animation: j-scan 6.5s linear forwards; }
-.j-halo { opacity: 0.14; transform-box: fill-box; transform-origin: center; animation: j-ping 2.8s cubic-bezier(.2, .6, .3, 1) infinite; }
+.j-dot.hop { animation: j-hop 3.4s linear forwards; }
+.j-halo { opacity: 0.14; transform-box: fill-box; transform-origin: center; animation: j-ping 1.8s cubic-bezier(.2, .6, .3, 1) infinite; }
 .j-train { transform: translateX(-560px); }
-.j-train.on { animation: j-train 7.5s cubic-bezier(.3, 0, .7, 1) forwards; }
-.j-cloud { animation: j-cloud 70s ease-in-out infinite alternate; }
-.j-cloud2 { animation-duration: 95s; animation-direction: alternate-reverse; }
-.j-tw { animation: j-tw 5.5s ease-in-out infinite alternate; animation-delay: var(--t, 0s); }
+.j-train.on { animation: j-train 3.4s cubic-bezier(.3, 0, .7, 1) forwards; }
+.j-cloud { animation: j-cloud 36s ease-in-out infinite alternate; }
+.j-cloud2 { animation-duration: 48s; animation-direction: alternate-reverse; }
+.j-tw { animation: j-tw 3s ease-in-out infinite alternate; animation-delay: var(--t, 0s); }
 .journey.is-paused .j-anim, .journey.is-paused .j-dot { animation-play-state: paused; }
 @keyframes j-ping { 0% { transform: scale(0.45); opacity: 0.42; } 70%, 100% { transform: scale(1.7); opacity: 0; } }
 @keyframes j-train { from { transform: translateX(-560px); } to { transform: translateX(1780px); } }
@@ -53,18 +50,18 @@
 
 /* ---- callouts: hairline leader + small frosted label ---- */
 .j-notes { position: absolute; inset: 0; pointer-events: none; --stem: color-mix(in srgb, var(--ink) 46%, transparent); --stem-accent: var(--accent); }
-.j-note { position: absolute; left: 0; top: 0; width: 0; height: 0; opacity: 0; transition: opacity 320ms ease; }
-.j-note.on { opacity: 1; transition: opacity 200ms ease calc(var(--d, 0) * 120ms + 120ms); }
+.j-note { position: absolute; left: 0; top: 0; width: 0; height: 0; opacity: 0; transition: opacity 220ms ease; }
+.j-note.on { opacity: 1; transition: opacity 150ms ease calc(var(--d, 0) * 60ms + 60ms); }
 .j-stem, .j-tick, .j-bar { position: absolute; display: block; background: var(--stem); }
-.j-stem, .j-tick { width: 1px; margin-left: -0.5px; transform: scaleY(0); transform-origin: 50% 100%; transition: transform 300ms ease; }
-.j-bar { height: 1px; margin-top: -0.5px; transform: scaleX(0); transition: transform 300ms ease; }
+.j-stem, .j-tick { width: 1px; margin-left: -0.5px; transform: scaleY(0); transform-origin: 50% 100%; transition: transform 200ms ease; }
+.j-bar { height: 1px; margin-top: -0.5px; transform: scaleX(0); transition: transform 200ms ease; }
 .j-note.accent .j-stem, .j-note.accent .j-tick, .j-note.accent .j-bar { background: var(--stem-accent); }
-.j-note.on .j-tick { transform: none; transition: transform 700ms cubic-bezier(.25, .8, .25, 1) calc(var(--d, 0) * 120ms + 150ms); }
-.j-note.on .j-bar { transform: none; transition: transform 700ms cubic-bezier(.25, .8, .25, 1) calc(var(--d, 0) * 120ms + 600ms); }
+.j-note.on .j-tick { transform: none; transition: transform 350ms cubic-bezier(.25, .8, .25, 1) calc(var(--d, 0) * 60ms + 80ms); }
+.j-note.on .j-bar { transform: none; transition: transform 350ms cubic-bezier(.25, .8, .25, 1) calc(var(--d, 0) * 60ms + 280ms); }
 .j-shoulder { transform-origin: 0 50%; }
 .j-shoulder.to-l { transform-origin: 100% 50%; }
-.j-note.on .j-shoulder { transition-delay: calc(var(--d, 0) * 120ms + 900ms); }
-.j-note.on .j-stem { transform: none; transition: transform 900ms cubic-bezier(.25, .8, .25, 1) calc(var(--d, 0) * 120ms + 300ms); }
+.j-note.on .j-shoulder { transition-delay: calc(var(--d, 0) * 60ms + 420ms); }
+.j-note.on .j-stem { transform: none; transition: transform 450ms cubic-bezier(.25, .8, .25, 1) calc(var(--d, 0) * 60ms + 120ms); }
 .j-pin { position: absolute; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: var(--paper); box-shadow: inset 0 0 0 1.25px var(--stem); }
 .j-note.accent .j-pin { width: 6px; height: 6px; margin: -3px 0 0 -3px; background: var(--stem-accent); box-shadow: none; }
 .j-card {
@@ -73,11 +70,11 @@
   border: 1px solid color-mix(in srgb, var(--ink) 11%, transparent);
   box-shadow: 0 1px 0 rgba(14, 20, 36, 0.03), 0 10px 22px -16px rgba(14, 20, 36, 0.45);
   color: var(--ink); white-space: nowrap; text-align: left;
-  opacity: 0; transform: translateY(5px); transition: opacity 300ms ease, transform 300ms ease;
+  opacity: 0; transform: translateY(5px); transition: opacity 200ms ease, transform 200ms ease;
 }
 .j-card.j-r { border-bottom-left-radius: 0; }
 .j-card.j-l { border-bottom-right-radius: 0; }
-.j-note.on .j-card { opacity: 1; transform: none; transition: opacity 600ms ease calc(var(--d, 0) * 120ms + 1000ms), transform 900ms cubic-bezier(.2, .7, .2, 1) calc(var(--d, 0) * 120ms + 1000ms); }
+.j-note.on .j-card { opacity: 1; transform: none; transition: opacity 350ms ease calc(var(--d, 0) * 60ms + 450ms), transform 500ms cubic-bezier(.2, .7, .2, 1) calc(var(--d, 0) * 60ms + 450ms); }
 .j-card small { display: flex; align-items: center; gap: 6px; font-size: 9.5px; line-height: 1.35; font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
 .j-note.accent .j-card small::before { content: ''; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .j-card b { display: block; margin-top: 1px; font-size: 15px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums lining-nums; color: var(--ink); }
@@ -103,55 +100,33 @@
   .j-card dl > div { gap: 10px; }
 }
 
-/* ---- journey bar ---- */
-.journey-bar { position: absolute; z-index: 2; display: grid; gap: 10px; padding: 14px 14px 13px; border-radius: 20px; background: color-mix(in srgb, var(--surface) 90%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.1); backdrop-filter: blur(14px) saturate(1.1); border: 1px solid var(--line); box-shadow: var(--shadow); }
-.jb-top { display: flex; align-items: center; gap: 8px; }
-.jb-label { margin-right: auto; }
-.jb-mode { flex-wrap: nowrap; }
-.jb-mode button { min-height: 34px; padding: 6px 12px; font-weight: 600; font-family: var(--sans); white-space: nowrap; }
-.jb-mode button.on { background: var(--ink); color: var(--paper); }
-.jb-play { width: 40px; height: 40px; }
-.jb-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
-.jb-steps button { width: 100%; min-height: 50px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font: 600 12.5px/1.1 var(--sans); cursor: pointer; padding: 5px 2px; white-space: nowrap; }
-.jb-steps button:hover { background: var(--surface-2); color: var(--ink); }
-.jb-steps button.on { background: var(--surface-2); color: var(--ink); }
-.jb-n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--surface); color: var(--ink-2); border: 1.5px solid var(--line); transition: background 200ms ease, box-shadow 200ms ease; }
-.jb-steps button.done .jb-n { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-.jb-steps button.on .jb-n { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 24%, transparent); }
-.jb-progress { height: 3px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
-.jb-progress i { display: block; height: 100%; background: var(--accent); transform-origin: 0 50%; animation: jb-fill 6.5s linear forwards; }
-.jb-progress i.paused { animation-play-state: paused; }
-@keyframes jb-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-.jb-caption { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); min-height: calc(1.45em * 2); }
+/* ---- pause / play: the only control (WCAG 2.2.2), small and out of the way ---- */
+.journey-pause { position: absolute; z-index: 2; right: 16px; top: 16px; width: 40px; height: 40px; border-radius: 50%; color: var(--ink);
+  background: color-mix(in srgb, var(--surface) 86%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.journey-pause:hover { background: var(--surface); }
 
-/* desktop: the street fills the hero; search panel and journey bar float over it */
+/* desktop: the street fills the hero; the search panel floats over it */
 @media (min-width: 960px) {
   .home-hero { min-height: clamp(640px, calc(100svh - 104px), 880px); }
   .hero-copy { max-width: 560px; padding: 26px 28px 24px; border-radius: 24px; background: color-mix(in srgb, var(--paper) 84%, transparent); -webkit-backdrop-filter: blur(16px) saturate(1.15); backdrop-filter: blur(16px) saturate(1.15); border: 1px solid var(--line); box-shadow: var(--shadow); }
   .home-hero h1 { font-size: clamp(2.3rem, 3.3vw, 3.3rem); }
-  .journey-bar { top: 40px; right: max(24px, calc((100% - 1320px) / 2 + 24px)); width: 372px; }
+  .journey-pause { right: max(24px, calc((100% - 1320px) / 2 + 24px)); top: 24px; }
 }
-/* tablet & phone: the street runs as a band under the search, the bar captions it */
+/* tablet & phone: the street runs as a band under the search */
 @media (max-width: 959px) {
   .home-hero { display: flex; flex-direction: column; }
   .home-hero-inner { width: 100%; padding: 22px 16px 0; }
   .hero-copy { max-width: 640px; }
   .journey { position: relative; inset: auto; aspect-ratio: 9 / 4; max-height: 440px; margin-top: 4px; }
-  .journey-bar { position: relative; margin: -14px 16px 18px; }
+  .journey-pause { right: 10px; top: 10px; width: 36px; height: 36px; }
 }
 @media (max-width: 599px) {
   .journey { aspect-ratio: 920 / 603; max-height: none; margin-top: 2px; }
-  .journey-bar { margin: -10px 12px 14px; padding: 12px 10px 11px; }
-  .jb-label { display: none; }
-  .jb-top { justify-content: space-between; }
-  .jb-steps button { font-size: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .journey .j-anim, .journey .j-dot { animation: none !important; }
-  .j-far, .j-mid, .j-grow, .j-scaffold, .j-van, .j-card, .j-stem, .j-tick, .j-bar { transform: none !important; }
+  .j-far, .j-mid, .j-grow, .j-van, .j-card, .j-stem, .j-tick, .j-bar { transform: none !important; }
   .j-leaf { transition: none; }
   .j-note, .j-note.on, .j-card, .j-note.on .j-card { transition: opacity 200ms ease !important; }
-  /* the progress bar only times the chapters once someone presses play */
-  .jb-progress i { animation-duration: 6.5s !important; animation-iteration-count: 1 !important; }
 }
 @media (prefers-reduced-motion: reduce) { .j-train.on { transform: translateX(560px); } }
