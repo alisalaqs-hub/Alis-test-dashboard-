@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { heuristics, repetition, screen } from '../src/ai/inbox/screen';
+import { assess, heuristics, repetition, screen } from '../src/ai/inbox/screen';
 import { validateTriage, type TriageOut } from '../src/ai/inbox/triage';
 import { checkReply } from '../src/ai/inbox/reply';
-import { numbersOk, summarisePhotoQuality } from '../src/ai/inbox/insights';
+import { numbersOk, speculative, summarisePhotoQuality } from '../src/ai/inbox/insights';
 import { q, one } from '../src/db';
 import { outbox } from '../src/services/email';
+import { limits } from '../src/services/ratelimit';
 import { client, getApp, jpegWithExif, lastMail, LISTING, makeAdmin, multipart, signUp } from './helpers';
 import { mockOpenAI, reply, type ChatMessage } from './openai-mock';
 
@@ -88,7 +89,8 @@ describe('enquiry screening', () => {
   it('asks the model only when the signals are inconclusive, and lets messages through on doubt or failure', async () => {
     const { ref } = await liveListing();
     const filteredOf = async (id: string) => (await one<{ filtered: boolean; filter_reason: string | null }>('SELECT filtered, filter_reason FROM enquiries WHERE id = $1', [id]))!;
-    const unsure = 'Hello, is this still available? Please message me on WhatsApp, I can pay the holding deposit quickly.';
+    // Two soft signals (abroad + WhatsApp): unusual, so the model is asked, but never decided by rules.
+    const unsure = 'Hello, is this still available? I am currently working abroad, so please message me on WhatsApp.';
 
     let ai = aiWith({ enquiry_screen: () => reply.json({ verdict: 'genuine', confidence: 'high' }) });
     try {
@@ -99,7 +101,11 @@ describe('enquiry screening', () => {
       const prompt = promptOf(calls[0].body);
       expect(prompt).toMatch(/<<<enquiry/); // the message is wrapped as untrusted data
       expect(prompt).toMatch(/Be conservative/);
-      expect(calls[0].body.messages[0].content).not.toContain('WhatsApp, I can pay'); // never in the system prompt
+      expect(calls[0].body.messages[0].content).not.toContain('working abroad, so please'); // never in the system prompt
+      // One soft signal on its own (WhatsApp, offering a holding deposit) isn't even worth a model call.
+      const plain = await enquire(ref, { message: 'Please message me on WhatsApp, I can pay the holding deposit quickly.', kind: 'question' });
+      expect((await filteredOf(plain.json.id)).filtered).toBe(false);
+      expect(ai.named('enquiry_screen')).toHaveLength(1);
     } finally { ai.restore(); }
 
     ai = aiWith({ enquiry_screen: () => reply.json({ verdict: 'scam', confidence: 'medium' }) });
@@ -132,7 +138,7 @@ describe('enquiry screening', () => {
     const ai = aiWith({ enquiry_screen: () => new Promise<ChatMessage>((res) => setTimeout(() => res(reply.json({ verdict: 'scam', confidence: 'high' })), 7000)) as never });
     try {
       const t0 = Date.now();
-      const r = await enquire(ref, { message: 'Hello, please message me on WhatsApp, I can pay the holding deposit quickly.', kind: 'question' });
+      const r = await enquire(ref, { message: 'Hello, I am currently working abroad, so please message me on WhatsApp.', kind: 'question' });
       expect(Date.now() - t0).toBeLessThan(6500);
       expect(r.status).toBe(201);
       expect((await one<{ filtered: boolean }>('SELECT filtered FROM enquiries WHERE id = $1', [r.json.id]))!.filtered).toBe(false);
@@ -150,7 +156,15 @@ describe('enquiry screening', () => {
     } finally { ai.restore(); }
   });
 
-  it('never decides against ordinary genuine messages by rules alone', async () => {
+  /** Relocating buyers who mention several soft signals at once (each of these used to be held back by rules). */
+  const RELOCATING = [
+    'I’m currently living abroad and moving back to London in March. I saw this on rightmove.co.uk too. I can pay the holding deposit straight away if a video viewing goes well.',
+    'Message me on WhatsApp 07700 900123. I’m working overseas until June and my relocation agent will arrange the move.',
+    'I’m based abroad for work so my relocation agent will arrange a video viewing and handle the paperwork. Happy to pay the holding deposit once we’ve agreed terms.',
+    'I’m currently working abroad, my lawyer will handle the conveyancing. You can see who I am at linkedin.com/in/sam',
+  ];
+
+  it('never decides against ordinary genuine messages by rules alone', () => {
     const genuine = [
       GENUINE,
       'Is it still available? You can reach me on sam.jones@gmail.com or WhatsApp 07700 900123.',
@@ -159,16 +173,42 @@ describe('enquiry screening', () => {
       'I saw this on rightmove.co.uk too. What is the service charge and how long is the lease?',
       'HI IS THE PRICE NEGOTIABLE?? WE ARE CASH BUYERS',
       'Can you send me your bank details for the holding deposit once we have agreed?',
+      ...RELOCATING,
+      // several soft signals, even a high score, but no unambiguous marker
+      'I am working abroad, my agent will pay the deposit for me. WhatsApp me or see www.sam-moves.example for my details.',
     ];
-    for (const m of genuine) {
-      const s = heuristics(m);
-      const score = s.reduce((a, x) => a + x.weight, 0);
-      const strong = score >= 5 && new Set(s.map((x) => x.family)).size >= 2;
-      expect({ m, strong }).toEqual({ m, strong: false });
-    }
+    for (const m of genuine) expect({ m, rulesDecide: assess(heuristics(m)).rulesDecide }).toEqual({ m, rulesDecide: false });
+
+    // each family counts once, at its strongest
+    const many = assess(heuristics('I am working abroad, my agent will pay the deposit for me. WhatsApp me or see www.sam-moves.example for my details.'));
+    expect(many).toMatchObject({ score: 5, families: 3, strong: false, rulesDecide: false });
+    // offering to pay is ordinary; asking the lister to send money is not
+    expect(heuristics('I can pay the holding deposit straight away.').map((x) => x.id)).not.toContain('send-money');
+    expect(heuristics('Please send me the holding deposit first, then I will post the keys.').map((x) => x.id)).toContain('send-money');
+    // relocation agents and lawyers arranging things are ordinary; a third party paying or collecting money is not
+    expect(heuristics('My relocation agent will arrange the move and my lawyer will handle the conveyancing.').map((x) => x.id)).toEqual([]);
+    expect(heuristics('My agent will collect the keys and pay you in cash.').map((x) => x.id)).toContain('agent-abroad');
+
     expect(heuristics('pay me 0.5 BTC to bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh').map((s) => s.id)).toContain('crypto');
-    expect(heuristics(SCAM).map((s) => s.family)).toEqual(expect.arrayContaining(['link', 'payment', 'abroad']));
+    expect(heuristics(SCAM).map((s) => s.family)).toEqual(expect.arrayContaining(['link', 'abroad']));
+    expect(assess(heuristics(SCAM))).toMatchObject({ strong: true, rulesDecide: true, kind: 'scam' }); // a phishing link is unambiguous
     expect(heuristics('Great SEO services, rank on Google: bit.ly/abc').map((s) => s.family)).toEqual(expect.arrayContaining(['link', 'marketing']));
+    expect(assess(heuristics('Great SEO services, rank on Google: bit.ly/abc')).rulesDecide).toBe(true);
+  });
+
+  it('sends relocating buyers to the model rather than holding them back by rules, and emails them to the lister', async () => {
+    const { seller, ref } = await liveListing();
+    const ai = aiWith({ enquiry_screen: () => reply.json({ verdict: 'genuine', confidence: 'high' }) });
+    try {
+      for (const message of RELOCATING) {
+        const r = await screen({ enquiryId: '00000000-0000-0000-0000-000000000000', listingId: '00000000-0000-0000-0000-000000000000', name: 'Sam Mover', email: 'sam.mover@example.com', message, kind: 'question' });
+        expect({ message, decidedBy: r.decidedBy, filter: r.filter }).toEqual({ message, decidedBy: 'model', filter: false });
+      }
+      const before = enquiryMails(seller.email);
+      const sent = await enquire(ref, { message: RELOCATING[0], kind: 'question' });
+      expect((await one<{ filtered: boolean }>('SELECT filtered FROM enquiries WHERE id = $1', [sent.json.id]))!.filtered).toBe(false);
+      expect(enquiryMails(seller.email)).toBe(before + 1);
+    } finally { ai.restore(); }
   });
 
   it('notices the same message sent to many listings', async () => {
@@ -265,15 +305,96 @@ describe('enquiry triage', () => {
       expect(Object.keys(all)).toContain(id);
       expect(Object.keys((await buyer.c.get('/api/ai/inbox')).json.items)).not.toContain(id);
 
-      // a follow-up from the enquirer refreshes it; the lister's own replies don't
+      // the lister's own replies never set off a triage
       await seller.c.post(`/api/enquiries/${id}/messages`, { body: 'Thanks, Saturday at 10 works.' });
       expect(ai.named('enquiry_triage')).toHaveLength(1);
+      // enquirers can't drive AI use: within 10 minutes of the last triage, a follow-up waits…
       await buyer.c.post(`/api/enquiries/${id}/messages`, { body: 'Great, see you then. Is there parking? Call me on 07700 900555 or sam.b@example.org.' });
+      expect(ai.named('enquiry_triage')).toHaveLength(1);
+      expect((await seller.c.get(`/api/ai/inbox/${id}`)).json.status).toBe('ready'); // …even when the lister looks
+      expect(ai.named('enquiry_triage')).toHaveLength(1);
+      // …and is picked up when the lister opens the conversation after the wait
+      const age = () => q(`UPDATE enquiry_ai SET updated_at = now() - interval '11 minutes' WHERE enquiry_id = $1`, [id]);
+      await age();
+      expect((await seller.c.get(`/api/ai/inbox/${id}`)).json.status).toBe('ready');
       expect(ai.named('enquiry_triage')).toHaveLength(2);
       const second = promptOf(ai.named('enquiry_triage')[1].body);
       expect(second).toContain('Is there parking? Call me on [phone] or [email].'); // contact details are redacted before the model sees them
       expect((await one<{ messages_seen: number }>('SELECT messages_seen FROM enquiry_ai WHERE enquiry_id = $1', [id]))!.messages_seen).toBe(2);
+      await seller.c.get(`/api/ai/inbox/${id}`);
+      expect(ai.named('enquiry_triage')).toHaveLength(2); // up to date: not re-run
+
+      // after the wait, a follow-up from the enquirer refreshes it straight away
+      await age();
+      await buyer.c.post(`/api/enquiries/${id}/messages`, { body: 'One more thing: is the loft boarded?' });
+      expect(ai.named('enquiry_triage')).toHaveLength(3);
+      // at most 6 triages a day for one enquiry, however often they write
+      await q(`INSERT INTO ai_jobs (kind, subject, status, finished_at) SELECT 'inbox.triage', $1, 'done', now() FROM generate_series(1, 3)`, [`enquiry:${id}`]);
+      await age();
+      await buyer.c.post(`/api/enquiries/${id}/messages`, { body: 'And is the boiler under warranty?' });
+      expect(ai.named('enquiry_triage')).toHaveLength(3);
+      expect((await seller.c.get(`/api/ai/inbox/${id}`)).json.status).toBe('ready'); // the last triage stays in place
+      expect(ai.named('enquiry_triage')).toHaveLength(3);
     } finally { ai.restore(); }
+  });
+
+  it('caps triage across one lister’s enquiries each day', async () => {
+    const { seller, ref } = await liveListing();
+    const ai = aiWith({ enquiry_triage: () => reply.json(TRIAGE) });
+    try {
+      await q(`INSERT INTO rate_limits (key, window_start, count) VALUES ($1, to_timestamp(floor(extract(epoch FROM now()) / 86400) * 86400), $2)
+               ON CONFLICT (key, window_start) DO UPDATE SET count = EXCLUDED.count`, [`ai.inbox.triage.lister:u:${seller.user.id}`, Math.round(300 * limits.multiplier)]);
+      const r = await enquire(ref, { message: GENUINE });
+      expect(r.status).toBe(201);
+      expect(ai.named('enquiry_triage')).toHaveLength(0);
+      // the lister opening it gets a clear "unavailable", not an endless "pending"
+      expect((await seller.c.get(`/api/ai/inbox/${r.json.id}`)).json).toMatchObject({ status: 'unavailable', triage: null });
+      expect(ai.named('enquiry_triage')).toHaveLength(0);
+    } finally { ai.restore(); }
+  });
+
+  it('runs a triage no worker picked up inside the lister’s request, and retries a failed one once after a pause', async () => {
+    const { seller, ref } = await liveListing();
+    // AI off while the enquiries arrive, so nothing is triaged yet
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) ids.push((await enquire(ref, { message: `Is the garden south facing? (${i})`, kind: 'question' })).json.id as string);
+    const subject = (id: string) => `enquiry:${id}`;
+    const status = async (id: string) => (await seller.c.get(`/api/ai/inbox/${id}`)).json.status as string;
+    const ai = aiWith({ enquiry_triage: () => reply.json({ ...TRIAGE, intent: 'ask_question', urgency: 'unknown', questions: ['Is the garden south facing?'] }) });
+    try {
+      // 1) queued but never dispatched (no Background Functions on this plan): a fresh job is left to the worker…
+      const job = (await one<{ id: string }>(`INSERT INTO ai_jobs (kind, subject, input) VALUES ('inbox.triage', $1, $2) RETURNING id`, [subject(ids[0]), JSON.stringify({ enquiryId: ids[0] })]))!;
+      expect(await status(ids[0])).toBe('pending');
+      expect(ai.named('enquiry_triage')).toHaveLength(0);
+      // …but once it has waited 10 seconds, the lister's request runs it
+      await q(`UPDATE ai_jobs SET created_at = now() - interval '30 seconds' WHERE id = $1`, [job.id]);
+      expect(await status(ids[0])).toBe('ready');
+      expect(ai.named('enquiry_triage')).toHaveLength(1);
+      expect((await one<{ status: string }>('SELECT status FROM ai_jobs WHERE id = $1', [job.id]))!.status).toBe('done');
+
+      // 2) a running job whose worker died is picked up the same way
+      const dead = (await one<{ id: string }>(`INSERT INTO ai_jobs (kind, subject, input, status, attempts, started_at, lease_until) VALUES ('inbox.triage', $1, $2, 'running', 1, now() - interval '5 minutes', now() - interval '1 minute') RETURNING id`, [subject(ids[1]), JSON.stringify({ enquiryId: ids[1] })]))!;
+      expect(await status(ids[1])).toBe('ready');
+      expect(ai.named('enquiry_triage')).toHaveLength(2);
+      expect((await one<{ status: string }>('SELECT status FROM ai_jobs WHERE id = $1', [dead.id]))!.status).toBe('done');
+
+      // 3) a failed triage: unavailable for now, retried once after 5 minutes, then left alone
+      await q(`INSERT INTO ai_jobs (kind, subject, input, status, finished_at) VALUES ('inbox.triage', $1, '{}', 'failed', now())`, [subject(ids[2])]);
+      expect(await status(ids[2])).toBe('unavailable');
+      expect(ai.named('enquiry_triage')).toHaveLength(2);
+      await q(`UPDATE ai_jobs SET finished_at = now() - interval '6 minutes', created_at = now() - interval '6 minutes' WHERE subject = $1`, [subject(ids[2])]);
+      expect(await status(ids[2])).toBe('ready');
+      expect(ai.named('enquiry_triage')).toHaveLength(3);
+    } finally { ai.restore(); }
+
+    // two failures in a day: no more automatic retries
+    const again = (await enquire(ref, { message: 'Is the loft boarded?', kind: 'question' })).json.id as string;
+    const ai2 = aiWith({ enquiry_triage: () => reply.json(TRIAGE) });
+    try {
+      await q(`INSERT INTO ai_jobs (kind, subject, input, status, created_at, finished_at) SELECT 'inbox.triage', $1, '{}', 'failed', now() - interval '20 minutes', now() - interval '20 minutes' FROM generate_series(1, 2)`, [subject(again)]);
+      expect(await status(again)).toBe('unavailable');
+      expect(ai2.named('enquiry_triage')).toHaveLength(0);
+    } finally { ai2.restore(); }
   });
 
   it('triages older conversations on first open, and reports when AI is off', async () => {
@@ -385,7 +506,7 @@ describe('suggest a reply', () => {
   it('checks drafts for rentals: fees, bidding, discrimination and invented amounts', () => {
     const listing = { address_line: 'Flat 3, 22 Mill Lane', postcode: 'M4 1AB', district: 'M4', price: 1200, service_charge_annual: null, ground_rent_annual: null, channel: 'rent' as const, source_kind: 'landlord' as const };
     const out = checkReply({ reply: 'Hi Jo, the rent is £1,200 pcm plus a £150 admin fee. We prefer professionals only and the best offer secures it. Flat 3 is on the top floor. Please send the deposit to secure it. [your name]', placeholders: [], warnings: [] },
-      { listing, notes: '', preferredSlot: '', thread: 'Is it available from June?' });
+      { listing, intent: 'answer', notes: '', preferredSlot: '', enquirerText: 'Is it available from June?', listerText: '' });
     expect(out.reply).toContain('£1,200 pcm');
     expect(out.reply).toContain('[amount] admin fee');
     expect(out.reply).not.toContain('Flat 3');
@@ -396,9 +517,62 @@ describe('suggest a reply', () => {
     expect(w).toMatch(/Equality Act/);
     expect(w).toMatch(/bank details/);
     // flexible viewing times are fine; placeholders are never rewritten
-    const ok = checkReply({ reply: 'I’m flexible on viewing times: [Saturday or Sunday] at [time]. The garden gets the sun all afternoon.', placeholders: [], warnings: [] }, { listing, notes: '', preferredSlot: '', thread: '' });
+    const ok = checkReply({ reply: 'I’m flexible on viewing times: [Saturday or Sunday] at [time]. The garden gets the sun all afternoon.', placeholders: [], warnings: [] }, { listing, intent: 'offer_times', notes: '', preferredSlot: '', enquirerText: '', listerText: '' });
     expect(ok.reply).toBe('I’m flexible on viewing times: [Saturday or Sunday] at [time]. The garden gets the sun all afternoon.');
     expect(ok.warnings).toEqual([]);
+  });
+
+  const SALE = { address_line: '14 Elm Road', postcode: 'E17 4QH', district: 'E17', price: 525000, service_charge_annual: null, ground_rent_annual: null, channel: 'sale' as const, source_kind: 'agent' as const };
+  const check = (text: string, over: Partial<Parameters<typeof checkReply>[1]> = {}) =>
+    checkReply({ reply: text, placeholders: [], warnings: [] }, { listing: SALE, intent: 'answer', notes: '', preferredSlot: '', enquirerText: '', listerText: '', ...over });
+
+  it('never lets a draft hint at price negotiation, accept an offer or talk up other buyers', () => {
+    for (const s of [
+      'I’d accept 450k if you can move quickly.', 'We’d consider any reasonable offer.', 'There’s some wiggle room on the price.',
+      'I can do a bit off the asking for a quick sale.', 'Another buyer has already viewed it twice.', 'Other buyers are interested, so please be quick.',
+      'I’ll take £500,000 for a quick sale.', 'We would be happy to accept an offer around 500,000.', 'The seller would take 480,000.', 'The price is negotiable.',
+    ]) {
+      const out = check(`Thanks for your message. ${s} [your name]`);
+      expect({ s, reply: out.reply }).toEqual({ s, reply: 'Thanks for your message. [your name]' });
+      expect(out.warnings.join(' ')).toMatch(/price flexibility/);
+    }
+    // agreeing to the enquirer's own figure: the acceptance goes, and their amount isn't repeated as fact
+    const offer = check('Thanks for your offer of £480,000. I am happy to accept £480,000 and we have a deal. [your name]', { enquirerText: 'Would you take £480,000?' });
+    expect(offer.reply).toBe('Thanks for your offer of [amount]. [your name]');
+    expect(offer.warnings.join(' ')).toMatch(/price flexibility/);
+    expect(offer.warnings.join(' ')).toMatch(/amount from the enquirer/);
+    // only what the lister's notes say (same wording and amount, same polarity) stays
+    expect(check('We are open to offers around £500,000.', { notes: 'Say I’m open to offers around £500,000.' }).reply).toBe('We are open to offers around £500,000.');
+    expect(check('The price is negotiable.', { notes: 'The price is not negotiable.' }).reply).toBe('');
+    expect(check('The price is not negotiable.', { notes: 'The price is not negotiable.' }).reply).toBe('The price is not negotiable.');
+    // ordinary replies are left alone
+    for (const s of [
+      'Any offer should be made in writing and I will pass it to the seller.', 'All offers will be considered.', 'The move-in date is negotiable.',
+      'The asking price is £525,000.', 'The flat is 650 sq ft and 2 miles from the station.', 'Call me on 07700 900123 to arrange a viewing.',
+    ]) expect(check(s)).toEqual({ reply: s, placeholders: [], warnings: [] });
+  });
+
+  it('treats the enquirer’s figures and requested times as questions, not facts', () => {
+    // an amount only the enquirer gave is never confirmed
+    const sc = check('Yes, the service charge is £900 a year.', { enquirerText: 'Is the service charge £900?' });
+    expect(sc.reply).toBe('Yes, the service charge is [amount] a year.');
+    expect(sc.warnings.join(' ')).toMatch(/amount from the enquirer/);
+    expect(check('Council tax is about 2,100 a year.').reply).toBe('Council tax is about [amount] a year.'); // bare amounts too
+    // …unless it is a listing figure
+    expect(check('Yes, the service charge is £1,200 a year.', { listing: { ...SALE, service_charge_annual: 1200 }, enquirerText: 'Is the service charge £1,200?' }).reply).toBe('Yes, the service charge is £1,200 a year.');
+    expect(check('Yes, the asking price is £525,000.', { enquirerText: 'Is it still £525,000?' }).reply).toBe('Yes, the asking price is £525,000.');
+
+    // the time they asked for is used only when confirming a viewing
+    const asked = { enquirerText: 'Could I view on Saturday at 10am?', preferredSlot: 'Sat 10:00' };
+    for (const intent of ['answer', 'offer_times', 'request_info'] as const) {
+      const out = check('Saturday at 10am is fine.', { ...asked, intent });
+      expect({ intent, reply: out.reply }).toEqual({ intent, reply: '[day] at [time] is fine.' });
+      expect(out.warnings.join(' ')).toMatch(/days or times/);
+    }
+    expect(check('Saturday at 10am is fine.', { ...asked, intent: 'confirm_viewing' }).reply).toBe('Saturday at 10am is fine.');
+    // the lister's own times (notes or their earlier messages) are theirs to offer
+    expect(check('I can do Thursday at 6pm or Friday at noon.', { ...asked, intent: 'offer_times', listerText: 'I can do Thursday at 6pm.', notes: 'Friday midday' }).reply)
+      .toBe('I can do Thursday at 6pm or Friday at noon.');
   });
 });
 
@@ -467,12 +641,18 @@ describe('listing insights', () => {
   it('falls back to rule-based wording when the model’s numbers can’t be trusted, and needs a live listing', async () => {
     const { seller, ref } = await liveListing();
     const draft = await seller.c.post('/api/listings', { ...LISTING, addressLine: '2 Birch Road' });
-    const ai = aiWith({ listing_insights: () => reply.json({ headline: 'Expect an offer within 9 days at £540,000.', whatsWorking: ['Up 300% on last month.'], whatToImprove: [], priceNote: 'It is worth £600,000.' }) });
+    const ai = aiWith({ listing_insights: () => reply.json({
+      headline: 'Expect more enquiries once you add photos.',
+      whatsWorking: ['Up 300% on last month.', 'Listings like yours sell in 3 weeks with 10 photos.'],
+      whatToImprove: [{ action: 'Add 2 more photos', why: 'Homes with more photos sell faster than similar listings.', impact: 'high' }, { action: 'Reply within 9 days', why: 'You will get an offer within 9 days.', impact: 'medium' }],
+      priceNote: 'It is worth £600,000.' }) });
     try {
       expect((await seller.c.get(`/api/ai/listings/${draft.json.listing.ref}/insights`)).status).toBe(409);
       const r = (await seller.c.get(`/api/ai/listings/${ref}/insights`)).json;
       expect(r.headline).toBe('No tracked views yet in the last 30 days.');
-      expect(r.whatsWorking.join(' ')).not.toMatch(/300%/);
+      expect(r.headline).not.toMatch(/Expect/);
+      expect(r.whatsWorking.join(' ')).not.toMatch(/300%|3 weeks/);
+      expect(r.whatToImprove.map((x: { why: string }) => x.why).join(' ')).not.toMatch(/faster|9 days/);
       expect(r.whatToImprove.map((x: { action: string }) => x.action)).toContain('Add more photos, covering every main room and the outside');
       expect(r.priceNote).toMatch(/not a valuation/);
       expect(r.priceNote).not.toMatch(/600,000/);
@@ -483,6 +663,16 @@ describe('listing insights', () => {
     expect(numbersOk('25 views and £525k asking, 4% conversion', [25, 525000, 4])).toBe(true);
     expect(numbersOk('Drop it by £20,000', [25, 525000])).toBe(false);
     expect(numbersOk('Add 2 more photos', [])).toBe(true);
+    expect(numbersOk('Add 2 or 3 good kitchen photos and list 4 key features', [])).toBe(true);
+    // small numbers are fine only when they count something on the listing, never time
+    expect(numbersOk('Expect an offer within 9 days.', [])).toBe(false);
+    expect(numbersOk('Listings like yours sell in 3 weeks with 10 photos.', [])).toBe(false);
+    expect(numbersOk('Listings like yours sell in 3 weeks with 10 photos.', [3])).toBe(true); // numbers fine…
+    // …but predictions and comparisons are dropped whatever their numbers
+    for (const t of ['Expect an offer within 9 days.', 'Listings like yours sell in 3 weeks with 10 photos.', 'This will attract more buyers.', 'Homes with floor plans sell faster.',
+      'Better photos get 2x the views.', 'It outperforms similar homes nearby.', 'Similar listings get three times as many enquiries.', 'It is likely to sell soon.']) expect({ t, s: speculative(t) }).toEqual({ t, s: true });
+    for (const t of ['25 views in the last 30 days.', 'Add photos of the garden and kitchen.', 'Buyers like to see every room before they enquire.', 'Add the missing material information.', '1 person has saved it.'])
+      expect({ t, s: speculative(t) }).toEqual({ t, s: false });
     expect(summarisePhotoQuality([{ score: 8, issues: ['slightly dark'] }, { quality: 0.3 }, '{"score": 6}', 'not json', 7])).toMatchObject({ analysed: 5, averageScore: 6, weak: 1, issues: ['slightly dark'] });
     expect(summarisePhotoQuality([])).toBeNull();
   });

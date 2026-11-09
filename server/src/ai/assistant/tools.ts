@@ -209,7 +209,8 @@ async function searchHomes(a: Infer<typeof SearchArgs>) {
   const notes = [
     ...(top.some((h) => isDemo(h.property)) ? ['Homes with demo: true are fictional demonstration listings.'] : []),
     ...(top.some((h) => !isDemo(h.property)) ? ['For live listings (demo: false), journey times, loft and extension potential, schools and risks have not been assessed yet.'] : []),
-    ...(hits.length < all.length ? ['Live listings were left out because their journey times have not been calculated yet.'] : []),
+    // The engine itself never counts an uncalculated journey as meeting a limit, so say why live homes are missing.
+    ...(query.maxCommuteMins && (hits.length < all.length || PROPERTIES.some((p) => !isDemo(p))) ? ['Live listings were left out because their journey times have not been calculated yet.'] : []),
   ];
   return {
     understood: describeQuery(query), notSupportedYet: query.unsupported, totalMatches: hits.length,
