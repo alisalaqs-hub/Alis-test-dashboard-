@@ -7,6 +7,10 @@
  * amount (never by a count such as 3 bedrooms, 30m² or 12 weeks), and a percentage by a rate.
  * Money is recognised with £, "GBP", "pounds", k/m/bn and million-style suffixes, and amounts
  * written next to "pcm", "a month", "a year" and similar.
+ *
+ * Only Streetkey's own figures count as evidence: text a lister wrote (titles, towns, features,
+ * descriptions, anything wrapped as <<<…>>>) and text that just echoes what the model asked for
+ * (error messages, "understood" search summaries) never ground a figure. See engineOnly().
  */
 
 export interface Figure { raw: string; value: number; tol: number; kind: 'money' | 'pct' }
@@ -106,7 +110,31 @@ const COUNT_KEY = /^(?:beds|baths|storeys|weeks|weeksOnSite|years|days|minutes|w
 /** JSON keys whose numbers are rates (percentages or fractions). */
 const PCT_KEY = /(?:pct|percent|rate|yield)$/i;
 
-/** Every number the evidence allows, by kind: numbers themselves and numbers written inside strings. */
+/**
+ * Keys whose values are not Streetkey's figures: what a lister wrote about a home, and text that
+ * echoes the model's own tool arguments (an error naming the id it asked for, the search it ran).
+ */
+const NOT_EVIDENCE_KEY = /^(?:title|town|street|features|description|source|error|understood|notSupportedYet|notFound)$/;
+/** Untrusted blocks made by untrusted(): they can't nest (markers inside are collapsed). */
+const UNTRUSTED_BLOCK = /<<<[\s\S]*?(?:>>>|$)/g;
+
+/**
+ * The parts of a tool result (or the page's property data) that come from Streetkey's engines:
+ * lister-written fields and untrusted blocks removed. Used as the evidence for the grounding check
+ * and for the correction pass, so a figure in a listing's description can never vouch for a reply.
+ */
+export function engineOnly(v: unknown, depth = 0): unknown {
+  if (depth > 10) return null;
+  if (v == null) return v;
+  if (typeof v === 'string') return v.includes('<<<') ? v.replace(UNTRUSTED_BLOCK, ' ').trim() || null : v;
+  if (Array.isArray(v)) return v.map((x) => engineOnly(x, depth + 1));
+  if (typeof v === 'object') {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => !NOT_EVIDENCE_KEY.test(k)).map(([k, x]) => [k, engineOnly(x, depth + 1)]));
+  }
+  return v;
+}
+
+/** Every number the evidence allows, by kind: numbers themselves and numbers written inside strings (never inside <<<…>>> blocks). */
 export function numbersIn(v: unknown, out: Allowed = { money: [], pct: [] }, depth = 0, key = ''): Allowed {
   if (depth > 8 || v == null) return out;
   if (typeof v === 'number') {
@@ -118,8 +146,9 @@ export function numbersIn(v: unknown, out: Allowed = { money: [], pct: [] }, dep
   }
   if (typeof v === 'string') {
     if (v.startsWith('/')) return out; // internal links: ids and query strings, not figures
-    // Dates ("2024-05", "2026-11-09T…") are not figures.
-    for (const t of tokens(v.replace(/\b\d{4}-\d{2}(?:-\d{2})?(?:T[\d:.]+Z?)?\b/g, ' '))) {
+    // Listing text wrapped as data is never evidence. Dates ("2024-05", "2026-11-09T…") are not figures.
+    const text = v.replace(UNTRUSTED_BLOCK, ' ').replace(/\b\d{4}-\d{2}(?:-\d{2})?(?:T[\d:.]+Z?)?\b/g, ' ');
+    for (const t of tokens(text)) {
       if (t.kind === 'money' || t.kind === 'plain') out.money.push(t.value);
       if (t.kind === 'pct' || t.kind === 'plain') out.pct.push(t.value);
     }
@@ -141,19 +170,24 @@ export function ungrounded(text: string, allowed: Allowed): string[] {
   return [...new Set(figuresIn(text).filter((f) => !matches(f, allowed)).map((f) => f.raw))];
 }
 
-/** Removes the sentences that carry unchecked figures, keeping list structure. */
-export function stripUngrounded(text: string, allowed: Allowed): { text: string; removed: number } {
+/** Removes the sentences `drop` rejects, keeping list structure (a list item goes when all its sentences do). */
+export function dropSentences(text: string, drop: (sentence: string) => boolean): { text: string; removed: number } {
   let removed = 0;
   const out: string[] = [];
   for (const line of text.split('\n')) {
-    if (!ungrounded(line, allowed).length) { out.push(line); continue; }
+    if (!line.trim() || !drop(line)) { out.push(line); continue; }
     const m = line.match(/^(\s*(?:[-•*]|\d+\.)\s+)?([\s\S]*)$/)!;
     const kept = m[2].split(/(?<=[.!?])\s+(?=[A-Z£(*"“‘'])/).filter((s) => {
-      const bad = ungrounded(s, allowed).length > 0;
+      const bad = drop(s);
       if (bad) removed++;
       return !bad;
     });
     if (kept.length) out.push(`${m[1] ?? ''}${kept.join(' ')}`);
   }
   return { text: out.join('\n').replace(/\n{3,}/g, '\n\n').trim(), removed };
+}
+
+/** Removes the sentences that carry unchecked figures, keeping list structure. */
+export function stripUngrounded(text: string, allowed: Allowed): { text: string; removed: number } {
+  return dropSentences(text, (s) => ungrounded(s, allowed).length > 0);
 }

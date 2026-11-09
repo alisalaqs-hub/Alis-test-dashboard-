@@ -25,7 +25,8 @@ export interface Briefing {
   opportunities: string[];
   questions: string[];
   labels: Record<string, string>;
-  grounding: { checked: number; dropped: number };
+  /** dropped: removed because a £/% figure wasn't in the data; withheld: removed under the content rules. */
+  grounding: { checked: number; dropped: number; withheld?: number };
   source: 'dashboard' | 'live';
   generatedAt: string;
 }
@@ -33,7 +34,9 @@ export interface Briefing {
 export interface AiProposal { id: string; agent: string; title: string; detail: string; consequential: boolean; rationale: string }
 export interface AutomationResult {
   agent: string; basis: 'demo' | 'demo+context'; cached: boolean;
-  findings: string[]; toolsCalled: string[]; proposals: AiProposal[]; grounding: { checked: number; dropped: number };
+  findings: string[]; toolsCalled: string[]; proposals: AiProposal[]; grounding: { checked: number; dropped: number; withheld?: number };
+  /** Proposals left out because the same one is already waiting in the approval queue. */
+  alreadyWaiting?: number;
 }
 
 /** The server's limits (server/src/ai/briefing/snapshot.ts). */
@@ -64,13 +67,24 @@ export function boundSnapshot(s: BriefingSnapshot): BriefingSnapshot {
   return out;
 }
 
-/** Ask for a briefing. Resolves immediately when cached; otherwise follows the background job. */
-export async function requestBriefing(kind: BriefingKind, snapshot: BriefingSnapshot | null, o: { onProgress?: (job: AiJob<Briefing>) => void; signal?: AbortSignal } = {}): Promise<Briefing> {
+type BriefingOptions = { onProgress?: (job: AiJob<Briefing>) => void; signal?: AbortSignal };
+
+/**
+ * Ask for a briefing, and say whether it came from the cache (the server keeps each briefing for an
+ * hour while the figures don't change). Resolves immediately when cached; otherwise follows the job.
+ */
+export async function fetchBriefing(kind: BriefingKind, snapshot: BriefingSnapshot | null, o: BriefingOptions = {}): Promise<{ briefing: Briefing; cached: boolean }> {
   const body = kind === 'my-agency' ? { kind } : { kind, snapshot: boundSnapshot(snapshot ?? { items: [] }) };
   const r = await aiPost<{ briefing: Briefing | null; jobId: string | null; cached: boolean }>('/api/ai/briefing', body, 30_000);
-  if (r.briefing) return r.briefing;
+  if (o.signal?.aborted) throw new ApiError(0, 'Cancelled.', 'cancelled');
+  if (r.briefing) return { briefing: r.briefing, cached: r.cached };
   if (!r.jobId) throw new ApiError(502, 'The AI couldn’t write a briefing just now. Please try again.', 'ai_failed');
-  return pollJob<Briefing>(r.jobId, { onProgress: o.onProgress, signal: o.signal, timeoutMs: 3 * 60_000 });
+  return { briefing: await pollJob<Briefing>(r.jobId, { onProgress: o.onProgress, signal: o.signal, timeoutMs: 3 * 60_000 }), cached: false };
+}
+
+/** Ask for a briefing. Resolves immediately when cached; otherwise follows the background job. */
+export async function requestBriefing(kind: BriefingKind, snapshot: BriefingSnapshot | null, o: BriefingOptions = {}): Promise<Briefing> {
+  return (await fetchBriefing(kind, snapshot, o)).briefing;
 }
 
 /** Ask the AI what an agent should do next, from the agent's deterministic findings. Nothing is executed. */

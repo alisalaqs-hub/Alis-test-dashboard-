@@ -39,7 +39,47 @@ export interface SearchQuery {
   unsupported: string[];
 }
 
-const WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
+const WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+const BED_N = '(\\d|one|two|three|four|five|six|seven|eight|nine|ten)';
+const BED_WORD = '(?:\\+\\s*)?(?:bed(?:room)?s?|br)\\b';
+const BED_RANGE = new RegExp(`\\b${BED_N}\\s*(?:-|–|to|or|and)\\s*${BED_N}[- ]?${BED_WORD}`);
+const BED_ANY = new RegExp(`\\b${BED_N}[- ]?${BED_WORD}`, 'g');
+/** "up to 4 beds": 4 is a ceiling, not a minimum. */
+const BED_CEILING = /\b(?:up to|max(?:imum)?(?:\s+of)?|no more than|not more than|at most)\s*$/;
+/** "fewer than 4 bedrooms": at most 3. */
+const BED_BELOW = /\b(?:fewer than|less than|under|below)\s*$/;
+const bedNumber = (s: string) => WORD_NUM[s] ?? parseInt(s, 10);
+
+/**
+ * The bedrooms someone asked for, read from their words:
+ * "3 bed" → min 3 · "2 to 3 beds" / "2-3 bed" → min 2, max 3 · "up to 4 beds" → max 4 (not "4+") · "fewer than 4 bedrooms" → max 3.
+ */
+export function bedroomRange(text: string): { min?: number; max?: number } {
+  const t = ` ${text.toLowerCase()} `;
+  const range = t.match(BED_RANGE);
+  if (range) {
+    const a = bedNumber(range[1]); const b = bedNumber(range[2]);
+    if (a > 0 && b >= a) return { min: a, max: b };
+  }
+  const out: { min?: number; max?: number } = {};
+  for (const m of t.matchAll(BED_ANY)) {
+    const before = t.slice(0, m.index);
+    const v = bedNumber(m[1]);
+    if (BED_CEILING.test(before)) { if (out.max == null) out.max = v; }
+    else if (BED_BELOW.test(before)) { if (out.max == null && v > 1) out.max = v - 1; }
+    else if (out.min == null) out.min = v;
+  }
+  if (out.min != null && out.max != null && out.max < out.min) delete out.max;
+  return out;
+}
+
+/**
+ * Words that say the person wants to rent: "to rent", "for rent", "to let", "rental(s)", "pcm", "per month", "tenant".
+ * Not "buy to let" (an investment), "rental demand / yield / income" (investment measures) or a "sitting tenant".
+ */
+export const RENT_WORDS = /\b(?:to rent|for rent|renting|per month|pcm|p\/m)\b|\brentals?\b(?!\s+(?:demand|yields?|income|returns?|potential|market|values?|growth))|(?<!sitting\s)\btenants?\b(?!\s+in\s+situ)|(?<!buy[- ])\bto[- ]let\b/;
+/** Words that say the person is investing. */
+export const INVEST_WORDS = /\b(invest\w*|yield|btl|buy[- ]to[- ]let|brrr+|flip\w*|hmo|portfolio|profit)\b/;
 
 const PLACE_ALIASES: Record<string, string[]> = {
   london: ['London'], manchester: ['Manchester'], leeds: ['Leeds'], bristol: ['Bristol'], birmingham: ['Birmingham'],
@@ -61,11 +101,11 @@ export function parseQuery(text: string): SearchQuery {
   const t = ` ${text.toLowerCase()} `;
   const q: SearchQuery = { intent: 'buy', locations: [], districts: [], types: [], unsupported: [] };
 
-  if (/\b(to rent|to let|renting|tenant|per month|pcm)\b/.test(t)) q.intent = 'rent';
-  else if (/\b(invest|yield|btl|buy[- ]to[- ]let|brrr|flip|hmo|portfolio|profit)\b/.test(t)) q.intent = 'invest';
+  if (RENT_WORDS.test(t)) q.intent = 'rent';
+  else if (INVEST_WORDS.test(t)) q.intent = 'invest';
 
-  const beds = t.match(/\b(\d|one|two|three|four|five|six|seven)[- ]?(?:\+\s*)?(?:bed(?:room)?s?|br)\b/);
-  if (beds) q.minBeds = WORD_NUM[beds[1]] ?? parseInt(beds[1], 10);
+  const beds = bedroomRange(text);
+  if (beds.min) q.minBeds = beds.min;
 
   // A price needs £, a k/m suffix or at least 4 digits ("up to 4 beds" is not £4).
   const price = t.match(/\b(?:under|below|less than|max(?:imum)?|up to|budget(?: of)?)\s*(£\s?[\d,.]+\s?[km]?|[\d,.]+\s?[km]\b|\d[\d,]{3,}(?:\.\d+)?)(?!\s*(?:-|\s)?(?:bed|bath|br\b|min|mile|year|week|storey|floor))/);

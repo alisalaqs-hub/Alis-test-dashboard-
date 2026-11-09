@@ -170,5 +170,12 @@ export const figuresInText = (texts: string[]) => texts.flatMap((t) => moneyMent
 export const finite = (n: number) => (Number.isFinite(n) ? n : null);
 export const round = (n: number, to = 1) => Math.round(n / to) * to;
 
+/**
+ * Who an AI answer is for, and how to charge their allowance. `charge` is called only when the model is
+ * actually about to be called (after validation and a cache miss), so rejected forms and cached answers
+ * never use up anyone's AI allowance.
+ */
+export interface AiMeta { userId: string | null; charge?: () => Promise<unknown> }
+
 /** Stable cache key for a JSON-able value. */
 export const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 40);

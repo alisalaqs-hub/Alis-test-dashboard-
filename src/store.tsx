@@ -1,7 +1,7 @@
 /** Client-side app state (saved properties, comparison set, designs, approvals, audit log).
  *  Persisted to localStorage when available; production stores these server-side per user. */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { ProposedAction } from './ai/agents';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { mergeQueue, QUEUE_CAP, type ProposedAction } from './ai/agents';
 import { baseListings, setDynamicListings, type Property } from './data/properties';
 import { dedupe } from './engine/listings';
 
@@ -20,7 +20,12 @@ interface Ctx extends State {
   toggleSaved: (id: string) => void;
   toggleCompare: (id: string) => void;
   saveDesign: (d: Omit<SavedDesign, 'id' | 'createdAt'>) => void;
-  enqueue: (a: ProposedAction[]) => void;
+  /**
+   * Send proposals to the approval queue. Only consequential ones are queued; one that is already
+   * waiting isn't queued twice, and when the queue is full new ones are turned away (with an audit
+   * entry) instead of older pending ones being dropped. Returns what happened to each.
+   */
+  enqueue: (a: ProposedAction[]) => EnqueueResult;
   decide: (id: string, approved: boolean, actor?: string) => void;
   log: (actor: string, action: string, detail: string) => void;
   requestViewing: (propertyId: string, slot: string) => void;
@@ -37,11 +42,25 @@ interface Ctx extends State {
   addServerListing: (p: Property) => void;
   replaceSaved: (keys: string[]) => void;
   replaceSavedSearches: (list: RecentSearch[]) => void;
+  /**
+   * Forget everything personal kept in this browser (saved homes and searches, recent searches,
+   * designs, viewings, listings, tracked and feed listings, the approval queue and audit log), so the
+   * next person on the device sees none of it. Call on sign-out, after the session has ended and
+   * the user is cleared (the account's own copies stay on the server and come back at sign-in).
+   */
+  clearPersonal: () => void;
 }
+export interface EnqueueResult { added: string[]; duplicates: string[]; full: string[] }
 const StoreCtx = createContext<Ctx | null>(null);
+
+const idsOf = (xs: ProposedAction[]) => xs.map((x) => x.id);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [s, set] = useState<State>(load);
+  // The queue as of the latest change, so enqueue() can report what it did even when it is called
+  // several times before React re-renders (the state itself is always updated functionally).
+  const queueRef = useRef(s.queue);
+  useEffect(() => { queueRef.current = s.queue; }, [s.queue]);
   // Register dynamic listings into the shared registry during render so every screen sees them.
   useMemo(() => {
     const base = baseListings();
@@ -58,8 +77,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     toggleSaved: (id) => set((x) => ({ ...x, saved: x.saved.includes(id) ? x.saved.filter((y) => y !== id) : [...x.saved, id] })),
     toggleCompare: (id) => set((x) => ({ ...x, compare: x.compare.includes(id) ? x.compare.filter((y) => y !== id) : [...x.compare, id].slice(-3) })),
     saveDesign: (d) => set((x) => ({ ...x, designs: [{ ...d, id: `d${Date.now()}`, createdAt: new Date().toISOString() }, ...x.designs].slice(0, 20) })),
-    enqueue: (a) => set((x) => ({ ...x, queue: [...a.filter((n) => n.consequential), ...x.queue].slice(0, 50), audit: [...a.map((n) => ({ at: new Date().toISOString(), actor: `agent:${n.agent}`, action: n.consequential ? 'proposed (awaiting approval)' : 'completed (non-consequential)', detail: n.title })), ...x.audit].slice(0, 200) })),
+    enqueue: (a) => {
+      const preview = mergeQueue(queueRef.current, a);
+      queueRef.current = preview.queue;
+      set((x) => {
+        const m = mergeQueue(x.queue, a);
+        const at = new Date().toISOString();
+        const entry = (n: ProposedAction, action: string): AuditEntry => ({ at, actor: `agent:${n.agent}`, action, detail: n.title });
+        // In the order the proposals arrived, newest first like the rest of the log.
+        const notes = a.map((n) => (m.added.includes(n) ? entry(n, 'proposed (awaiting approval)')
+          : m.duplicates.includes(n) ? entry(n, 'not queued (already awaiting approval)')
+          : m.full.includes(n) ? entry(n, `not queued (approval queue full: ${QUEUE_CAP} waiting)`)
+          : entry(n, 'completed (non-consequential)'))).reverse();
+        return { ...x, queue: m.queue, audit: [...notes, ...x.audit].slice(0, 200) };
+      });
+      return { added: idsOf(preview.added), duplicates: idsOf(preview.duplicates), full: idsOf(preview.full) };
+    },
     decide: (id, approved, actor = 'you') => set((x) => { const a = x.queue.find((q) => q.id === id); return { ...x, queue: x.queue.filter((q) => q.id !== id), audit: a ? [{ at: new Date().toISOString(), actor, action: approved ? 'approved' : 'rejected', detail: a.title }, ...x.audit] : x.audit }; }),
+    clearPersonal: () => { queueRef.current = []; set((x) => ({ ...EMPTY, serverListings: x.serverListings })); },
     log,
     addRecent: (q, mode) => set((x) => ({ ...x, recent: [{ q, mode, at: new Date().toISOString() }, ...x.recent.filter((r) => r.q.toLowerCase() !== q.toLowerCase())].slice(0, 6) })),
     toggleSavedSearch: (q, mode) => set((x) => ({ ...x, savedSearches: x.savedSearches.some((r) => r.q === q) ? x.savedSearches.filter((r) => r.q !== q) : [{ q, mode, at: new Date().toISOString() }, ...x.savedSearches].slice(0, 20) })),

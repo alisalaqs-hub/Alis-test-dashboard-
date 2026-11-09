@@ -16,7 +16,13 @@
  * ("£525,000", "£525k" and "£0.53m" all match 525000, within 5%); percentages tolerate
  * formatting only ("1.2%" matches 1.2 or 0.012, "1%" does not). Totals, differences and new
  * percentages the model works out itself do not match and are removed.
+ *
+ * Statements are also withheld (counted separately from figure drops) when they make a claim
+ * Streetkey never makes (guarantees, "this is a valuation") or talk about people by a protected
+ * characteristic (race, ethnicity, nationality, religion, sexual orientation, gender reassignment,
+ * age, disability), using the same detection as search. That is a code-level backstop to the prompt.
  */
+import { mentionsProtected } from '../../../../src/lib/ai/search';
 
 export interface Figure { kind: 'money' | 'percent'; value: number; tol: number; text: string }
 
@@ -167,33 +173,63 @@ export function figurePools(data: unknown): Pools {
   return { money: [...new Set(pools.money)], percent: [...new Set(pools.percent)] };
 }
 
+/** Why a statement can't be shown: a £/% figure that isn't in the data, or a content rule. */
+export type Verdict = 'ok' | 'figure' | 'policy';
+
 export class Grounding {
   private readonly pools: Pools;
   checked = 0;
+  /** Statements removed because a £ or % figure wasn't in the data. */
   dropped = 0;
+  /** Statements removed under the content rules (prohibited claims, protected characteristics). */
+  withheld = 0;
   constructor(data: unknown) { this.pools = figurePools(data); }
 
   /** Is this figure in the data, as the same kind of figure (allowing for formatting and rounding)? */
   matches(f: Figure): boolean {
     return this.pools[f.kind].some((n) => Math.abs(n - f.value) <= f.tol);
   }
-  /** True when every £/% figure in the text is grounded and it makes no prohibited claim. */
-  ok(text: string): boolean {
+  /** Checks one statement (and counts the figures checked). */
+  verdict(text: string): Verdict {
     const figs = figuresIn(text);
     this.checked += figs.length;
-    return figs.every((f) => this.matches(f)) && !PROHIBITED.test(text);
+    if (breaksContentRules(text)) return 'policy';
+    return figs.every((f) => this.matches(f)) ? 'ok' : 'figure';
   }
+  /** True when every £/% figure in the text is grounded and it breaks no content rule. */
+  ok(text: string): boolean { return this.verdict(text) === 'ok'; }
+  private count(v: Verdict) { if (v === 'figure') this.dropped++; else if (v === 'policy') this.withheld++; }
   /** Prose: keep only the sentences that pass. */
   prose(text: string): string {
-    const kept = sentences(text).filter((s) => { const good = this.ok(s); if (!good) this.dropped++; return good; });
+    const kept = sentences(text).filter((s) => { const v = this.verdict(s); this.count(v); return v === 'ok'; });
     return kept.join(' ').trim();
   }
   /** Lists: keep only the items whose every text passes. */
   list<T>(items: T[], texts: (t: T) => string[]): T[] {
-    return items.filter((it) => { const good = texts(it).every((t) => this.ok(t)); if (!good) this.dropped++; return good; });
+    return items.filter((it) => {
+      const vs = texts(it).map((t) => this.verdict(t));
+      const bad = vs.find((v) => v === 'policy') ?? vs.find((v) => v === 'figure');
+      if (bad) this.count(bad);
+      return !bad;
+    });
   }
-  get report() { return { checked: this.checked, dropped: this.dropped }; }
+  /** Count an item removed for a content rule outside list()/prose(). */
+  withhold(n = 1) { this.withheld += n; }
+  get report() { return { checked: this.checked, dropped: this.dropped, withheld: this.withheld }; }
 }
+
+/**
+ * Does the text talk about people by a protected characteristic? Uses search's detection, after
+ * neutralising two everyday uses that aren't about people: "polish the description" (the verb) and
+ * the immigration-status part of a landlord's legal right to rent check.
+ */
+export function aboutProtectedGroups(text: string): boolean {
+  let t = text.replace(/\bpolish(?=\s+(?:up|off|the|a|an|it|its|this|that|these|those|your|their|our|and|or)\b)/gi, 'refine');
+  if (/\bright[- ]to[- ]rent\b/i.test(t)) t = t.replace(/\bimmigration(?:\s+status)?\b/gi, 'eligibility');
+  return mentionsProtected(t);
+}
+/** A prohibited claim, or a statement about people's protected characteristics. */
+export const breaksContentRules = (text: string) => PROHIBITED.test(text) || aboutProtectedGroups(text);
 
 /**
  * Claims Streetkey never makes (Consumer Protection from Unfair Trading Regulations / DMCC Act

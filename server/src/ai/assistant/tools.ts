@@ -41,11 +41,25 @@ const whole = (n: number) => (Number.isFinite(n) ? Math.round(n) : null);
 
 const priceIs = (p: Property) => (p.listing === 'rent' ? 'rent per calendar month' : p.listing === 'auction' ? 'auction guide price' : 'asking price');
 
-/** Short card used in search results and comparisons. */
+/** Short card used in search results and comparisons. The town is free text for live listings, so it is wrapped as data too. */
 function homeCard(p: Property) {
   return {
-    id: p.id, title: lt(p, p.title, 120), town: p.town, district: p.district, listing: p.listing, price: p.price, priceIs: priceIs(p),
+    id: p.id, title: lt(p, p.title, 120), town: lt(p, p.town, 80), district: p.district, listing: p.listing, price: p.price, priceIs: priceIs(p),
     type: p.type, beds: p.beds, baths: p.baths, floorAreaM2: p.floorArea, tenure: p.tenure, status: p.status ?? 'live', demo: isDemo(p),
+  };
+}
+
+/**
+ * What the lister wrote about a home (for live listings) or Streetkey's demo text: the words the
+ * model needs to refer to it, sent as a data block, never as instructions or as evidence for figures.
+ * Street only: never a private seller's house number or full postcode.
+ */
+export function listingText(p: Property) {
+  return {
+    title: p.title.slice(0, 120), town: p.town.slice(0, 80), street: p.street.slice(0, 80),
+    features: p.features.slice(0, 8).map((x) => x.slice(0, 60)),
+    ...(!isDemo(p) && p.description ? { description: p.description.slice(0, 600) } : {}),
+    listedBy: isDemo(p) ? 'Streetkey demonstration data' : `${p.source?.name ?? 'Lister'}${p.source?.verified ? ' (verified)' : ''}`.slice(0, 80),
   };
 }
 
@@ -132,7 +146,8 @@ export function propertyIntel(p: Property, facts?: LiveFacts | null) {
     daysOnMarket: f ? f.daysOnMarket : p.daysOnMarket,
     ...(f ? { listedOn: f.listedOn } : {}),
     priceHistory: demo ? p.priceHistory.slice(-3) : null, // not tracked for live listings yet
-    valuation: val ? {
+    // Named so the model talks about an indicative range, never "Streetkey's valuation".
+    indicativeValue: val ? {
       asIsRange: val.asIs, postWorksRange: val.postWorks, askingPriceIs: val.verdict, askingVsMidPct: pct1(val.askingVsMid),
       confidence: val.confidence, soldComparables: val.evidenceCount, note: 'Indicative range from comparables; not a valuation.',
     } : null,

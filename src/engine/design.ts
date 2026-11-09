@@ -80,14 +80,63 @@ export function fitBudget(room: RoomType, budget: number, dims: Dims, postcode: 
   return { fits, best: fits[0] ?? null, cheapest, headroom: fits[0] ? budget - fits[0].cost.total : budget - cheapest.cost.total };
 }
 
+/**
+ * Words that name a room or a style in a brief, as whole words: "bedside" isn't a bedroom, "toilet"
+ * isn't a let and "modernise" isn't the Modern style. Rooms are in priority order (an open-plan
+ * "kitchen living space" is a kitchen).
+ */
+const ROOM_WORDS: [RoomType, RegExp][] = [
+  ['kitchen', /\bkitchen(s|ette)?\b/],
+  ['bathroom', /\b(bath(room)?s?|shower( ?room)?s?|en[- ]?suites?|wet ?rooms?|cloakrooms?)\b/],
+  ['bedroom', /\b(bed(room)?s?|nursery)\b/],
+  ['living', /\b(living( ?rooms?| spaces?| areas?)?|lounges?|reception( rooms?)?|sitting rooms?|front rooms?|snug)\b/],
+];
+const STYLE_WORDS: Record<string, RegExp> = {
+  modern: /\bmodern\b/,
+  contemporary: /\bcontemporary\b/,
+  luxury: /\bluxur(y|ious)\b/,
+  scandi: /\b(scandi(navian)?|nordic)\b/,
+  minimal: /\bminimal(ist|ism)?\b/,
+  traditional: /\b(traditional|shaker)\b/,
+  industrial: /\b(industrial|warehouse)\b/,
+  rental: /\b(rental|to let|buy[- ]to[- ]let|landlord|tenants?)\b/,
+  investment: /\b(high[- ]end investment|investment|resale)\b/,
+};
+
+/** Every room and style a brief names (rooms in priority order, styles in STYLES order). */
+export function briefMentions(text: string): { rooms: RoomType[]; styles: string[] } {
+  const t = text.toLowerCase();
+  return {
+    rooms: ROOM_WORDS.filter(([, re]) => re.test(t)).map(([r]) => r),
+    styles: STYLES.filter((s) => STYLE_WORDS[s.id]?.test(t)).map((s) => s.id),
+  };
+}
+
+/** Budgets the brief reader accepts at all; anything else is a misreading ("2 bedrooms") rather than a budget. */
+export const BRIEF_BUDGET_RANGE = { min: 300, max: 1_000_000 } as const;
+const amount = (digits: string, k?: string) => {
+  const n = Number.parseFloat(digits.replace(/,/g, ''));
+  return Number.isFinite(n) ? Math.round(n * (k ? 1000 : 1)) : undefined;
+};
+/**
+ * The budget a brief states: "£5,000", "£5k", "£3,500, keep the floor" (the comma and the "k" of
+ * "keep" aren't part of it), "5k pounds" or "a budget of 4500". Out-of-range figures are dropped.
+ */
+export function briefBudget(text: string): number | undefined {
+  const t = text.toLowerCase();
+  const NUM = String.raw`(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?`;
+  const m = t.match(new RegExp(String.raw`£\s?(${NUM})(?:\s?(k)\b)?`))
+    ?? t.match(new RegExp(String.raw`\b(${NUM})\s?(k)?\s?(?:pounds|quid|gbp)\b`))
+    ?? t.match(new RegExp(String.raw`\bbudget\b[^\d£\n.]{0,20}(\d{1,3}(?:,\d{3})+|\d{3,}|\d+(?=\s?k\b))(?:\s?(k)\b)?`));
+  if (!m) return undefined;
+  const n = amount(m[1], m[m.length - 1] === 'k' ? 'k' : undefined);
+  return n !== undefined && n >= BRIEF_BUDGET_RANGE.min && n <= BRIEF_BUDGET_RANGE.max ? n : undefined;
+}
+
 /** Parse "Redesign this living room for £5,000" style requests. */
 export function parseDesignBrief(text: string): { room?: RoomType; budget?: number; style?: string } {
-  const t = text.toLowerCase();
-  const room = /kitchen/.test(t) ? 'kitchen' : /bath|shower/.test(t) ? 'bathroom' : /bed/.test(t) ? 'bedroom' : /living|lounge|reception|flat/.test(t) ? 'living' : undefined;
-  const m = t.match(/£\s?([\d,.]+)\s?(k)?/);
-  const budget = m ? parseFloat(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1) : undefined;
-  const style = STYLES.find((s) => t.includes(s.name.toLowerCase()) || (s.id === 'luxury' && /luxur/.test(t)) || (s.id === 'rental' && /rental|let/.test(t)))?.id;
-  return { room, budget, style };
+  const named = briefMentions(text);
+  return { room: named.rooms[0], budget: briefBudget(text), style: named.styles[0] };
 }
 
 /* ---------- Layout planner ---------- */

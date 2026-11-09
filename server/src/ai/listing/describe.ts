@@ -100,6 +100,7 @@ function factSentences(f: Facts, intro: boolean): string[] {
 /** Wording found in the seller's own notes and deliberately left out. */
 const NOTE_TEXT: Partial<Record<Reason, string>> = {
   discrimination: 'Your notes include wording that could discriminate or steer people (such as “no DSS” or “professionals only”), so it was left out.',
+  steering: 'Your notes say who the home would suit (such as “ideal for professionals”), so that was left out: describe the home, not who should live there.',
   bidding: 'Your notes mention offers or bidding, so that was left out: a rental advert must state one fixed rent.',
   fees: 'Your notes mention tenant fees, so they were left out: most letting fees are banned under the Tenant Fees Act 2019.',
   pets: 'Your notes include a blanket “no pets” line, which was left out: tenants can ask to keep a pet and landlords must not unreasonably refuse.',

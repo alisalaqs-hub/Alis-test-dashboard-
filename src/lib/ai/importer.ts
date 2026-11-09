@@ -9,7 +9,7 @@
  *
  * We never fetch other websites: only the text the person pasted is read.
  */
-import { complianceChecks, extractListing, type Extracted, type ListingInput } from '../../engine/listings';
+import { complianceChecks, extractListing, POSTCODE_RE, type Extracted, type ListingInput } from '../../engine/listings';
 
 export type Confidence = 'stated' | 'inferred';
 export type SaleMethod = 'private treaty' | 'auction' | 'modern method of auction' | 'tender';
@@ -183,7 +183,7 @@ export const keyBefore = (before: string, keys: string) => new RegExp(`(?:${keys
 const NOT_PRICE = String.raw`service charges?|ground rents?|deposit|council tax|(?:estate|management|maintenance|parking|permit|admin(?:istration)?|reservation|holding|tenancy|referencing|buyer'?s?) (?:charges?|fees?|premium|deposit)|buyer'?s premium|parking(?: space| permit)?|rental income|(?:currently|presently) (?:let|rented)(?: at| for)?|tenanted at|(?:achievable|estimated|potential|expected|passing) rent|reduced from|previously|was`;
 export const notPriceBefore = (before: string) => keyBefore(before, NOT_PRICE);
 
-interface Money { amount: number; before: string; after: string; period: Period | null }
+interface Money { amount: number; before: string; after: string; period: Period | null; at: number; end: number }
 function moneyIn(text: string): Money[] {
   const t = normText(text);
   const out: Money[] = [];
@@ -195,7 +195,7 @@ function moneyIn(text: string): Money[] {
     const rest = t.slice(end, end + 48);
     const cut = rest.search(/£|\d/);
     const after = cut >= 0 ? rest.slice(0, cut) : rest;
-    if (Number.isFinite(amount)) out.push({ amount, before: t.slice(Math.max(0, at - 48), at), after, period: periodAfter(after) });
+    if (Number.isFinite(amount)) out.push({ amount, before: t.slice(Math.max(0, at - 48), at), after, period: periodAfter(after), at, end });
   }
   return out;
 }
@@ -203,39 +203,188 @@ const SALE_WORDS = /\b(for sale|guide price|asking price|offers (over|in excess 
 const LET_WORDS = /\b(to let|to rent|for rent|available to (rent|let)|let agreed|tenancy agreement|holding deposit|security deposit)\b/i;
 
 /** The asking price or rent (pcm), skipping service charges, ground rent, deposits, fees and old prices. */
-function priceOf(money: Money[], text: string): { listing: 'sale' | 'rent'; price: number } | null {
+function priceOf(money: Money[], text: string): { listing: 'sale' | 'rent'; price: number; m: Money } | null {
   const real = money.filter((m) => !notPriceBefore(m.before));
   const rent = real.find((m) => (m.period === 'month' || m.period === 'week') && m.amount >= 50 && m.amount <= 100_000);
   const sale = real.find((m) => m.period === null && m.amount >= 1000);
   const clearlyForSale = !!sale && sale.amount >= 20_000 && SALE_WORDS.test(text) && !LET_WORDS.test(text);
-  if (rent && !clearlyForSale) return { listing: 'rent', price: rent.period === 'week' ? Math.round((rent.amount * 52) / 12) : Math.round(rent.amount) };
-  if (sale) return { listing: 'sale', price: Math.round(sale.amount) };
+  if (rent && !clearlyForSale) return { listing: 'rent', price: rent.period === 'week' ? Math.round((rent.amount * 52) / 12) : Math.round(rent.amount), m: rent };
+  if (sale) return { listing: 'sale', price: Math.round(sale.amount), m: sale };
   return null;
 }
 /** An annual charge (converted from its written period in code), or undefined. */
-function chargeOf(money: Money[], keys: string, max: number): number | undefined {
+function chargeOf(money: Money[], keys: string, max: number): { annual: number; m: Money } | undefined {
   const m = money.find((x) => keyBefore(x.before, keys));
   if (!m) return undefined;
   const annual = Math.round(m.amount * (m.period ? PER_YEAR[m.period] : 1));
-  return annual >= 0 && annual <= max ? annual : undefined;
+  return annual >= 0 && annual <= max ? { annual, m } : undefined;
 }
 
+/* ───────────── facts read line by line, with labels first ───────────── */
+type Tenure = NonNullable<ImportValues['tenure']>;
+type Era = NonNullable<ImportValues['era']>;
+type Condition = NonNullable<ImportValues['condition']>;
+/** A value the built-in reader found, the words it found it in, and whether they state it or only point to it. */
+export interface RuleFind<T> { value: T; evidence: string; confidence: Confidence }
+const WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+/** Words after a mention that cancel it: "Share of freehold option not available". */
+const CANCELLED_AFTER = /\b(not|unavailable|no longer|n\/a)\b/i;
+const live = (t: string, from: number, to: number) => !negatedAt(t, from, to) && !CANCELLED_AFTER.test(t.slice(to, to + 40).split(/[.;!?•·|\n,()]/)[0]);
+
 /**
- * The built-in reader (src/engine/listings.ts extractListing) with the money corrected: a "£100 per
- * month" service charge isn't read as the rent, charges keep their period, and ground rent is read.
+ * Bedrooms or bathrooms. Labelled values come first ("BEDROOMS: x2", "Bathrooms ×1", or the label
+ * on one line and "×1" on the next, as Rightmove pages copy); then "2 bedrooms" written on one line.
+ * A number straight after "x"/"×" or another label ("BEDROOMS ×2 BATHROOMS ×1") belongs to that label.
  */
-export function ruleReading(text: string, url = ''): ImportValues {
+function countOf(t: string, kind: 'bed' | 'bath'): RuleFind<number> | null {
+  const w = kind === 'bed' ? String.raw`bed(?:room)?s?` : String.raw`bath(?:room)?s?`;
+  // Not a room size ("Bedroom: 3.5m x 3.0m"): the number isn't followed by a decimal or a unit.
+  const notSize = String.raw`(?!\d|[.,]\d|\s?(?:m|ft|metres?|meters?|feet|'|")(?![a-z]))`;
+  // A bare label counts when the next label follows on the same line ("BEDROOMS 2 BATHROOMS 1"), not before a room size.
+  const nextLabel = String.raw`(?=[ \t]+(?:bed(?:room)?s?|bath(?:room)?s?|receptions?|size|tenure|epc|council|property type)\b)`;
+  const labelled = new RegExp(String.raw`\b${w}\s*(?::\s*[x×]?|[x×])\s*(\d{1,2})${notSize}|\b${w}[ \t]*\n[ \t]*(\d{1,2})[ \t]*(?:\n|$)|\b${w}[ \t]+(\d{1,2})${nextLabel}`, 'i').exec(t);
+  if (labelled) return { value: Number(labelled[1] ?? labelled[2] ?? labelled[3]), evidence: quoteAt(t, labelled.index, labelled.index + labelled[0].length), confidence: 'stated' };
+  const words = Object.keys(WORD_NUM).join('|');
+  const re = new RegExp(String.raw`\b(\d{1,2}|${words})[ \t-]*(?:(?:double|single|good[- ]sized|large)[ \t]+)?${w}\b`, 'gi');
+  for (const m of t.matchAll(re)) {
+    const at = m.index ?? 0;
+    const lineBefore = t.slice(Math.max(0, at - 30), at).split('\n').pop() ?? '';
+    if (/[x×]\s*$/i.test(lineBefore) || /\b(bed(room)?s?|bath(room)?s?|receptions?)\s*[:\-]?\s*$/i.test(lineBefore)) continue;
+    const raw = m[1].toLowerCase();
+    return { value: WORD_NUM[raw] ?? Number(raw), evidence: quoteAt(t, at, at + m[0].length), confidence: 'stated' };
+  }
+  if (kind === 'bed') { const s = /\bstudio\b/i.exec(t); if (s) return { value: 0, evidence: quoteAt(t, s.index, s.index + s[0].length), confidence: 'inferred' }; }
+  return null;
+}
+
+const SOF = String.raw`share (?:of|in) (?:the )?freehold`;
+/**
+ * Tenure: a labelled value ("Tenure: Leasehold") wins; otherwise the first mention that isn't negated
+ * or cancelled ("Share of freehold option not available" isn't share of freehold), share of freehold
+ * before leasehold before freehold ("Leasehold with a share of the freehold" is share of freehold).
+ */
+export function tenureOf(text: string): RuleFind<Tenure> | null {
+  const t = prep(text);
+  const sof = (s: string, offset = 0) => { for (const m of s.matchAll(new RegExp(SOF, 'gi'))) { const at = offset + (m.index ?? 0); if (live(t, at, at + m[0].length)) return { at, end: at + m[0].length }; } return null; };
+  const lab = new RegExp(String.raw`\btenure\b[ \t]*(?:[:\-]|\bis\b)?\s*(?:(${SOF})|(leasehold)|(freehold))\b`, 'i').exec(t);
+  if (lab) {
+    const end = lab.index + lab[0].length;
+    const line = t.slice(end, end + 80).split('\n')[0];
+    const alsoSof = lab[2] ? sof(line, end) : null; // "Tenure: Leasehold with a share of the freehold"
+    const value: Tenure = lab[1] || alsoSof ? 'share-of-freehold' : lab[2] ? 'leasehold' : 'freehold';
+    return { value, evidence: quoteAt(t, lab.index, alsoSof ? alsoSof.end : end), confidence: 'stated' };
+  }
+  const s = sof(t);
+  if (s) return { value: 'share-of-freehold', evidence: quoteAt(t, s.at, s.end), confidence: 'stated' };
+  const sofSpans = [...t.matchAll(new RegExp(SOF, 'gi'))].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length]);
+  for (const [value, re] of [['leasehold', /\bleasehold\b/gi], ['freehold', /\bfreehold\b/gi]] as const) {
+    for (const m of t.matchAll(re)) {
+      const at = m.index ?? 0; const end = at + m[0].length;
+      if (sofSpans.some(([a, b]) => at >= a && end <= b) || !live(t, at, end)) continue;
+      return { value, evidence: quoteAt(t, at, end), confidence: 'stated' };
+    }
+  }
+  return null;
+}
+
+const eraOfYear = (y: number): Era => (y < 1919 ? 'pre-1919' : y < 1945 ? '1919-1944' : y < 1980 ? '1945-1979' : y < 2000 ? '1980-1999' : '2000+');
+const BUILDING = String.raw`(?:semi|semi-detached|detached|terrace|terraced|house|home|bungalow|flat|apartment|block|build|building|property|conversion|cottage|villa|maisonette|mansion block|purpose[- ]built)`;
+/**
+ * Age clues in a piece of text: a build year or "new build" state it; a period name (Victorian,
+ * 1930s semi, post-war) points to it. Negated clues ("not a new build") don't count. `loose` adds
+ * weaker hints such as "period features", for checking a reading rather than making one.
+ */
+export function eraClues(text: string, o: { loose?: boolean } = {}): RuleFind<Era>[] {
+  const t = prep(text);
+  const now = new Date().getFullYear();
+  const out: (RuleFind<Era> & { at: number })[] = [];
+  const add = (re: RegExp, value: (m: RegExpMatchArray) => Era | null, confidence: Confidence) => {
+    for (const m of t.matchAll(re)) {
+      const at = m.index ?? 0; const end = at + m[0].length;
+      const v = value(m);
+      if (v && !negatedAt(t, at, end)) out.push({ value: v, evidence: quoteAt(t, at, end), confidence, at });
+    }
+  };
+  const year = (s: string) => { const y = Number(s); return y >= 1700 && y <= now + 3 ? eraOfYear(y) : null; };
+  add(/\b(?:built|constructed|erected|dating from|dates from|dates back to)\b[^.;\n\d]{0,20}?\b((?:17|18|19|20)\d\d)\b/gi, (m) => year(m[1]), 'stated');
+  add(/\b(new[- ]build|newly built|brand[- ]new (?:home|house|flat|apartment|development))\b/gi, () => '2000+', 'stated');
+  add(new RegExp(String.raw`\b((?:18|19|20)\d0)'?s\s+${BUILDING}\b`, 'gi'), (m) => year(m[1]), 'inferred');
+  add(/\b(victorian|edwardian|georgian|regency)\b/gi, () => 'pre-1919', 'inferred');
+  add(/\b(inter[- ]?war|art deco)\b/gi, () => '1919-1944', 'inferred');
+  add(/\bpost[- ]?war\b/gi, () => '1945-1979', 'inferred');
+  add(/\bperiod (?:property|home|house|conversion|building|terrace|cottage)\b/gi, () => 'pre-1919', 'inferred');
+  // Looser hints, only to support a reading someone will check ("period features" are also found in 1920s homes).
+  if (o.loose) add(/\b(?:period|original) (?:features?|details?|character|fireplaces?|cornicing)\b|\bsash windows?\b/gi, () => 'pre-1919', 'inferred');
+  return out.sort((a, b) => (a.confidence === b.confidence ? a.at - b.at : a.confidence === 'stated' ? -1 : 1)).map(({ at: _at, ...r }) => r);
+}
+
+const CONDITION_WORDS: [Condition, RegExp][] = [
+  ['derelict', /\b(derelict|uninhabitable|fire[- ]damaged|shell condition|structural (?:repairs?|issues?|problems?|damage)|in need of (?:complete|total) (?:renovation|refurbishment|restoration))\b/gi],
+  ['poor', /\b(?:requires?|needs?|needing|in need of|ripe for)\s+(?:(?:complete|full|extensive|total|general|major|significant)\s+)?(?:modernis|moderniz|updat|renovat|refurbish|restor|improvement|work|repair)\w*|\b(?:renovation|refurbishment|restoration|modernisation|improvement) (?:project|opportunity)\b|\bin poor (?:condition|repair)\b/gi],
+  ['fair', /\b(?:requires?|needs?|needing|in need of)\s+(?:some|light|minor|cosmetic)\s+\w+|\b(?:could|would) benefit from\b|\b(?:scope|potential|room) (?:to|for) (?:improve|update|modernise|modernize|add value|improvement|updating)\w*|\bfair condition\b|\bdated\b/gi],
+  ['good', /\b(?:well[- ]presented|immaculate(?:ly)?|beautifully (?:presented|refurbished|renovated)|(?:newly|recently|fully|completely|tastefully) (?:refurbished|renovated|modernised|modernized|updated|decorated|refitted)|refurbished to a high standard|excellent condition|good (?:condition|order)|move[- ]in ready|ready to move (?:in|into)|turn[- ]?key|show home)\b/gi],
+];
+/** Condition clues in a piece of text ("requires modernisation", "beautifully presented"), first one first. Negated ones don't count. */
+export function conditionClues(text: string): RuleFind<Condition>[] {
+  const t = prep(text);
+  const out: (RuleFind<Condition> & { at: number })[] = [];
+  for (const [value, re] of CONDITION_WORDS) for (const m of t.matchAll(re)) {
+    const at = m.index ?? 0; const end = at + m[0].length;
+    if (!negatedAt(t, at, end)) out.push({ value, evidence: quoteAt(t, at, end), confidence: 'inferred', at });
+  }
+  return out.sort((a, b) => a.at - b.at).map(({ at: _at, ...r }) => r);
+}
+
+/** Where the built-in reader found each value, for the page to show next to it. */
+export type RuleEvidence = Partial<Record<FieldKey, { quote: string; confidence: Confidence }>>;
+
+/**
+ * The built-in reader (src/engine/listings.ts extractListing) with the money corrected (a "£100 per
+ * month" service charge isn't read as the rent, charges keep their period, ground rent is read),
+ * tenure and room counts read with their labels and line breaks, the age and condition read from
+ * clear wording, and the words each value was found in.
+ */
+export function ruleRead(text: string, url = ''): { values: ImportValues; evidence: RuleEvidence } {
   const ex = extractListing(text, /^https?:\/\//i.test(url.trim()) ? url.trim() : '');
   const v: ImportValues = { ...ex.fields, features: ex.fields.features ?? [] };
+  const t = prep(text);
+  const evidence: RuleEvidence = {};
+  const note = (k: FieldKey, q: string | null, confidence: Confidence = 'stated') => { if (q) evidence[k] = { quote: q, confidence }; };
+  const take = <K extends 'beds' | 'baths' | 'tenure' | 'era' | 'condition'>(k: K, f: RuleFind<NonNullable<ImportValues[K]>> | null | undefined) => {
+    if (f) { (v as Record<string, unknown>)[k] = f.value; note(k, f.evidence, f.confidence); } else delete v[k];
+  };
+
   const money = moneyIn(text);
   const p = priceOf(money, text);
-  if (p) { v.listing = p.listing; v.price = p.price; } else { delete v.listing; delete v.price; }
+  if (p) { v.listing = p.listing; v.price = p.price; note('price', quoteAt(t, p.m.at, p.m.end)); note('listing', quoteAt(t, p.m.at, p.m.end), 'inferred'); } else { delete v.listing; delete v.price; }
   const sc = chargeOf(money, 'service charges?', 60_000);
-  if (sc !== undefined) v.serviceChargeAnnual = sc; else delete v.serviceChargeAnnual;
-  const gr = chargeOf(money, 'ground rents?', 20_000) ?? (RE.peppercorn.test(text) ? 0 : undefined);
-  if (gr !== undefined) v.groundRentAnnual = gr;
-  return v;
+  if (sc) { v.serviceChargeAnnual = sc.annual; note('serviceChargeAnnual', quoteAt(t, Math.max(0, sc.m.at - 20), sc.m.end)); } else delete v.serviceChargeAnnual;
+  const gr = chargeOf(money, 'ground rents?', 20_000);
+  if (gr) { v.groundRentAnnual = gr.annual; note('groundRentAnnual', quoteAt(t, Math.max(0, gr.m.at - 16), gr.m.end)); }
+  else if (RE.peppercorn.test(text)) { v.groundRentAnnual = 0; note('groundRentAnnual', quote(text, RE.peppercorn)); }
+
+  take('beds', countOf(t, 'bed'));
+  take('baths', countOf(t, 'bath'));
+  take('tenure', tenureOf(text));
+  take('era', eraClues(text)[0]);
+  take('condition', conditionClues(text)[0]);
+
+  if (v.title) note('title', v.title);
+  if (v.postcode) note('postcode', quote(text, POSTCODE_RE));
+  if (v.epc) note('epc', quote(text, /\bEPC(?:\s*rating)?\s*[:\-]?\s*[A-G]\b/i));
+  if (v.councilTax) note('councilTax', quote(text, /council tax(?:\s*band)?\s*[:\-]?\s*[A-I]\b/i));
+  if (v.leaseYears) note('leaseYears', quote(text, new RegExp(String.raw`\b${v.leaseYears}\s*years?\s*(remaining|left|on the lease)`, 'i')));
+  if (v.floorArea) note('floorArea', quote(text, /[\d,.]{2,5}\s?(sq\.?\s?m|m²|m2|square met)/i) ?? quote(text, /[\d,]{3,5}\s?(sq\.?\s?ft|sqft|square feet)/i));
+  if (v.type) {
+    const words: Record<string, RegExp> = { 'semi-detached': /semi[- ]detached/i, detached: /\bdetached\b/i, terraced: /terrace/i, bungalow: /bungalow/i, flat: /\b(flat|apartment)\b/i };
+    const stated = quote(text, words[v.type]);
+    note('type', stated ?? quote(text, /\b(maisonette|studio)\b/i), stated ? 'stated' : 'inferred');
+  }
+  return { values: v, evidence };
 }
+
+/** The built-in reader's values (see ruleRead). */
+export const ruleReading = (text: string, url = ''): ImportValues => ruleRead(text, url).values;
 
 /* ───────────── red flags (rules) ───────────── */
 export function ruleFlags(v: ImportValues, text: string): RedFlag[] {
@@ -243,6 +392,8 @@ export function ruleFlags(v: ImportValues, text: string): RedFlag[] {
   const add = (id: string, severity: Severity, title: string, detail: string, evidence: string | null = null) => flags.push({ id, severity, title, detail, evidence, source: 'rules' });
   const rent = v.listing === 'rent';
   const lease = v.tenure === 'leasehold';
+  // A share of freehold usually comes with a lease too: once its length is known, the same lease checks apply.
+  const leaseKnown = (lease || v.tenure === 'share-of-freehold') && has(v.leaseYears);
 
   if (!has(v.epc)) add('no-epc', 'medium', 'No EPC rating stated', 'An Energy Performance Certificate is needed before a home is marketed. Ask for the rating and the certificate: it affects running costs and, for a let, whether it can legally be rented.');
   else if (rent && ['F', 'G'].includes(String(v.epc))) add('epc-let', 'high', `EPC ${v.epc} for a home to let`, 'Homes in England and Wales generally can’t be let with an EPC below E unless a valid exemption is registered. Ask the agent to confirm.');
@@ -250,8 +401,8 @@ export function ruleFlags(v: ImportValues, text: string): RedFlag[] {
 
   if (!has(v.tenure)) add('tenure-missing', 'medium', 'Tenure not stated', 'Freehold or leasehold makes a big difference to costs and rights, and it’s required information. Ask the agent.');
   if (lease && !has(v.leaseYears)) add('lease-unknown', 'high', 'Lease length not stated', 'Ask how many years are left. Leases under about 80 years usually cost more to extend, and some lenders won’t lend on short leases.');
-  else if (lease && Number(v.leaseYears) < 80) add('short-lease', 'high', `Lease under 80 years (${v.leaseYears} years stated)`, 'Short leases usually cost more to extend and some lenders won’t lend on them. Get a lease extension quote and legal advice before you offer.', quote(text, new RegExp(`\\b${Number(v.leaseYears)}\\s*(years?|yrs?)`, 'i')));
-  else if (lease && Number(v.leaseYears) < 100) add('lease-under-100', 'low', `Lease under 100 years (${v.leaseYears} years stated)`, 'Many lenders want a minimum unexpired term. Check what an extension would cost and how long it would take.');
+  else if (leaseKnown && Number(v.leaseYears) < 80) add('short-lease', 'high', `Lease under 80 years (${v.leaseYears} years stated)`, 'Short leases usually cost more to extend and some lenders won’t lend on them. Get a lease extension quote and legal advice before you offer.', quote(text, new RegExp(`\\b${Number(v.leaseYears)}\\s*(years?|yrs?)`, 'i')));
+  else if (leaseKnown && Number(v.leaseYears) < 100) add('lease-under-100', 'low', `Lease under 100 years (${v.leaseYears} years stated)`, 'Many lenders want a minimum unexpired term. Check what an extension would cost and how long it would take.');
   // A charge written in the text ("Ground rent £250 pa") is never reported as "not stated", even if it was cleared on the page.
   if ((lease || v.tenure === 'share-of-freehold') && !has(v.serviceChargeAnnual) && !/service charges?[^.]{0,30}£\s?\d/i.test(text)) add('service-charge', 'medium', 'Service charge not stated', 'Service charges are required information for leasehold homes. Ask for the annual charge, what it covers and whether major works are planned.');
   if (lease && !has(v.groundRentAnnual) && !RE.peppercorn.test(text) && !/ground rents?[^.]{0,30}£\s?\d/i.test(text)) add('ground-rent', 'low', 'Ground rent not stated', 'Ask for the ground rent and how and when it can rise under the lease.');
@@ -382,9 +533,10 @@ export function combineQuestions(v: ImportValues, flags: RedFlag[], aiQuestions:
 
 /** The built-in reader on its own: what the site uses offline, and the server's fallback. */
 export function rulesOnlyResult(text: string, url = ''): ImportResult {
-  const values = ruleReading(text, url);
+  const { values, evidence } = ruleRead(text, url);
   const fields: ImportResult['fields'] = {};
-  for (const k of ORDER) if (has(values[k as keyof ImportValues])) fields[k] = { confidence: k === 'condition' || k === 'listing' ? 'inferred' : 'stated', evidence: null, source: 'rules' };
+  // "Stated" only with the words it was read from; anything the rules worked out, or can't quote, is "inferred".
+  for (const k of ORDER) if (has(values[k as keyof ImportValues])) fields[k] = { confidence: evidence[k]?.confidence ?? 'inferred', evidence: evidence[k]?.quote ?? null, source: 'rules' };
   const redFlags = combineFlags(values, text);
   return { engine: 'rules', values, fields, found: foundOf(values), missing: missingOf(values), redFlags, questionsToAsk: combineQuestions(values, redFlags), note: null };
 }
