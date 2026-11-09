@@ -33,7 +33,8 @@ Browser ── static site (dist/, from Netlify's CDN)
 > **Don't drag and drop the `dist` folder.** That uploads only the website. The back end needs Netlify to build from GitHub.
 
 1. **Create the site.** netlify.com → *Add new site* → *Import an existing project* → GitHub → choose `alisalaqs-hub/Alis-test-dashboard-` and the branch `claude/ai-property-platform-uk-kwzcrf` (or `main` once merged). Netlify reads `netlify.toml`: build command `npm run build:netlify`, publish folder `dist`, functions in `netlify/functions`. Click **Deploy**.
-2. **Add a database.** Site → *Extensions* (or *Database*) → **Netlify Database** → create. It sets `NETLIFY_DB_URL` for you. (Alternative: create a free Neon project and add its connection string as `DATABASE_URL`.)
+2. **Add a database.** Site → *Extensions* (or *Database*) → **Netlify Database** → create. It sets `NETLIFY_DB_URL` for you. (Alternative: create a free Neon project and add its connection string as `DATABASE_URL`.) Pick a European region (London `eu-west-2` or Frankfurt `eu-central-1`) for your UK visitors.
+   - **Keep the functions next to the database.** Site configuration → *Build & deploy* → *Functions* → *Functions region*: choose the same region as the database, if your plan offers it. Every page that talks to the server makes several database round trips, so a US function talking to a European database adds about 80 ms each time.
 3. **Add environment variables** (Site configuration → Environment variables). Full list with explanations in `.env.example`:
    - `OPENAI_API_KEY`: from platform.openai.com → API keys. Add credit and set a monthly limit there.
    - `ADMIN_EMAIL`: your email address (see step 5).
@@ -70,10 +71,13 @@ Leave the `OPENAI_*_MODEL` settings blank and Streetkey picks the best models yo
 
 ### Keeping costs under control
 
-- Site-wide daily token budget (`AI_DAILY_TOKEN_BUDGET`): AI pauses until the next day once reached; the site keeps working.
-- Per-person and per-visitor daily limits, per-feature per-minute/hour limits (stored in the database, so they hold across all serverless instances), and a daily image limit.
+- Site-wide daily token budget (`AI_DAILY_TOKEN_BUDGET`, rolling 24 hours). Ordinary features pause at 85% of it; the last 15% is kept for safety work (trust reviews of listings, enquiry screening), so a burst of chat can't switch off scam checks. While paused, `/api/health` and `/api/ai/status` say so and every page uses its built-in rules.
+- Per-person token caps (`AI_DAILY_TOKENS_PER_USER`, `AI_DAILY_TOKENS_PER_IP`): every AI call, including background jobs, is charged to the signed-in person or to the visitor's network (IPv6 addresses are grouped by /64 so they can't be rotated). Safety checks aren't capped per person.
+- Request limits per person, per visitor and per feature (per minute and hour), stored in the database so they hold across all serverless instances; a daily cap on new accounts per network; image limits per person (`AI_DAILY_IMAGES_PER_USER`) and for the whole site (`AI_DAILY_IMAGES_SITE`).
+- Image generation and photo analysis need a confirmed email address.
+- Out of credit: if OpenAI says the account has no credit left, Streetkey pauses AI for 10 minutes at a time (and retries), emails `ADMIN_EMAIL` once, shows the reason in *Admin → AI*, and tells visitors only that AI is temporarily unavailable.
 - Fast models for parsing and classification, caching of repeatable results, jobs for slow work, consent before photos are analysed.
-- Every call is recorded in `ai_usage` (tokens, latency, purpose; never prompts or outputs).
+- Every call is recorded in `ai_usage` (tokens, latency, purpose, who it was charged to as an id; never prompts or outputs). Calls whose answer had to be thrown away (cut short, refused, invalid) are recorded as failures.
 - Set a monthly spend limit in your OpenAI account too.
 
 ## Security and privacy
@@ -81,9 +85,11 @@ Leave the `OPENAI_*_MODEL` settings blank and Streetkey picks the best models yo
 - Passwords hashed with scrypt; sessions are random tokens in `HttpOnly`, `Secure`, `SameSite=Lax` cookies (only hashes stored); password reset signs out every device.
 - Cross-site request protection (origin checks); database-backed rate limits; Netlify edge rate limit on the API.
 - Uploads: real file type checked from the bytes, size limits, EXIF/XMP/GPS metadata removed.
+- Agent-feed photos hosted elsewhere are only downloaded from public HTTPS host names: the address is checked at connection time (no private, loopback, link-local or cloud-metadata addresses), each redirect is re-checked (at most 3), only images are accepted, up to 10 MB.
+- Background workers only start for requests carrying the worker secret; stuck or abandoned AI jobs are closed out automatically and never retried forever.
 - Private sellers' house numbers and full postcodes are never shown publicly or given to the AI engines.
 - AI: untrusted text is fenced off from instructions; outputs are validated in code; no prompts, outputs or API keys are logged; OpenAI API data isn't used for training by default.
-- UK GDPR: data export (`/api/me/export`) includes automated assessments; account deletion removes personal data and AI summaries.
+- UK GDPR: data export (`/api/me/export`) includes automated assessments. Account deletion removes the person's details, sessions, saved homes and searches, design-studio photos and AI results (files included), AI jobs, enquiry AI summaries, and draft listings with their photos; published listings are withdrawn and kept without the owner's details. AI usage records are kept without the person's id.
 - Listings: compliance checks block submission (EPC, council tax, tenure, leasehold details, EPC E+ for lettings, discriminatory wording, rental bidding), plus admin review.
 
 ## Run it on your computer
@@ -106,6 +112,8 @@ OPENAI_BASE_URL=http://127.0.0.1:8790/v1 OPENAI_API_KEY=mock npm run server:dev
 Make yourself admin locally: `ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a long passphrase' npm run db:seed`.
 
 For website work with hot reload, run `npm run dev` alongside the server and set `VITE_API_URL=http://localhost:8787` in `.env.local`.
+
+**Migrations:** add a new numbered file in `server/migrations/` and run `npm run gen:migrations`. Never edit a migration that has already been applied anywhere: each applied migration's checksum is stored, and the server refuses to start in development (and logs an error in production) if one changes.
 
 ### Tests and checks
 
