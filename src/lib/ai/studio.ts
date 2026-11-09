@@ -12,6 +12,25 @@ import { aiPost, pollJob } from './core';
 export interface RoomImageStart { jobId: string; image: AiImageDTO; remainingToday: number; label: string }
 export interface RoomImageResult { image: AiImageDTO; label: string; remainingToday: number }
 export const ROOM_IMAGE_PROGRESS = 'Designing your room… usually under a minute';
+/**
+ * Largest upload we send for a redesign. The site runs on Netlify Functions, which cap a request at
+ * 6 MB (less once a binary body is encoded), so anything near the server's own photo limit would be
+ * turned away before it reached Streetkey.
+ */
+export const ROOM_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+const TOO_LARGE = 'That photo is too large to upload. Try a photo under 4 MB, or a smaller copy of it (for example a screenshot).';
+
+/**
+ * The photo to upload for a redesign: a 2048px JPEG (plenty for image editing, much smaller than a
+ * phone photo, and without camera or location metadata). The original is used only when the browser
+ * can't resize it and it's already under the limit.
+ */
+export async function prepareRoomPhoto(photo: File | Blob): Promise<Blob> {
+  const small = await shrinkForAnalysis(photo, 2048, 0.9);
+  if (small !== photo && small.size <= ROOM_IMAGE_MAX_BYTES) return small;
+  if (photo.size <= ROOM_IMAGE_MAX_BYTES) return photo;
+  throw new ApiError(413, TOO_LARGE, 'too_large');
+}
 
 /**
  * Upload a room photo, then wait for the redesign job. `onProgress` receives short messages for
@@ -22,13 +41,21 @@ export async function generateRoomImage(
   fields: { room: string; style: string; brief?: string; palette?: string },
   o: { onProgress?: (text: string) => void; signal?: AbortSignal } = {},
 ): Promise<RoomImageResult> {
+  o.onProgress?.('Preparing your photo…');
+  const upload = await prepareRoomPhoto(photo);
   const form = new FormData();
   form.append('room', fields.room); form.append('style', fields.style); form.append('consent', 'true');
   if (fields.brief) form.append('brief', fields.brief.slice(0, 600));
   if (fields.palette) form.append('palette', fields.palette.slice(0, 200));
-  form.append('photo', photo, (photo as File).name || 'room.jpg');
+  form.append('photo', upload, upload === photo ? (photo as File).name || 'room.jpg' : 'room.jpg');
   o.onProgress?.('Uploading your photo…');
-  const start = await apiCall<RoomImageStart>('POST', '/api/ai/room-image', form, { timeout: 90_000 });
+  let start: RoomImageStart;
+  try { start = await apiCall<RoomImageStart>('POST', '/api/ai/room-image', form, { timeout: 90_000 }); }
+  catch (e) {
+    // The hosting platform rejects oversized requests itself, without Streetkey's friendly message.
+    if (e instanceof ApiError && e.status === 413 && e.code !== 'too_large') throw new ApiError(413, TOO_LARGE, 'too_large');
+    throw e;
+  }
   if (start.image.status === 'done' && start.image.url) return { image: start.image, label: start.label, remainingToday: start.remainingToday };
   o.onProgress?.(ROOM_IMAGE_PROGRESS);
   const out = await pollJob<{ image: AiImageDTO; label: string }>(start.jobId, {
@@ -58,11 +85,11 @@ export interface RoomAnalysis {
 const ANALYSIS_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
- * A smaller JPEG for analysis: the AI looks at a low-detail view, so a 1024px image is plenty,
- * uploads quickly and stays under the 4 MB limit. Re-encoding also drops camera metadata.
- * Falls back to the original file when the browser can't resize it.
+ * A smaller JPEG: for analysis the AI looks at a low-detail view, so a 1024px image is plenty,
+ * uploads quickly and stays under the 4 MB limit (redesigns use 2048px). Re-encoding also drops
+ * camera metadata. Falls back to the original file when the browser can't resize it.
  */
-export async function shrinkForAnalysis(file: File | Blob, maxSide = 1024): Promise<Blob> {
+export async function shrinkForAnalysis(file: File | Blob, maxSide = 1024, quality = 0.85): Promise<Blob> {
   if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return file;
   try {
     const bmp = await createImageBitmap(file);
@@ -73,7 +100,7 @@ export async function shrinkForAnalysis(file: File | Blob, maxSide = 1024): Prom
     if (!ctx) return file;
     ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
     bmp.close?.();
-    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', quality));
     return blob && blob.size > 0 ? blob : file;
   } catch { return file; }
 }

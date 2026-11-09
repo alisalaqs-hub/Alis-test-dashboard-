@@ -107,7 +107,7 @@ async function checkListingPhotos(job: JobRow, progress: (t: string) => Promise<
   if (!/^[0-9a-f-]{36}$/i.test(listingId)) return { checked: 0, skipped: 0, failed: 0 };
   if (!(await hasPhotoConsent(job.user_id))) return { checked: 0, skipped: 0, failed: 0, consent: false }; // withdrawn since it was queued
   const total = (await one<{ n: number }>('SELECT count(*)::int n FROM listing_photos WHERE listing_id = $1 AND ai_checked_at IS NULL', [listingId]))?.n ?? 0;
-  let checked = 0, skipped = 0, failed = 0, limited = false;
+  let checked = 0, skipped = 0, failed = 0, limited = false, withdrawn = false;
   const skip = async (ids: string[]) => { if (ids.length) { await q('UPDATE listing_photos SET ai_checked_at = now() WHERE id = ANY($1)', [ids]); skipped += ids.length; } };
   // Checked, but no usable analysis: shown as "Couldn't be checked" (any earlier analysis is cleared, as it may no longer apply).
   const fail = async (ids: string[]) => { if (ids.length) { await q('UPDATE listing_photos SET ai_checked_at = now(), ai_room = NULL, ai_alt = NULL, ai_quality = NULL, ai_features = NULL, ai_flags = NULL WHERE id = ANY($1)', [ids]); failed += ids.length; } };
