@@ -534,6 +534,19 @@ describe('photo consent', () => {
       expect(audit.map((a) => a.action)).toEqual(['consent.ai_images_withdrawn', 'consent.ai_images_withdrawn']);
     } finally { ai.restore(); }
   });
+
+  it('stops between batches when consent is withdrawn during a run', async () => {
+    const { c, ref, user } = await newListing({}, { consent: true });
+    // The person withdraws while the first batch is being checked.
+    const ai = mockOpenAI({ chat: async (body) => { await q(`UPDATE consents SET withdrawn_at = now() WHERE user_id = $1 AND withdrawn_at IS NULL`, [user.id]); return visionReply(body); } });
+    try {
+      const up = await upload(c, ref, Array.from({ length: 6 }, (_, i) => ({ name: `p${i}.png`, data: i % 2 ? FRONT : WIDE_KITCHEN })));
+      expect(up.status).toBe(201);
+      expect(visionCalls(ai)).toHaveLength(1);
+      expect((await jobsFor(ref))[0].output).toEqual({ checked: 4, skipped: 0, failed: 0, consent: false });
+      expect(await q('SELECT 1 FROM listing_photos p JOIN listings l ON l.id = p.listing_id WHERE l.ref = $1 AND p.ai_checked_at IS NULL', [ref])).toHaveLength(2);
+    } finally { ai.restore(); }
+  });
 });
 
 /* ───────── per-person daily allowance for background photo checks ───────── */

@@ -9,6 +9,8 @@
 .sk-pill.inferred { background: var(--gold-soft); color: var(--gold); border-color: color-mix(in srgb, var(--gold) 35%, transparent); }
 .sk-pill.edited { background: var(--surface-2); color: var(--ink-2); }
 .sk-pill.missing { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
+.sk-alt-note { flex-basis: 100%; color: var(--ink-2); }
+.sk-alt-use { align-self: flex-start; min-height: 28px; }
 .sk-legend { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); margin: 0 0 10px; }
 
 /* ── red flags ── */

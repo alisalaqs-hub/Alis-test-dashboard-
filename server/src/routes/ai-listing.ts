@@ -112,12 +112,14 @@ async function checkListingPhotos(job: JobRow, progress: (t: string) => Promise<
   // Checked, but no usable analysis: shown as "Couldn't be checked" (any earlier analysis is cleared, as it may no longer apply).
   const fail = async (ids: string[]) => { if (ids.length) { await q('UPDATE listing_photos SET ai_checked_at = now(), ai_room = NULL, ai_alt = NULL, ai_quality = NULL, ai_features = NULL, ai_flags = NULL WHERE id = ANY($1)', [ids]); failed += ids.length; } };
   const meta = { purpose: 'listing.photos', userId: job.user_id };
+  // Consent and the allowance are checked before every call, so withdrawing consent stops a long run between batches.
   const vision = async (imgs: ImageIn[]) => {
+    if (!(await hasPhotoConsent(job.user_id))) { withdrawn = true; return null; }
     if ((await photoCallsLeft(job.user_id)) <= 0) { limited = true; return null; }
     return analyseBatch(imgs, meta, { timeoutMs: config.ai.timeoutMs });
   };
   // Loops until nothing is left, so photos added while the job runs are picked up too (bounded).
-  while (checked + skipped + failed < JOB_MAX_PHOTOS && !limited) {
+  while (checked + skipped + failed < JOB_MAX_PHOTOS && !limited && !withdrawn) {
     const rows = await q<PhotoRow>(`SELECT * FROM listing_photos WHERE listing_id = $1 AND ai_checked_at IS NULL ORDER BY position, created_at LIMIT ${JOB_BATCH}`, [listingId]);
     if (!rows.length) break;
     const loaded = await Promise.all(rows.map(async (r) => {
@@ -167,7 +169,7 @@ async function checkListingPhotos(job: JobRow, progress: (t: string) => Promise<
     }
     await progress(`Checked ${checked + skipped + failed} of ${Math.max(total, checked + skipped + failed)} photos`);
   }
-  return { checked, skipped, failed, ...(limited ? { limited: true } : {}) };
+  return { checked, skipped, failed, ...(limited ? { limited: true } : {}), ...(withdrawn ? { consent: false as const } : {}) };
 }
 
 export async function aiListingRoutes(app: FastifyInstance) {

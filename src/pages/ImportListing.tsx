@@ -10,7 +10,7 @@ import { AiDisclaimer, AiLabel, AiThinking, AiUnavailable } from '../components/
 import { useStore } from '../store';
 import { aiPost, useAi } from '../lib/ai/core';
 import { ApiError } from '../lib/api';
-import { combineFlags, combineQuestions, foundOf, isRuleQuestion, missingOf, rulesOnlyResult, type FieldKey, type ImportResult, type ImportValues, type RedFlag } from '../lib/ai/importer';
+import { combineFlags, combineQuestions, FIELD_LABEL, foundOf, isRuleQuestion, missingOf, rulesOnlyResult, type FieldKey, type ImportResult, type ImportValues, type RedFlag } from '../lib/ai/importer';
 import '../components/ai/studio.css';
 
 const MAX_TEXT = 15_000;
@@ -82,7 +82,20 @@ export default function ImportListing() {
     if (edited.has(k)) body = <span className="sk-pill edited">Edited by you</span>;
     else if (!info || value === undefined || value === '') body = <span className="sk-pill missing">Not found</span>;
     else body = <><span className={`sk-pill ${info.confidence}`}>{info.confidence === 'stated' ? 'Stated' : 'Inferred: please check'}</span>{info.evidence && <q>{info.evidence}</q>}</>;
-    return <span className="sk-prov" id={id}>{body}</span>;
+    // Streetkey AI and the built-in reader disagreed: the built-in value is shown, with the AI's reading to compare.
+    const alt = !edited.has(k) && info?.alt && String(info.alt.value) !== String(value ?? '') ? info.alt : null;
+    return <>
+      <span className="sk-prov" id={id}>{body}{alt && <span className="sk-alt-note">Streetkey AI read {altText(k, alt.value)}{alt.evidence ? <> from <q>{alt.evidence}</q></> : null}</span>}</span>
+      {alt && <button type="button" className="btn ghost sm sk-alt-use" onClick={() => set(k, alt.value as never)} aria-label={`Use ${altText(k, alt.value)} for the ${FIELD_LABEL[k]}`}>Use AI’s reading</button>}
+    </>;
+  };
+  const altText = (k: FieldKey, v: string | number) => {
+    if (typeof v !== 'number') return String(v);
+    if (k === 'price') return fields.listing === 'rent' ? `${gbp(v)} pcm` : gbp(v);
+    if (k === 'serviceChargeAnnual' || k === 'groundRentAnnual') return `${gbp(v)} a year`;
+    if (k === 'floorArea') return `${v} m²`;
+    if (k === 'leaseYears') return `${v} years`;
+    return String(v);
   };
   const field = (k: FieldKey, label: string, control: (id: string, describedBy: string) => ReactNode) => {
     const id = `${uid}-${k}`;
