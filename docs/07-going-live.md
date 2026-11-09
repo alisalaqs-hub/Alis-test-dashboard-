@@ -11,10 +11,11 @@ Preview address: `https://alisalaqs-hub.github.io/Alis-test-dashboard-/`
 
 What the preview includes: “Public preview” banner, `noindex` (search engines won't list the demo data), self-hosted fonts (no third-party requests), draft Privacy / Terms / Accessibility pages.
 
-## Stage 1b · The live site with accounts (server)
-Accounts, real listings with photos, enquiries, alerts, agent feeds and the AI room designer need the Streetkey server.
-It hosts the website and the API at one address. Follow **[08 · The back end](08-backend.md) → Put it live on Render**
-(`render.yaml` sets up the web service, database and hourly job). GitHub Pages can stay as a free static demo.
+## Stage 1b · The live site on Netlify (accounts, listings, AI)
+Accounts, real listings with photos, enquiries, alerts, agent feeds, admin and every AI feature run as Netlify
+Functions next to the website. Follow **[08 · The back end](08-backend.md) → Put it live on Netlify**:
+import the repository from GitHub (not drag-and-drop), add Netlify Database, set `OPENAI_API_KEY` and
+`ADMIN_EMAIL`, deploy, then confirm your admin account. GitHub Pages can stay as a free static demo.
 
 ## Stage 2 · Your own domain (e.g. streetkey.co.uk)
 1. Check the name: UKIPO trade mark search (classes 9, 35, 36, 37, 42) and Companies House.

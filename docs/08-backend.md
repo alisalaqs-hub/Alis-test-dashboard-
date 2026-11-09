@@ -1,122 +1,132 @@
-# 08 · The Streetkey back end
+# 08 · The Streetkey back end (Netlify + AI)
 
-The website now has a real server behind it. One Node.js service serves **the website and the API from the same address**, backed by a PostgreSQL database. Without the server (GitHub Pages, the shareable preview) the site still works in demo mode: nothing breaks, account features simply explain that they need the live site.
+Streetkey is one codebase that runs in three ways:
 
-## What it does
+| Where | What you get |
+|---|---|
+| **Netlify (recommended, production)** | The website plus the full back end as Netlify Functions: accounts, real listings with photos, enquiries, alerts, agent feeds, admin, and every AI feature. |
+| Any Node host (Render, Fly.io, a VPS) | The same back end as one long-running server (`render.yaml`, `Dockerfile`). |
+| Static preview (GitHub Pages, shared previews) | The website only. AI and account features explain that they need the live site; everything else falls back to Streetkey's built-in rules. |
 
-| Area | What people can do | Where |
+## How it fits together on Netlify
+
+```
+Browser ── static site (dist/, from Netlify's CDN)
+   │
+   ├── /api/*     → netlify/functions/api.mts        the whole API (Fastify app, ~30 s per request)
+   ├── /media/*   → netlify/functions/media.mts      photos and AI images from Netlify Blobs
+   │
+   │   AI jobs (image redesigns, photo analysis, listing reviews…)
+   ├──────────────→ netlify/functions/ai-worker-background.mts   up to 15 minutes, runs queued jobs
+   └── hourly     → netlify/functions/scheduled.mts             search alerts, job recovery, clean-up
+                       │
+        PostgreSQL (Netlify Database / Neon) · Netlify Blobs · OpenAI · Resend (email)
+```
+
+- **Database:** PostgreSQL. On Netlify use **Netlify Database** (it sets `NETLIFY_DB_URL` automatically) or any Postgres URL in `DATABASE_URL` (e.g. Neon). Migrations in `server/migrations/` run during the Netlify build and again (cheaply) on the first request of each new function instance.
+- **Files:** listing photos and AI images live in **Netlify Blobs**, served from `/media/...` with year-long caching.
+- **Slow AI work runs as jobs:** the request queues the job and answers immediately; a Netlify Background Function does the work; the page polls `GET /api/ai/jobs/:id`. Quick jobs can run inside a request if no worker picks them up.
+- **Email:** Resend. Without a key, emails are written to the function log (useful for the first admin's confirmation link).
+
+## Put it live on Netlify: step by step
+
+> **Don't drag and drop the `dist` folder.** That uploads only the website. The back end needs Netlify to build from GitHub.
+
+1. **Create the site.** netlify.com → *Add new site* → *Import an existing project* → GitHub → choose `alisalaqs-hub/Alis-test-dashboard-` and the branch `claude/ai-property-platform-uk-kwzcrf` (or `main` once merged). Netlify reads `netlify.toml`: build command `npm run build:netlify`, publish folder `dist`, functions in `netlify/functions`. Click **Deploy**.
+2. **Add a database.** Site → *Extensions* (or *Database*) → **Netlify Database** → create. It sets `NETLIFY_DB_URL` for you. (Alternative: create a free Neon project and add its connection string as `DATABASE_URL`.)
+3. **Add environment variables** (Site configuration → Environment variables). Full list with explanations in `.env.example`:
+   - `OPENAI_API_KEY`: from platform.openai.com → API keys. Add credit and set a monthly limit there.
+   - `ADMIN_EMAIL`: your email address (see step 5).
+   - `RESEND_API_KEY` and `EMAIL_FROM` (e.g. `Streetkey <hello@yourdomain.co.uk>`): from resend.com after verifying your domain. Optional at first.
+   - Optional: `AI_DAILY_TOKEN_BUDGET`, `AI_DAILY_IMAGES_PER_USER`, `AI_DAILY_REQUESTS_PER_USER`, `AI_DAILY_REQUESTS_PER_IP`, `AI_AUTO_APPROVE_LOW_RISK`, `AI_DISABLED`.
+4. **Redeploy** (Deploys → *Trigger deploy*). The build applies the database migrations.
+5. **Make yourself admin.** Open the site, *Sign in → Create account* with the same address as `ADMIN_EMAIL`, then click the confirmation link in the email (or, if email isn't set up yet, find the link in Netlify → *Logs → Functions → api*). Once confirmed you're the admin (this only works while no admin exists).
+6. **Check it.** Visit `/api/health` (should say `"ok": true` and `"ai": true`), then *Admin → AI* to see which OpenAI models were selected and today's usage.
+7. **Your domain.** Domain management → add your domain and follow the DNS steps. Then set `PUBLIC_URL` to `https://www.yourdomain.co.uk` and redeploy (used in emails).
+
+**Plan note:** long AI work (room redesigns, photo checks) uses Netlify **Background Functions**. If your Netlify plan doesn't include them, those AI tasks show "background processing isn't running on this site"; everything else works.
+
+## AI across the site
+
+All OpenAI traffic goes through `server/src/ai/core.ts`. Figures shown to people always come from Streetkey's own engines or the database; the AI explains, prioritises and writes, and code checks its output (money figures it didn't get from the engines are removed). Every AI result is labelled, and every feature falls back to Streetkey's built-in rules when AI is off or a call fails.
+
+| Where | What the AI does | Endpoints |
 |---|---|---|
-| Accounts | Create an account, sign in/out, confirm email, reset a forgotten password, change password, sign out other devices | `server/src/routes/auth.ts` |
-| Your data (UK GDPR) | Download everything held about you; delete your account (listings withdrawn, personal details removed) | `server/src/routes/me.ts` |
-| Listing a property | Owners and landlords create a listing, upload photos (location data stripped), see compliance checks, submit for review; edit, mark under offer / sold / let, withdraw | `server/src/routes/listings.ts` |
-| Review before publishing | Private listings wait in an admin queue; admins approve, request changes with a reason, mark ownership verified | `server/src/routes/admin.ts`, `/admin` page |
-| Search | Live listings appear in the site's normal search alongside demo listings (labelled), with full-text search and filters on the API | `GET /api/listings` |
-| Privacy for sellers | The public never sees a private seller's house number or full postcode; only the street, the district and an approximate location | `services/listings.ts` (`toDTO`) |
-| Enquiries & viewings | Buyers request a viewing or ask a question (no account needed); the lister is emailed; both sides continue in the inbox; replies are emailed | `server/src/routes/enquiries.ts`, `/account/inbox` |
-| Saved homes & alerts | Saved homes and searches sync to the account (merged from the device on sign-in); search alerts email new matches instantly, daily or weekly | `routes/me.ts`, `jobs/run.ts` |
-| Agent feeds | Agencies create a feed key and push their full stock as a BLM v3 file; changes update, missing properties are withdrawn; listings go live once an admin verifies the agency | `server/src/routes/feeds.ts`, `/account/agency` |
-| AI room redesign | Signed-in users upload a room photo; OpenAI restyles it while keeping walls, windows and layout; results are labelled AI-generated and kept in "AI designs"; daily limit per user | `server/src/routes/ai.ts`, `services/openai.ts` |
-| Listing analytics | With the visitor's consent, anonymous views/saves/enquiries per listing (no IP, no account, random session id) feed the lister's stats | `routes/events.ts` |
-| Audit trail | Sign-ins, listing changes, approvals, exports and deletions are logged for admins | `audit_log` table, `/admin` → Audit |
+| **Ask Streetkey** (floating button on desktop, *Ask* tab on phones) and *Ask anything about this home* on property pages | A chat assistant that uses tools wired to the engines: search homes, property facts and intelligence, stamp duty, renovation estimates, investment checks, mortgage payments, comparisons. Links and property cards are validated; figures are checked against tool results. | `POST /api/ai/chat` |
+| **Search** | Natural-language search turned into filters ("AI understood" chips you can remove), semantic re-ranking, and *Similar homes* on property pages. Never filters by protected characteristics. | `POST /api/ai/search/intent`, `POST /api/ai/search/rank`, `GET /api/ai/search/similar/:id` |
+| **List a property** | Description writer with code-enforced wording rules (no unverifiable claims, fixed rent for lettings, no discriminatory wording), photo checks with consent (room labels, alt text, quality tips, privacy flags, best order), price-guide explanation (figures from the engine), and a pre-submission check. | `POST /api/ai/listing/describe`, `/price-guide`, `/precheck`, `/photos/preview`, `POST /api/ai/listing/:ref/photos/check`, `GET /api/ai/listing/:ref/photos`, `GET/PUT /api/ai/listing/photos/consent` |
+| **Trust & safety** (admin) | Every submitted listing is reviewed automatically: OpenAI moderation of text and photos, scam signals (payment before viewing, price far below the area, contact details), material-information gaps, discrimination; a risk score with quoted evidence and a suggested message to the lister. Optional auto-approval of low-risk listings (`AI_AUTO_APPROVE_LOW_RISK`, off by default; AI never rejects). | `GET /api/ai/trust/pending`, `GET /api/ai/trust/listings/:ref`, `POST /api/ai/trust/listings/:ref/review`, `GET /api/ai/admin/overview` |
+| **Inbox** | New enquiries are screened for spam and scams (filtered ones aren't emailed and can be released with *Not spam*), triaged (buyer position, questions, urgency), and listers can ask for an editable *Suggested reply* (never sent automatically). | `GET /api/ai/inbox`, `GET /api/ai/inbox/:id`, `POST /api/ai/inbox/:id/suggest-reply`, `POST /api/ai/inbox/:id/unfilter` |
+| **My listings / Owner dashboard** | Performance insights per listing with prioritised actions. | `GET /api/ai/listings/:ref/insights` |
+| **Check any listing** (import) | Extracts facts from pasted listing text (stated vs inferred, quoted evidence), red flags and questions to ask. Links are never visited. | `POST /api/ai/import/extract` |
+| **Design studio** | Photo-real room redesign as a background job (consent, daily limit, labelled), brief reader with costs from the design engine, and *Analyse this room*. | `POST /api/ai/room-image`, `GET /api/ai/room-images`, `POST /api/ai/design/brief`, `POST /api/ai/design/describe-photo` |
+| **Costs, investment, My Home** | Renovation estimate from photos (vision → engine scope → estimate; photos deleted after), *Explain this estimate*, investment verdict (never more optimistic than the rules), and a personal home-improvement plan. | `POST /api/ai/refurb/from-photos`, `/refurb/explain`, `/invest/explain`, `/my-home/plan` |
+| **Agents, landlords, developers** | Dashboard briefings grounded in the page's figures (or, for agency members, their live listings), and AI proposals on the automation page that still need human approval. | `POST /api/ai/briefing`, `POST /api/ai/automation/run` |
+| Shared | Job polling and AI status. | `GET /api/ai/jobs/:id`, `GET /api/ai/status` |
 
-## How it's built
+### Models
 
-- **Server:** Node 22, TypeScript, [Fastify](https://fastify.dev), `pg`, `zod`. Built to a single bundle with esbuild (`npm run server:build`).
-- **Database:** PostgreSQL 14+ (16 recommended). Numbered SQL migrations in `server/migrations/` run automatically when the server starts (`npm run db:migrate` runs them by hand). `db/schema.sql` remains the long-range design (PostGIS, lettings, contractors); new tables move into migrations as features ship.
-- **Shared code:** the server reuses the website's own engines, so the compliance checks, the BLM parser and the search that powers alerts behave exactly like the site. API shapes live in `src/lib/apiTypes.ts`.
-- **Website integration:** `src/lib/api.ts` (client), `src/lib/server.tsx` (detects the server, signed-in user, saved sync), `src/lib/listingAdapter.ts` (server listing → the site's `Property`), pages in `src/pages/Account.tsx` and `src/pages/Admin.tsx`.
-- **Storage:** photos and AI images on local disk (a persistent disk on the host) or any S3-compatible bucket such as Cloudflare R2 (`STORAGE_DRIVER=s3`).
-- **Email:** [Resend](https://resend.com). Without a key, emails are written to the server log so every flow still works in development.
-- **AI images:** OpenAI image editing (`gpt-image-1` by default, configurable). The key stays on the server.
+Leave the `OPENAI_*_MODEL` settings blank and Streetkey picks the best models your OpenAI account can use (checked every few hours): the newest plain `gpt-N` for writing and reasoning, the newest `gpt-N-mini` for fast tasks and photos, the newest `gpt-image-N` for room redesigns, `text-embedding-3-small` for search and `omni-moderation-latest` for moderation. If OpenAI rejects a parameter for a model, the server retries without it and remembers. *Admin → AI* shows what's in use.
+
+### Keeping costs under control
+
+- Site-wide daily token budget (`AI_DAILY_TOKEN_BUDGET`): AI pauses until the next day once reached; the site keeps working.
+- Per-person and per-visitor daily limits, per-feature per-minute/hour limits (stored in the database, so they hold across all serverless instances), and a daily image limit.
+- Fast models for parsing and classification, caching of repeatable results, jobs for slow work, consent before photos are analysed.
+- Every call is recorded in `ai_usage` (tokens, latency, purpose; never prompts or outputs).
+- Set a monthly spend limit in your OpenAI account too.
 
 ## Security and privacy
 
-- Passwords: scrypt (memory-hard), 10+ characters, common passwords refused; login errors never reveal whether an email is registered.
-- Sessions: random tokens in `HttpOnly`, `SameSite=Lax`, `Secure` cookies; only a SHA-256 of each token is stored. Resetting a password signs out every device.
-- Cross-site request protection: state-changing requests must come from the site itself (Origin check) as well as SameSite cookies.
-- Rate limits on sign-in, registration, password reset, enquiries, uploads and AI.
-- Uploads: file type detected from the bytes (JPEG, PNG, WebP only), size limit, EXIF/XMP metadata (including GPS) removed before storing.
-- Security headers: Content-Security-Policy, HSTS, nosniff, referrer policy, permissions policy.
-- Listings: compliance checks (EPC, council tax, tenure, leasehold details, minimum EPC E for lettings, discriminatory wording such as "No DSS", rental bidding) block submission; private listings are reviewed before publishing.
-- Enquiries: honeypot field and per-email limits against spam; the lister's contact details are never shown to enquirers; buyers' details go only to the lister.
-- AI: explicit consent before a photo is sent to OpenAI (recorded in `consents`); outputs labelled; per-user daily limit; rejected API keys are never logged or stored.
-- Analytics: only with consent; no personal data; raw events deleted after 13 months.
+- Passwords hashed with scrypt; sessions are random tokens in `HttpOnly`, `Secure`, `SameSite=Lax` cookies (only hashes stored); password reset signs out every device.
+- Cross-site request protection (origin checks); database-backed rate limits; Netlify edge rate limit on the API.
+- Uploads: real file type checked from the bytes, size limits, EXIF/XMP/GPS metadata removed.
+- Private sellers' house numbers and full postcodes are never shown publicly or given to the AI engines.
+- AI: untrusted text is fenced off from instructions; outputs are validated in code; no prompts, outputs or API keys are logged; OpenAI API data isn't used for training by default.
+- UK GDPR: data export (`/api/me/export`) includes automated assessments; account deletion removes personal data and AI summaries.
+- Listings: compliance checks block submission (EPC, council tax, tenure, leasehold details, EPC E+ for lettings, discriminatory wording, rental bidding), plus admin review.
 
 ## Run it on your computer
 
 ```bash
-# 1. PostgreSQL 16 running locally, then:
-createuser -P streetkey        # password: streetkey
+# PostgreSQL 16 running locally:
+createuser -P streetkey            # password: streetkey
 createdb -O streetkey streetkey
 createdb -O streetkey streetkey_test
 
-# 2. Install and start
 npm install
-npm run build                   # builds the website into dist/
-npm run server:dev              # API + website on http://localhost:8787 (auto-restarts)
+npm run build                      # website → dist/
+npm run server:dev                 # website + API on http://localhost:8787
 
-# 3. Make yourself an admin
-ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a long passphrase' npm run db:seed
+# Try every AI screen without an OpenAI key or cost:
+node scripts/mock-openai.mjs &     # a local stand-in that answers with valid sample data
+OPENAI_BASE_URL=http://127.0.0.1:8790/v1 OPENAI_API_KEY=mock npm run server:dev
 ```
 
-For website work with hot reload, run `npm run dev` (Vite) alongside `npm run server:dev` and set `VITE_API_URL=http://localhost:8787` in `.env.local`.
+Make yourself admin locally: `ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a long passphrase' npm run db:seed`.
 
-Tests: `npm test` (engines) and `npm run server:test` (API against a real `streetkey_test` database). GitHub Actions runs both on every push (`.github/workflows/ci.yml`).
+For website work with hot reload, run `npm run dev` alongside the server and set `VITE_API_URL=http://localhost:8787` in `.env.local`.
 
-## Put it live on Render (recommended)
+### Tests and checks
 
-`render.yaml` describes everything: the web service (website + API), a PostgreSQL database and an hourly job for search alerts and clean-up. Frankfurt is the closest Render region to the UK.
+| Command | What it checks |
+|---|---|
+| `npm test` | Engine and website logic tests |
+| `npm run server:test` | API and AI features against a real `streetkey_test` database, with a fake OpenAI |
+| `npm run typecheck` / `npm run server:typecheck` | TypeScript, website and server |
+| `npm run netlify:bundle-check -- --run` | Bundles the Netlify functions like Netlify does and runs the API bundle against PostgreSQL |
+| `npm run a11y` | axe WCAG 2.2 AA audit (see the script header for options) |
 
-1. Create an account at [render.com](https://render.com) and connect your GitHub account.
-2. **New → Blueprint**, choose `alisalaqs-hub/Alis-test-dashboard-`. Render reads `render.yaml`.
-3. Fill in the values it asks for:
-   - `PUBLIC_URL`: the address of the site, e.g. `https://streetkey.onrender.com` (later your own domain).
-   - `OPENAI_API_KEY`: from platform.openai.com → API keys (starts with `sk-`). Set a monthly spending limit there.
-   - `RESEND_API_KEY` and `EMAIL_FROM`: from resend.com after verifying your domain (e.g. `Streetkey <hello@streetkey.co.uk>`).
-   - `ADMIN_EMAIL`: your email.
-4. Deploy. When it's live, open the service's **Shell** and run once:
-   `ADMIN_PASSWORD='a long passphrase' npm run db:seed:prod`
-5. Sign in at `/#/admin` to review listings and verify agencies.
-6. Custom domain: Render → Settings → Custom domains; add the DNS records it shows at your registrar; then update `PUBLIC_URL`.
+GitHub Actions runs all of these on every push (`.github/workflows/ci.yml`).
 
-Rough running costs at launch: web service and disk, database and the hourly job together typically come to tens of pounds a month on Render's paid starter plans. OpenAI charges per image (pennies each at medium quality) and Resend has a free tier for low volumes. Check each provider's current pricing.
+## Other hosts
 
-**Other hosts:** the `Dockerfile` runs the same service anywhere (Fly.io, Railway, a VPS). Point `DATABASE_URL` at any PostgreSQL 14+ and set the same variables as `.env.example`.
+`render.yaml` (Render Blueprint: web service, PostgreSQL, hourly job) and the `Dockerfile` run the same back end as a single Node server; uploads go to a disk or any S3-compatible bucket (`STORAGE_DRIVER=s3`), and AI jobs run in-process.
 
-**GitHub Pages** keeps working as a free static demo of the site; the account features there say they need the live site.
+## Not built yet
 
-## Settings
-
-Every setting is listed with an explanation in `.env.example`. The essentials in production are `DATABASE_URL`, `PUBLIC_URL`, `RESEND_API_KEY`, `EMAIL_FROM` and `OPENAI_API_KEY`.
-
-## API summary
-
-All endpoints are JSON under `/api`. Errors look like `{ "error": { "code", "message", "fields" } }` with messages written for people.
-
-| Method & path | Who | Purpose |
-|---|---|---|
-| `GET /api/health` | anyone | Server and feature status |
-| `POST /api/auth/register` · `login` · `logout` · `verify` · `forgot` · `reset` · `change-password` · `resend-verification`; `GET /api/auth/me` | — | Accounts |
-| `PATCH /api/me` · `GET /api/me/export` · `DELETE /api/me` | signed in | Profile, data export, erasure |
-| `GET/PUT/DELETE /api/me/saved[/:key]` · `POST /api/me/saved/merge` | signed in | Saved homes |
-| `GET/POST /api/me/searches` · `PATCH/DELETE /api/me/searches/:id` | signed in | Saved searches & alerts |
-| `GET /api/listings` · `GET /api/listings/:ref` | anyone | Search and view live listings |
-| `POST /api/listings` · `PATCH /api/listings/:ref` · `POST …/submit` · `POST …/status` · `DELETE …` | lister | Manage a listing |
-| `POST /api/listings/:ref/photos` · `PATCH/DELETE …/photos/:id` · `PUT …/photos/order` | lister | Photos |
-| `GET /api/me/listings` · `GET /api/me/listings/:ref/stats` | lister | Dashboard and stats |
-| `POST /api/listings/:ref/enquiries` | anyone | Viewing request or question |
-| `GET /api/me/inbox` · `GET /api/enquiries/:id` · `POST …/messages` · `PATCH …` | participants | Conversations |
-| `POST /api/orgs` · `GET /api/me/orgs` · `GET/POST/DELETE /api/orgs/:id/feed-keys` · `GET /api/orgs/:id/feed-runs` | agency | Agency set-up and feed keys |
-| `POST /api/feeds/blm` | feed key | Upload full stock (BLM v3) |
-| `GET /api/ai/status` · `POST /api/ai/room-image` · `GET /api/ai/room-images` | signed in | AI room redesign |
-| `POST /api/events` | consented visitors | Anonymous listing analytics |
-| `GET /api/admin/summary` · `GET /api/admin/listings` · `POST …/approve` · `…/reject` · `…/verify-ownership` · `GET /api/admin/orgs` · `POST /api/admin/orgs/:id/verify` · `GET /api/admin/users` · `POST /api/admin/users/:id/role` · `GET /api/admin/audit` | admin | Operations |
-
-## Not built yet (next steps)
-
-- **Payments** (Stripe) for paid listing upgrades, agency subscriptions and API plans.
-- **AI assistant on the server** (Claude) answering questions about a listing from its verified data, replacing the on-device rule-based assistant.
-- **Real property data**: HM Land Registry price paid, EPC register, Ofsted schools, TfL/National Rail journey times and flood risk, replacing the demo figures in the intelligence profile.
-- **Identity and title checks** for "Verified owner" (an ID-verification provider plus HM Land Registry title lookup).
-- **Documents** (EPC certificates, floor plans, leases) with AI extraction, and a map/geo search using PostGIS.
-- **Lettings tools** (tenancies, deposits, compliance reminders) from the long-range schema.
+- Payments (Stripe) for listing upgrades, agency subscriptions and API plans.
+- Real property data: HM Land Registry prices, the EPC register, Ofsted, TfL/National Rail journey times, flood risk (the intelligence profile still uses demonstration figures for these).
+- Identity and HM Land Registry title checks for a "Verified owner" badge.
+- Documents (EPC certificates, floor plans, leases) with AI extraction; map search with PostGIS.
+- Lettings management tools (tenancies, deposits, compliance reminders).

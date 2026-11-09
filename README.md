@@ -15,7 +15,8 @@ npm test             # engine/assistant/agent/listing tests
 npm run build        # production build → dist/
 npm run build:single # single self-contained HTML → dist-single/index.html
 
-# The server (accounts, listings, enquiries, AI): needs PostgreSQL. Full guide: docs/08-backend.md
+# The back end (accounts, listings, enquiries, AI) runs on Netlify Functions; locally it needs PostgreSQL.
+# Full guide, including Netlify deployment: docs/08-backend.md
 npm run server:dev   # website + API on http://localhost:8787
 npm run server:test  # API tests against a real database
 ```
