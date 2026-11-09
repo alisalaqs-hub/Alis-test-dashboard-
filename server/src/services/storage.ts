@@ -5,7 +5,10 @@
  *  - s3:    any S3-compatible bucket (Cloudflare R2, AWS S3, Backblaze B2) with a public base URL.
  */
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { lookup as dnsLookup, type LookupAddress } from 'node:dns';
 import fs from 'node:fs/promises';
+import https from 'node:https';
+import net from 'node:net';
 import path from 'node:path';
 import { config } from '../config';
 
@@ -40,7 +43,7 @@ export async function putFile(key: string, body: Buffer, contentType: string): P
 }
 
 export async function getFile(key: string): Promise<Buffer | null> {
-  if (key.startsWith('ext:')) { const r = await fetch(key.slice(4), { signal: AbortSignal.timeout(15_000) }).catch(() => null); return r?.ok ? Buffer.from(await r.arrayBuffer()) : null; }
+  if (key.startsWith('ext:')) return fetchExternalImage(key.slice(4)).catch(() => null);
   if (config.storage.driver === 'netlify-blobs') {
     const b = await (await blobs()).get(key, { type: 'arrayBuffer' });
     return b ? Buffer.from(b) : null;
@@ -65,11 +68,140 @@ export async function getFileWithType(key: string): Promise<{ body: Buffer; cont
   return { body, contentType: ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'jpg' ? 'image/jpeg' : 'application/octet-stream' };
 }
 
+/** CDN cache tag for one media file, so a deleted file can be purged from Netlify's edge. */
+export const mediaTag = (key: string) => `m-${createHash('sha256').update(key).digest('hex').slice(0, 32)}`;
+
 export async function deleteFile(key: string) {
   if (key.startsWith('ext:')) return;
-  if (config.storage.driver === 'netlify-blobs') { await (await blobs()).delete(key).catch(() => {}); return; }
+  if (config.storage.driver === 'netlify-blobs') {
+    await (await blobs()).delete(key).catch(() => {});
+    // Best effort: the CDN copy would otherwise be served until it expires.
+    await import('@netlify/functions').then((m) => (m as { purgeCache?: (o: { tags: string[] }) => Promise<void> }).purgeCache?.({ tags: [mediaTag(key)] })).catch(() => {});
+    return;
+  }
   if (config.storage.driver === 's3') { await s3Request('DELETE', key).catch(() => {}); return; }
   await fs.unlink(safeLocal(key)).catch(() => {});
+}
+
+/* ---------- external (agent feed) photos: public HTTPS hosts only ---------- */
+
+/** Biggest external photo we'll download. */
+export const MAX_EXTERNAL_BYTES = 10 * 1024 * 1024;
+const EXTERNAL_TIMEOUT_MS = 15_000;
+const MAX_REDIRECTS = 3;
+
+/** True for a stored key that's safe to fetch: our own files, or an `ext:` URL on a public HTTPS host name. */
+export function fetchableExternal(key: string) {
+  if (!key.startsWith('ext:')) return true;
+  return safeExternalUrl(key.slice(4)) !== null;
+}
+
+/** The URL if it's https on a public-looking host name (no IP literals, credentials or internal names), else null. */
+export function safeExternalUrl(raw: string): URL | null {
+  try {
+    const u = new URL(raw);
+    const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (u.protocol !== 'https:' || u.username || u.password) return null;
+    if (u.port && u.port !== '443') return null;
+    if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.home.arpa') || !h.includes('.')) return null;
+    if (/^[\d.]+$/.test(h) || /^0x/i.test(h) || h.includes(':') || net.isIP(h)) return null; // IP literals (incl. IPv6 and odd forms): use a host name
+    return u;
+  } catch { return null; }
+}
+
+/** Addresses we never connect to: loopback, private, link-local (cloud metadata), CGNAT, ULA, multicast, reserved. */
+export function isBlockedAddress(ip: string): boolean {
+  const v = ip.toLowerCase().replace(/%.*$/, '');
+  if (net.isIPv4(v)) {
+    const [a, b, c] = v.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || a >= 224
+      || (a === 100 && b >= 64 && b <= 127)          // CGNAT
+      || (a === 169 && b === 254)                    // link-local, cloud metadata
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || (a === 192 && b === 0 && (c === 0 || c === 2))
+      || (a === 198 && (b === 18 || b === 19))       // benchmarking
+      || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113);
+  }
+  if (!net.isIPv6(v)) return true;
+  const mapped = v.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isBlockedAddress(mapped[1]);
+  return v === '::' || v === '::1' || v.startsWith('::')  // unspecified, loopback, IPv4-compatible/mapped (hex form)
+    || /^f[cd]/.test(v)                                    // ULA fc00::/7
+    || /^fe[89ab]/.test(v)                                 // link-local fe80::/10
+    || v.startsWith('ff')                                  // multicast
+    || v.startsWith('64:ff9b:') || v.startsWith('100:')   // NAT64, discard
+    || v.startsWith('2001:db8') || v.startsWith('2002:'); // documentation, 6to4
+}
+
+/**
+ * DNS lookup that refuses blocked addresses. Used as the socket's lookup, so the address we check is the address
+ * we connect to (no DNS rebinding between a check and the request).
+ */
+function guardedLookup(hostname: string, options: { all?: boolean; family?: number }, cb: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void) {
+  dnsLookup(hostname, { all: true, family: options.family ?? 0 }, (err, addresses) => {
+    if (err) return cb(err, '', 4);
+    const list = addresses as LookupAddress[];
+    if (!list.length || list.some((a) => isBlockedAddress(a.address))) {
+      return cb(Object.assign(new Error(`${hostname} resolves to a private address`), { code: 'EBLOCKEDADDR' }), '', 4);
+    }
+    if (options.all) cb(null, list);
+    else cb(null, list[0].address, list[0].family);
+  });
+}
+
+const IMAGE_TYPE = /^image\/(jpeg|jpg|pjpeg|png|webp|gif|avif)\b/;
+type Fetched = { status: number; location?: string; contentType: string; body?: Buffer };
+function requestOnce(u: URL, signal: AbortSignal): Promise<Fetched> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(u, {
+      lookup: guardedLookup as unknown as typeof dnsLookup,
+      signal,
+      headers: { accept: 'image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8', 'user-agent': 'StreetkeyBot/1.0 (+listing photo check)' },
+    }, (res) => {
+      const status = res.statusCode ?? 0;
+      const contentType = String(res.headers['content-type'] ?? '').toLowerCase();
+      if (status >= 300 && status < 400) { res.resume(); return resolve({ status, location: res.headers.location, contentType }); }
+      if (status !== 200) { res.resume(); return resolve({ status, contentType }); }
+      if (!IMAGE_TYPE.test(contentType)) { res.destroy(); return resolve({ status: 415, contentType }); }
+      const declared = Number(res.headers['content-length'] ?? 0);
+      if (declared > MAX_EXTERNAL_BYTES) { res.destroy(); return resolve({ status: 413, contentType }); }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      res.on('data', (c: Buffer) => {
+        size += c.length;
+        if (size > MAX_EXTERNAL_BYTES) { res.destroy(); resolve({ status: 413, contentType }); return; }
+        chunks.push(c);
+      });
+      res.on('end', () => resolve({ status, contentType, body: Buffer.concat(chunks) }));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Download an external photo safely: https only, public host names that resolve only to public addresses,
+ * redirects followed by hand (each one re-checked, at most 3), image content types only, 10 MB cap, 15 s overall.
+ * Returns null for anything that doesn't meet those rules.
+ */
+let transport: (u: URL, signal: AbortSignal) => Promise<Fetched> = requestOnce;
+/** Tests only: replace the network call (URL, redirect, type and size rules still apply). */
+export function setExternalTransport(t: typeof transport | null) { transport = t ?? requestOnce; }
+
+export async function fetchExternalImage(raw: string): Promise<Buffer | null> {
+  const signal = AbortSignal.timeout(EXTERNAL_TIMEOUT_MS);
+  let u = safeExternalUrl(raw);
+  for (let hop = 0; u && hop <= MAX_REDIRECTS; hop++) {
+    const r = await transport(u, signal);
+    if (r.status >= 300 && r.status < 400) {
+      if (!r.location) return null;
+      u = safeExternalUrl(new URL(r.location, u).toString());
+      continue;
+    }
+    return r.status === 200 && IMAGE_TYPE.test(r.contentType) && r.body?.length && r.body.length <= MAX_EXTERNAL_BYTES ? r.body : null;
+  }
+  return null;
 }
 
 function safeLocal(key: string) {

@@ -99,6 +99,11 @@ export const config = {
     dailyRequestsPerIp: int(env.AI_DAILY_REQUESTS_PER_IP, 60),
     /** Site-wide safety net: AI pauses for the day once this many tokens have been used. 0 = no cap. */
     dailyTokenBudget: int(env.AI_DAILY_TOKEN_BUDGET, 3_000_000),
+    /** Tokens one person (signed in) or one visitor network may use per 24 hours. 0 = no per-person cap. Safety checks don't count. */
+    dailyTokensPerUser: int(env.AI_DAILY_TOKENS_PER_USER, 250_000),
+    dailyTokensPerIp: int(env.AI_DAILY_TOKENS_PER_IP, 60_000),
+    /** Room redesigns per day across the whole site (images are the most expensive AI calls). 0 = no cap. */
+    dailyImagesSite: int(env.AI_DAILY_IMAGES_SITE, 300),
     /** Per-call timeout for quick (in-request) AI calls; serverless requests must finish within ~30s. */
     quickTimeoutMs: int(env.AI_QUICK_TIMEOUT_MS, runtime === 'netlify' ? 24_000 : 45_000),
     /** Per-call timeout for background jobs (image editing, photo analysis). */

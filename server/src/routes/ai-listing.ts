@@ -26,7 +26,7 @@ import { PRICE_TIMING, PriceGuideBody, priceNarrative, priceRange } from '../ai/
 import { audit, HttpError, parse, requireUser } from '../services/http';
 import { enforce, hit } from '../services/ratelimit';
 import { sniffImage } from '../services/images';
-import { getFile } from '../services/storage';
+import { fetchableExternal, getFile } from '../services/storage';
 import { editable } from './listings';
 
 const PREVIEW_MAX_FILES = 6;
@@ -83,18 +83,8 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 /** Total image bytes per vision call (base64 inflates this by a third). */
 const BATCH_BYTES = 24 * 1024 * 1024;
 
-/** External (agent feed) photos are only fetched from public HTTPS hosts. */
-export function fetchableExternal(key: string) {
-  if (!key.startsWith('ext:')) return true;
-  try {
-    const u = new URL(key.slice(4));
-    const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    if (u.protocol !== 'https:' || u.username || u.password) return false;
-    if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal') || !h.includes('.')) return false;
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(h) || h.includes(':')) return false; // IP literals (incl. IPv6): use a host name
-    return true;
-  } catch { return false; }
-}
+/** External (agent feed) photos are only fetched from public HTTPS hosts (enforced again inside getFile). */
+export { fetchableExternal };
 
 /**
  * Check every not-yet-checked photo of a listing, up to 4 per vision call, storing results as each batch finishes.

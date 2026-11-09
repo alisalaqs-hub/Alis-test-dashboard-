@@ -5,6 +5,8 @@
  *   app.post('/api/auth/login', { preHandler: limit('login', 10, 60) }, ...)
  *   await enforce(req, 'ai.chat', 30, 3600, 'user')
  */
+import { createHash } from 'node:crypto';
+import net from 'node:net';
 import type { FastifyRequest } from 'fastify';
 import { config } from '../config';
 import { one } from '../db';
@@ -24,7 +26,37 @@ export async function hit(key: string, max: number, windowSec: number) {
 }
 
 export type LimitBy = 'ip' | 'user' | 'user-or-ip';
-const who = (req: FastifyRequest, by: LimitBy) => (by === 'ip' ? `ip:${req.ip}` : by === 'user' ? `u:${req.user?.id ?? `ip:${req.ip}`}` : req.user ? `u:${req.user.id}` : `ip:${req.ip}`);
+/**
+ * The key for a visitor's network. IPv4 addresses are used as they are (IPv4-mapped IPv6 is unwrapped);
+ * IPv6 addresses are cut to their /64, because one home or server usually controls a whole /64 and could
+ * otherwise rotate addresses to get round every limit.
+ */
+export function ipKey(ip: string | undefined | null): string {
+  let v = String(ip ?? '').trim().toLowerCase().replace(/%.*$/, '');
+  const mapped = v.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) v = mapped[1];
+  if (net.isIPv4(v)) return `ip:${v}`;
+  if (net.isIPv6(v)) return `ip6:${expandV6(v).slice(0, 4).join(':')}::/64`;
+  return `ip:${v || 'unknown'}`;
+}
+function expandV6(v: string): string[] {
+  const [head, tail = ''] = v.split('::');
+  const h = head ? head.split(':') : [];
+  const t = v.includes('::') && tail ? tail.split(':') : [];
+  // An embedded IPv4 tail (e.g. 64:ff9b::1.2.3.4) counts as two groups.
+  const last = (v.includes('::') ? t : h).at(-1) ?? '';
+  if (net.isIPv4(last)) {
+    const [a, b, c, d] = last.split('.').map(Number);
+    const groups = [((a << 8) | b).toString(16), ((c << 8) | d).toString(16)];
+    if (v.includes('::')) t.splice(-1, 1, ...groups); else h.splice(-1, 1, ...groups);
+  }
+  const fill = v.includes('::') ? Array(Math.max(0, 8 - h.length - t.length)).fill('0') : [];
+  return [...h, ...fill, ...t].map((g) => g.replace(/^0+(?=.)/, ''));
+}
+/** A visitor's network as a stable, non-reversible id (for usage records). */
+export const anonId = (ip: string | undefined | null) => `ip:${createHash('sha256').update(ipKey(ip)).digest('hex').slice(0, 24)}`;
+
+const who = (req: FastifyRequest, by: LimitBy) => (by === 'ip' ? ipKey(req.ip) : by === 'user' ? `u:${req.user?.id ?? ipKey(req.ip)}` : req.user ? `u:${req.user.id}` : ipKey(req.ip));
 
 export async function enforce(req: FastifyRequest, name: string, max: number, windowSec: number, by: LimitBy = 'ip', message?: string) {
   const r = await hit(`${name}:${who(req, by)}`, max, windowSec);

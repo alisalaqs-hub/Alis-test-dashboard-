@@ -1,6 +1,7 @@
 import { afterAll, beforeAll } from 'vitest';
 import { pool } from '../src/db';
 import { migrate } from '../src/migrate';
+import { setExternalTransport } from '../src/services/storage';
 
 /** Outbound HTTP is faked in tests: postcodes.io answers from a tiny table; tests can add handlers. */
 type Handler = (url: string, init?: RequestInit) => Promise<Response> | Response;
@@ -22,6 +23,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) return realFetch(input, init);
   throw new Error(`Unexpected outbound request in tests: ${url}`);
 }) as typeof fetch;
+
+// External (feed) photos normally use node:https with a DNS guard; in tests they go through the fake fetch above.
+setExternalTransport(async (u) => {
+  const r = await globalThis.fetch(u.href, { redirect: 'manual' });
+  return { status: r.status, location: r.headers.get('location') ?? undefined, contentType: (r.headers.get('content-type') ?? '').toLowerCase(), body: Buffer.from(await r.arrayBuffer()) };
+});
 
 beforeAll(async () => {
   // Fresh schema for every test file.

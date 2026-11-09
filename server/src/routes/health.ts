@@ -2,11 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import type { HealthDTO } from '../../../src/lib/apiTypes';
 import { config } from '../config';
 import { one } from '../db';
-import { aiAvailable } from '../ai/core';
+import { aiAvailable, refreshAiState } from '../ai/core';
 
 export async function healthRoutes(app: FastifyInstance) {
   app.get('/api/health', async (_req, reply) => {
     const db = await one('SELECT 1 AS ok').then(() => true).catch(() => false);
+    if (db) await refreshAiState().catch(() => {});
     const body: HealthDTO = {
       ok: db,
       version: process.env.RENDER_GIT_COMMIT?.slice(0, 7) ?? process.env.GIT_SHA ?? 'dev',

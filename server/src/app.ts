@@ -22,7 +22,7 @@ import { aiInboxRoutes } from './routes/ai-inbox';
 import { aiImportRoutes } from './routes/ai-import';
 import { aiPropertyRoutes } from './routes/ai-property';
 import { aiBriefingRoutes } from './routes/ai-briefing';
-import { AiError } from './ai/core';
+import { actorScope, AiError } from './ai/core';
 import { clearHooks } from './ai/hooks';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
@@ -57,6 +57,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.decorateRequest('user', null);
   app.decorateRequest('sessionHash', null);
 
+  // Each request gets its own slot for "who is using AI", so per-person token caps cover every AI call it makes.
+  app.addHook('onRequest', (_req, _reply, done) => actorScope(done));
   app.addHook('onRequest', async (req, reply) => {
     const url = req.url;
     if (url.startsWith('/api/')) {

@@ -10,6 +10,7 @@
  * - Accounts every call (tokens, latency) and enforces a site-wide daily token budget.
  * - Never logs or stores prompts, outputs or API keys.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { config } from '../config';
 import { one, q } from '../db';
 import { conforms } from './schema';
@@ -21,7 +22,66 @@ export class AiError extends Error {
   constructor(message: string, public userMessage: string, public status = 502, public code = 'ai_failed') { super(message); }
 }
 
-export const aiAvailable = () => !config.ai.disabled && !!config.ai.openaiKey;
+/* ───────────────────────── availability ───────────────────────── */
+/**
+ * AI is "available" when it's switched on, has a key, isn't paused (the OpenAI account ran out of credit)
+ * and today's site-wide budget isn't used up. While unavailable, every feature uses its built-in rules.
+ * Pause and budget state are cached per instance and refreshed by refreshAiState() / every budget check.
+ */
+let pausedUntil = 0;
+let pauseReason: 'quota' | null = null;
+let stateAt = 0;
+const configured = () => !config.ai.disabled && !!config.ai.openaiKey;
+export const aiAvailable = () => configured() && pausedUntil <= Date.now() && !budgetExhausted();
+export type AiOffReason = 'disabled' | 'no_key' | 'paused' | 'budget' | null;
+export function aiOffReason(): AiOffReason {
+  if (config.ai.disabled) return 'disabled';
+  if (!config.ai.openaiKey) return 'no_key';
+  if (pausedUntil > Date.now()) return 'paused';
+  if (budgetExhausted()) return 'budget';
+  return null;
+}
+/** Re-reads the shared pause flag and today's usage (at most every 30 s unless forced). */
+export async function refreshAiState(force = false) {
+  if (!configured() || (!force && Date.now() - stateAt < 30_000)) return;
+  stateAt = Date.now();
+  const row = await one<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'ai_paused_until'`).catch(() => null);
+  const until = row ? Date.parse(JSON.parse(row.value).until ?? '') : 0;
+  pausedUntil = Number.isFinite(until) ? until : 0;
+  pauseReason = pausedUntil > Date.now() ? 'quota' : null;
+  await loadBudget(true);
+}
+export const aiPause = () => (pausedUntil > Date.now() ? { until: new Date(pausedUntil).toISOString(), reason: pauseReason } : null);
+
+/** The OpenAI account has no credit left: pause AI everywhere for 10 minutes and tell the admin (once per pause). */
+async function pauseForQuota() {
+  const wasPaused = pausedUntil > Date.now();
+  pausedUntil = Date.now() + 10 * 60_000;
+  pauseReason = 'quota';
+  console.error('[ai] OpenAI reports no remaining credit (insufficient_quota). AI features are paused for 10 minutes; top up the OpenAI account.');
+  const prev = await one<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'ai_paused_until'`).catch(() => null);
+  const prevUntil = prev ? Date.parse(JSON.parse(prev.value).until ?? '') : 0;
+  await q(`INSERT INTO app_settings (key, value, updated_at) VALUES ('ai_paused_until', $1, now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [JSON.stringify({ until: new Date(pausedUntil).toISOString(), reason: 'quota' })]).catch(() => {});
+  if (!wasPaused && !(prevUntil > Date.now()) && config.adminEmail) {
+    const { sendMail } = await import('../services/email');
+    await sendMail({
+      to: config.adminEmail, template: 'ai_quota', subject: 'Streetkey AI is paused: the OpenAI account is out of credit',
+      text: 'OpenAI rejected a request because the account has no credit left (insufficient_quota).\n\nStreetkey has paused AI features and is using its built-in rules; it will try again in about 10 minutes.\n\nTo fix it: platform.openai.com → Settings → Billing → add credit, and check the monthly limit.\n\nThe rest of the site keeps working.',
+    }).catch(() => {});
+  }
+}
+
+/* ───────────────────────── who is using AI (for per-person token caps) ───────────────────────── */
+const actorStore = new AsyncLocalStorage<{ actor: string | null }>();
+/** Run fn with AI usage charged to `actor` ('u:<id>' or an anonymised 'ip:…'). Jobs use this. */
+export const withActor = <T>(actor: string | null, fn: () => T): T => actorStore.run({ actor }, fn);
+/** Fastify onRequest hook body: gives the request its own actor slot, filled in by aiGuard. */
+export const actorScope = (done: () => void) => actorStore.run({ actor: null }, done);
+export function setActor(actor: string) { const st = actorStore.getStore(); if (st) st.actor = actor; }
+export const currentActor = () => actorStore.getStore()?.actor ?? null;
+/** Safety work (trust reviews, enquiry screening, moderation) keeps a reserve of the budget and isn't capped per person. */
+export const isSafetyPurpose = (purpose: string) => /^(trust\.|inbox\.(screen|triage)$)|moderation$/.test(purpose);
 
 /* ───────────────────────── models ───────────────────────── */
 const DEFAULTS: Record<Role, string> = { main: 'gpt-4.1', fast: 'gpt-4.1-mini', vision: 'gpt-4.1-mini', image: 'gpt-image-1', embedding: 'text-embedding-3-small', moderation: 'omni-moderation-latest' };
@@ -40,22 +100,38 @@ function pick(ids: string[], role: Role): string | null {
 }
 
 let modelCache: { at: number; ids: string[] } | null = null;
+let modelsRefresh: Promise<string[]> | null = null;
+const MODELS_TTL = 6 * 3600_000;
+/** The account's model list: memory, then the shared copy in the database (6 h), then OpenAI (3 s timeout in requests). */
 async function accountModels(): Promise<string[]> {
-  if (modelCache && Date.now() - modelCache.at < 6 * 3600_000) return modelCache.ids;
+  if (modelCache && Date.now() - modelCache.at < MODELS_TTL) return modelCache.ids;
+  modelsRefresh ??= loadModels(MODELS_TTL, 3000).finally(() => { modelsRefresh = null; });
+  return modelsRefresh;
+}
+async function loadModels(maxAgeMs: number, timeoutMs: number): Promise<string[]> {
   try {
     const stored = await one<{ value: string; updated_at: Date }>(`SELECT value, updated_at FROM app_settings WHERE key = 'openai_models'`);
-    if (stored && Date.now() - stored.updated_at.getTime() < 6 * 3600_000) { modelCache = { at: stored.updated_at.getTime(), ids: JSON.parse(stored.value) }; return modelCache.ids; }
+    if (stored && Date.now() - stored.updated_at.getTime() < maxAgeMs) { modelCache = { at: stored.updated_at.getTime(), ids: JSON.parse(stored.value) }; return modelCache.ids; }
   } catch { /* table may not exist yet */ }
   try {
-    const r = await fetch(`${config.ai.openaiBase}/models`, { headers: { Authorization: `Bearer ${config.ai.openaiKey}` }, signal: AbortSignal.timeout(8000) });
+    const r = await fetch(`${config.ai.openaiBase}/models`, { headers: { Authorization: `Bearer ${config.ai.openaiKey}` }, signal: AbortSignal.timeout(timeoutMs) });
     if (!r.ok) throw new Error(`models ${r.status}`);
     const ids = ((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id);
     modelCache = { at: Date.now(), ids };
     await q(`INSERT INTO app_settings (key, value, updated_at) VALUES ('openai_models', $1, now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [JSON.stringify(ids)]).catch(() => {});
     return ids;
   } catch {
-    return [];
+    // Remember the failure for 5 minutes so a slow or failing /models doesn't delay every AI request.
+    modelCache = { at: Date.now() - MODELS_TTL + 5 * 60_000, ids: modelCache?.ids ?? [] };
+    return modelCache.ids;
   }
+}
+/** Hourly refresh (scheduled function): fetches the list outside any request once it's 5 h old, so requests rarely wait. */
+export async function refreshModels() {
+  if (!configured()) return null;
+  modelCache = null;
+  await loadModels(5 * 3600_000, 10_000);
+  return modelsInUse();
 }
 
 /** The model used for a role: env override, else best available on the account, else a safe default. */
@@ -73,21 +149,65 @@ const isReasoning = (model: string) => /^(gpt-5|o\d)/.test(model);
 const rejected = new Map<string, Set<string>>();
 
 /* ───────────────────────── budget & accounting ───────────────────────── */
+/** Share of the daily budget ordinary features may use; the rest is kept for safety work (trust, screening). */
+export const SAFETY_RESERVE = 0.15;
 let budgetCache: { at: number; used: number } | null = null;
-async function checkBudget() {
+function budgetExhausted() {
   const cap = config.ai.dailyTokenBudget;
-  if (!cap) return;
-  if (!budgetCache || Date.now() - budgetCache.at > 60_000) {
+  return !!cap && !!budgetCache && Date.now() - budgetCache.at < 5 * 60_000 && budgetCache.used >= cap * (1 - SAFETY_RESERVE);
+}
+async function loadBudget(force = false) {
+  if (!config.ai.dailyTokenBudget) return;
+  if (force || !budgetCache || Date.now() - budgetCache.at > 60_000) {
     const r = await one<{ n: number }>(`SELECT coalesce(sum(input_tokens + output_tokens), 0)::bigint AS n FROM ai_usage WHERE at > now() - interval '24 hours'`).catch(() => ({ n: 0 }));
     budgetCache = { at: Date.now(), used: Number(r?.n ?? 0) };
   }
-  if (budgetCache.used >= cap) throw new AiError('daily token budget reached', 'Streetkey AI is resting until tomorrow (daily limit reached). The rest of the site works as normal.', 503, 'ai_budget');
+}
+/** Per-person usage in the last 24 hours, cached briefly per instance. */
+const actorUsage = new Map<string, { at: number; used: number }>();
+async function usedBy(actor: string) {
+  const c = actorUsage.get(actor);
+  if (c && Date.now() - c.at < 20_000) return c.used;
+  const r = await one<{ n: number }>(`SELECT coalesce(sum(input_tokens + output_tokens), 0)::bigint AS n FROM ai_usage WHERE actor = $1 AND at > now() - interval '24 hours'`, [actor]).catch(() => ({ n: 0 }));
+  if (actorUsage.size > 5000) actorUsage.clear();
+  actorUsage.set(actor, { at: Date.now(), used: Number(r?.n ?? 0) });
+  return Number(r?.n ?? 0);
+}
+const actorFor = (meta: CallMeta) => currentActor() ?? (meta.userId ? `u:${meta.userId}` : null);
+
+/** Throws before a paid call when AI is paused, the site budget is used up, or this person has used their share today. */
+async function checkBudget(meta: CallMeta) {
+  if (pausedUntil > Date.now()) throw new AiError('ai paused (quota)', 'Streetkey AI is temporarily unavailable. The rest of the site works as normal.', 503, 'ai_quota');
+  const cap = config.ai.dailyTokenBudget;
+  const safety = isSafetyPurpose(meta.purpose);
+  if (cap) {
+    await loadBudget();
+    if (budgetCache!.used >= cap * (safety ? 1 : 1 - SAFETY_RESERVE)) {
+      throw new AiError('daily token budget reached', 'Streetkey AI is paused for a few hours (daily limit reached). The rest of the site works as normal.', 503, 'ai_budget');
+    }
+  }
+  const actor = actorFor(meta);
+  if (actor && !safety) {
+    const max = actor.startsWith('u:') ? config.ai.dailyTokensPerUser : config.ai.dailyTokensPerIp;
+    if (max && (await usedBy(actor)) >= max) {
+      throw new AiError('per-person token cap', actor.startsWith('u:') ? 'You’ve used today’s AI allowance. It resets within 24 hours.' : 'You’ve used today’s AI allowance for visitors. Create a free account for more.', 429, 'ai_user_limit');
+    }
+  }
 }
 export interface CallMeta { purpose: string; userId?: string | null }
-async function record(meta: CallMeta, model: string, u: { input?: number; output?: number; images?: number }, ms: number, ok: boolean, code?: string) {
-  if (budgetCache) budgetCache.used += (u.input ?? 0) + (u.output ?? 0);
-  await q('INSERT INTO ai_usage (user_id, purpose, model, input_tokens, output_tokens, images, latency_ms, ok, error_code) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-    [meta.userId ?? null, meta.purpose, model, u.input ?? 0, u.output ?? 0, u.images ?? 0, Math.round(ms), ok, code ?? null]).catch(() => {});
+async function record(meta: CallMeta, model: string, u: { input?: number; output?: number; images?: number }, ms: number, ok: boolean, code?: string): Promise<string | null> {
+  const tokens = (u.input ?? 0) + (u.output ?? 0);
+  if (budgetCache) budgetCache.used += tokens;
+  const actor = actorFor(meta);
+  const c = actor ? actorUsage.get(actor) : undefined;
+  if (c) c.used += tokens;
+  const row = await one<{ id: string }>('INSERT INTO ai_usage (user_id, purpose, model, input_tokens, output_tokens, images, latency_ms, ok, error_code, actor) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id::text',
+    [meta.userId ?? null, meta.purpose, model, u.input ?? 0, u.output ?? 0, u.images ?? 0, Math.round(ms), ok, code ?? null, actor]).catch(() => null);
+  return row?.id ?? null;
+}
+/** A paid call whose output was thrown away (truncated, refused, invalid) is recorded as a failure. */
+async function markFailed(usageId: string | null, code: string) {
+  if (usageId) await q('UPDATE ai_usage SET ok = false, error_code = $2 WHERE id = $1::bigint', [usageId, code]).catch(() => {});
 }
 
 /* ───────────────────────── HTTP ───────────────────────── */
@@ -96,7 +216,8 @@ export const redact = (s: string) => s.replace(/(api key provided:?\s*)\S+/gi, '
 function mapError(status: number, msg: string, code?: string): AiError {
   const m = redact(msg);
   if (status === 401 || status === 403) return new AiError(m, 'Streetkey AI isn’t available right now (the server’s OpenAI key was rejected). An admin needs to check OPENAI_API_KEY.', 503, 'ai_key');
-  if (status === 429) return new AiError(m, /quota|billing/i.test(m) ? 'Streetkey AI is unavailable: the OpenAI account has run out of credit. An admin needs to top it up.' : 'Streetkey AI is busy. Please try again in a moment.', 503, 'ai_busy');
+  if (code === 'insufficient_quota' || (status === 429 && /quota|billing/i.test(m))) return new AiError(m, 'Streetkey AI is temporarily unavailable. The rest of the site works as normal.', 503, 'ai_quota');
+  if (status === 429) return new AiError(m, 'Streetkey AI is busy. Please try again in a moment.', 503, 'ai_busy');
   if (code === 'moderation_blocked' || /safety system|content policy|moderation/i.test(m)) return new AiError(m, 'The AI declined this request. Try different wording or a different photo.', 422, 'ai_refused');
   if (status >= 500) return new AiError(m, 'The AI service had a problem. Please try again.', 502, 'ai_upstream');
   return new AiError(m, 'The AI couldn’t process that request.', 502, 'ai_bad_request');
@@ -106,6 +227,7 @@ interface PostOpts { timeoutMs?: number; retries?: number; form?: boolean }
 async function post<T>(path: string, body: Record<string, unknown> | FormData, opts: PostOpts = {}): Promise<T> {
   if (config.ai.disabled) throw new AiError('ai disabled', 'Streetkey AI is switched off on this site.', 503, 'ai_disabled');
   if (!config.ai.openaiKey) throw new AiError('no key', 'Streetkey AI isn’t set up on this server yet (OPENAI_API_KEY is missing).', 503, 'ai_disabled');
+  if (pausedUntil > Date.now()) throw new AiError('ai paused (quota)', 'Streetkey AI is temporarily unavailable. The rest of the site works as normal.', 503, 'ai_quota');
   const deadline = Date.now() + (opts.timeoutMs ?? config.ai.quickTimeoutMs);
   let attempt = 0;
   for (;;) {
@@ -129,6 +251,7 @@ async function post<T>(path: string, body: Record<string, unknown> | FormData, o
     const retriable = r.status >= 500 || (r.status === 429 && !/quota|billing/i.test(j.error?.message ?? ''));
     if (retriable && attempt < (opts.retries ?? 1) && deadline - Date.now() > 3000) { attempt++; await new Promise((res) => setTimeout(res, 600 * attempt)); continue; }
     const err = mapError(r.status, j.error?.message ?? `HTTP ${r.status}`, j.error?.code);
+    if (err.code === 'ai_quota') await pauseForQuota();
     (err as AiError & { param?: string; httpStatus?: number }).param = j.error?.param ?? undefined;
     (err as AiError & { httpStatus?: number }).httpStatus = r.status;
     throw err;
@@ -164,8 +287,8 @@ export interface ChatOpts extends CallMeta {
   temperature?: number;     // only sent to models that accept it
 }
 
-async function chatRaw(messages: Message[], extra: Record<string, unknown>, o: ChatOpts): Promise<{ res: ChatResponse; model: string }> {
-  await checkBudget();
+async function chatRaw(messages: Message[], extra: Record<string, unknown>, o: ChatOpts): Promise<{ res: ChatResponse; model: string; usageId: string | null }> {
+  await checkBudget(o);
   const model = o.model ?? await modelFor(o.role ?? 'fast');
   const body: Record<string, unknown> = { model, messages, max_completion_tokens: o.maxTokens ?? 1500, ...extra };
   if (isReasoning(model)) body.reasoning_effort = o.effort ?? 'low';
@@ -175,8 +298,8 @@ async function chatRaw(messages: Message[], extra: Record<string, unknown>, o: C
   for (let tries = 0; ; tries++) {
     try {
       const res = await post<ChatResponse>('/chat/completions', body, { timeoutMs: o.timeoutMs });
-      await record(o, model, { input: res.usage?.prompt_tokens, output: res.usage?.completion_tokens }, Date.now() - t0, true);
-      return { res, model };
+      const usageId = await record(o, model, { input: res.usage?.prompt_tokens, output: res.usage?.completion_tokens }, Date.now() - t0, true);
+      return { res, model, usageId };
     } catch (e) {
       const p = rejectedParam(e, Object.keys(body).filter((k) => !['model', 'messages'].includes(k)));
       if (p && tries < 3) { delete body[p]; const set = rejected.get(model) ?? new Set(); set.add(p); rejected.set(model, set); continue; }
@@ -196,13 +319,14 @@ export async function chatText(messages: Message[], o: ChatOpts): Promise<string
 
 /** Typed JSON answer that matches `schema` (built with S). */
 export async function chatJSON<T>(messages: Message[], schema: unknown, name: string, o: ChatOpts): Promise<T> {
-  const { res } = await chatRaw(messages, { response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } } }, { maxTokens: 2000, ...o });
+  const { res, usageId } = await chatRaw(messages, { response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } } }, { maxTokens: 2000, ...o });
+  const fail = async (e: AiError) => { await markFailed(usageId, e.code); return e; };
   const m = res.choices[0]?.message;
-  if (m?.refusal) throw new AiError('refusal', 'The AI declined to answer that.', 422, 'ai_refused');
-  if (res.choices[0]?.finish_reason === 'length') throw new AiError('truncated', 'The AI’s answer was cut short. Please try again.', 502, 'ai_truncated');
+  if (m?.refusal) throw await fail(new AiError('refusal', 'The AI declined to answer that.', 422, 'ai_refused'));
+  if (res.choices[0]?.finish_reason === 'length') throw await fail(new AiError('truncated', 'The AI’s answer was cut short. Please try again.', 502, 'ai_truncated'));
   let v: unknown;
-  try { v = JSON.parse(m?.content ?? ''); } catch { throw new AiError('bad json', 'The AI returned something unexpected. Please try again.', 502, 'ai_bad_output'); }
-  if (!conforms(schema, v)) throw new AiError('schema mismatch', 'The AI returned something unexpected. Please try again.', 502, 'ai_bad_output');
+  try { v = JSON.parse(m?.content ?? ''); } catch { throw await fail(new AiError('bad json', 'The AI returned something unexpected. Please try again.', 502, 'ai_bad_output')); }
+  if (!conforms(schema, v)) throw await fail(new AiError('schema mismatch', 'The AI returned something unexpected. Please try again.', 502, 'ai_bad_output'));
   return v as T;
 }
 
@@ -276,7 +400,7 @@ export async function moderate(input: { text?: string; images?: string[] }, meta
 /* ───────────────────────── embeddings ───────────────────────── */
 export async function embed(texts: string[], meta: CallMeta): Promise<number[][]> {
   if (!texts.length) return [];
-  await checkBudget();
+  await checkBudget(meta);
   const model = await modelFor('embedding');
   const t0 = Date.now();
   try {
@@ -296,7 +420,7 @@ export function cosine(a: number[], b: number[]) {
 
 /* ───────────────────────── image editing ───────────────────────── */
 export async function editImage(photo: Buffer, contentType: string, prompt: string, meta: CallMeta, opts: { quality?: string; size?: string } = {}): Promise<Buffer> {
-  await checkBudget();
+  await checkBudget(meta);
   const model = await modelFor('image');
   // gpt-image-2 and later always use high input fidelity and reject the parameter.
   const fidelityOk = /^gpt-image-1(\.5)?$/.test(model) && !!config.ai.inputFidelity;
@@ -355,4 +479,4 @@ export async function cached<T>(key: string, ttlSec: number, fn: () => Promise<T
 }
 
 /** For tests: forget discovered models and learned parameter quirks. */
-export function resetAiCaches() { modelCache = null; budgetCache = null; rejected.clear(); }
+export function resetAiCaches() { modelCache = null; budgetCache = null; rejected.clear(); actorUsage.clear(); pausedUntil = 0; pauseReason = null; stateAt = 0; }

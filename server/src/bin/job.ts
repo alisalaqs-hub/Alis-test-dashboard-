@@ -6,12 +6,13 @@
  */
 import { pool } from '../db';
 import { runAlerts, runCleanup } from '../jobs/run';
+import { sweep } from '../ai/jobs';
 
 const job = process.argv[2];
 const jobs: Record<string, () => Promise<unknown>> = {
   alerts: runAlerts,
   cleanup: runCleanup,
-  hourly: async () => ({ alerts: await runAlerts(), ...(new Date().getUTCHours() === 3 ? { cleanup: await runCleanup() } : {}) }),
+  hourly: async () => ({ jobs: await sweep(), alerts: await runAlerts(), cleanup: await runCleanup({ ifDue: true }) }),
 };
 const fn = jobs[job];
 if (!fn) { console.error('Usage: npm run job -- alerts|cleanup|hourly'); process.exit(1); }

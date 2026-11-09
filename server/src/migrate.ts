@@ -14,6 +14,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { config, ROOT } from './config';
+import { pool } from './db';
 import { EMBEDDED_MIGRATIONS } from './migrations.generated';
 
 export async function loadMigrations(): Promise<{ name: string; sql: string }[]> {
@@ -28,9 +29,19 @@ export async function loadMigrations(): Promise<{ name: string; sql: string }[]>
 const checksum = (sql: string) => createHash('sha256').update(sql.replace(/\r\n/g, '\n')).digest('hex');
 
 let done: Promise<void> | null = null;
-/** Run once per process (cheap when up to date: one query). */
+/**
+ * Run once per process. Cheap when up to date: one query on the normal (pooled) connection;
+ * the direct connection used for migrating is only opened when something is actually pending.
+ */
 export function ensureMigrated(log?: (m: string) => void) {
-  if (!done) done = migrate(log).catch((e) => { done = null; throw e; });
+  if (!done) {
+    done = (async () => {
+      const wanted = (await loadMigrations()).map((m) => m.name);
+      const have = await pool.query<{ name: string }>('SELECT name FROM schema_migrations').then((r) => new Set(r.rows.map((x) => x.name))).catch(() => new Set<string>());
+      if (wanted.every((n) => have.has(n))) return;
+      await migrate(log);
+    })().catch((e) => { done = null; throw e; });
+  }
   return done;
 }
 

@@ -612,7 +612,7 @@ describe('photo job resilience', () => {
 
   it('only fetches external (feed) photos from public HTTPS hosts when the job runs', async () => {
     const fetched: string[] = [];
-    const serve = (url: string) => { fetched.push(url); return new Response(new Uint8Array(FRONT)); };
+    const serve = (url: string) => { fetched.push(url); return new Response(new Uint8Array(FRONT), { headers: { 'content-type': 'image/png' } }); };
     for (const h of ['images.agency.example.co.uk', 'images.example.com', 'intranet', 'db.internal']) fakeHosts.set(h, serve);
     const ai = mockOpenAI({ chat: (body) => visionReply(body) });
     try {

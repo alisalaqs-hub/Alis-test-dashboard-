@@ -36,7 +36,8 @@ async function useEmailToken(token: string, purpose: 'verify' | 'reset') {
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  app.post('/api/auth/register', limited('register', 8), async (req, reply) => {
+  // Per minute, and per day per network (IPv6 /64), so throwaway accounts can't multiply the per-person AI allowances.
+  app.post('/api/auth/register', { preHandler: [limit('auth.register', 8, 60), limit('auth.register.d', 20, 86_400)] }, async (req, reply) => {
     const b = parse(Register, req.body);
     const problem = passwordProblem(b.password);
     if (problem) throw new HttpError(400, problem, 'weak_password', { password: problem });

@@ -2,18 +2,22 @@
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config';
 import { one, q } from '../db';
-import { aiAvailable, modelsInUse } from '../ai/core';
+import { aiAvailable, aiOffReason, aiPause, modelsInUse, refreshAiState } from '../ai/core';
+import { AI_OFF_MESSAGE } from '../ai/guard';
 import { getJob, dispatch, isInlineSafe, jobDTO, processJob } from '../ai/jobs';
 import { forbidden, notFound, requireAdmin } from '../services/http';
 
 export async function aiCoreRoutes(app: FastifyInstance) {
   app.get('/api/ai/status', async (req) => {
+    await refreshAiState().catch(() => {});
     const on = aiAvailable();
+    const off = aiOffReason();
     const used = req.user ? await one<{ n: number }>(`SELECT count(*)::int n FROM ai_images WHERE user_id = $1 AND status <> 'failed' AND created_at > now() - interval '24 hours'`, [req.user.id]) : null;
     return {
       enabled: on, imagesEnabled: on, signedIn: !!req.user,
       dailyLimit: config.ai.dailyImagesPerUser, usedToday: used?.n ?? 0,
-      note: on ? null : config.ai.disabled ? 'AI is switched off on this site.' : 'AI is not set up on this server yet.',
+      reason: off,
+      note: off ? AI_OFF_MESSAGE[off] : null,
     };
   });
 
@@ -23,7 +27,16 @@ export async function aiCoreRoutes(app: FastifyInstance) {
     const usage = await one<{ calls: number; tokens: number; images: number; failures: number }>(`SELECT count(*)::int calls, coalesce(sum(input_tokens + output_tokens), 0)::bigint tokens,
       coalesce(sum(images), 0)::int images, count(*) FILTER (WHERE NOT ok)::int failures FROM ai_usage WHERE at > now() - interval '24 hours'`);
     const byPurpose = await one<{ rows: unknown }>(`SELECT coalesce(json_agg(x ORDER BY x.calls DESC), '[]') AS rows FROM (SELECT purpose, count(*)::int calls, coalesce(sum(input_tokens + output_tokens), 0)::bigint tokens FROM ai_usage WHERE at > now() - interval '24 hours' GROUP BY purpose) x`);
-    return { enabled: aiAvailable(), models: aiAvailable() ? await modelsInUse() : null, last24h: usage, byPurpose: byPurpose?.rows ?? [], dailyTokenBudget: config.ai.dailyTokenBudget, jobsMode: config.jobs.mode };
+    await refreshAiState(true).catch(() => {});
+    const off = aiOffReason();
+    // Only admins see the billing detail: the public message just says AI is temporarily unavailable.
+    const pause = aiPause();
+    const notice = pause?.reason === 'quota' ? `The OpenAI account has run out of credit, so AI is paused until ${new Date(pause.until).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' })} and will retry automatically. Add credit at platform.openai.com → Billing.`
+      : off === 'budget' ? 'Today’s AI token budget (AI_DAILY_TOKEN_BUDGET) is used up, so ordinary AI features are paused; safety checks keep a reserve.' : off ? AI_OFF_MESSAGE[off] : null;
+    const topUsers = await q(`SELECT CASE WHEN actor LIKE 'u:%' THEN 'account' ELSE 'visitor' END AS kind, count(*)::int calls, coalesce(sum(input_tokens + output_tokens), 0)::bigint tokens
+      FROM ai_usage WHERE at > now() - interval '24 hours' AND actor IS NOT NULL GROUP BY actor ORDER BY tokens DESC LIMIT 5`).catch(() => []);
+    return { enabled: aiAvailable(), reason: off, notice, pause, models: config.ai.openaiKey && !config.ai.disabled ? await modelsInUse() : null, last24h: usage, byPurpose: byPurpose?.rows ?? [], topUsers,
+      dailyTokenBudget: config.ai.dailyTokenBudget, dailyTokensPerUser: config.ai.dailyTokensPerUser, dailyTokensPerIp: config.ai.dailyTokensPerIp, jobsMode: config.jobs.mode };
   });
 
   /** Poll a background job. Also nudges it along if it hasn't been picked up yet. */
