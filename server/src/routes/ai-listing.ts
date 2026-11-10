@@ -27,7 +27,7 @@ import { enqueue, jobDTO, registerJob, type JobRow } from '../ai/jobs';
 import { describeListing, DescribeBody } from '../ai/listing/describe';
 import { analyseBatch, imagesHash, isPlaceholderAlt, photoTips, PriorSchema, suggestOrder, type ImageIn, type PhotoAnalysis, type Summarisable } from '../ai/listing/photos';
 import { precheck, PrecheckBody } from '../ai/listing/precheck';
-import { PRICE_TIMING, PriceGuideBody, priceNarrative, priceRange } from '../ai/listing/price';
+import { officialPriceRange, PRICE_TIMING, PriceGuideBody, priceNarrative, priceRange } from '../ai/listing/price';
 import { bytesHash, signPreview } from '../ai/listing/previewToken';
 import { altTextProblem } from '../../../src/engine/listings';
 import { audit, HttpError, parse, requireUser } from '../services/http';
@@ -317,13 +317,16 @@ export async function aiListingRoutes(app: FastifyInstance) {
     const deadline = Date.now() + PRICE_TIMING.budgetMs; // one budget for the whole request (Netlify answers within 30 s)
     const { userId } = await aiAccess(req, { auth: true });
     const body = parse(PriceGuideBody, req.body);
-    const range = priceRange(body);
+    // Real sold prices nearby when they can be had (sales in England and Wales); otherwise Streetkey's demonstration evidence.
+    const range = (await officialPriceRange(body).catch(() => null)) ?? priceRange(body);
     // No evidence, no AI call: nothing is charged.
     if (!range) return { low: null, high: null, basis: null, position: null, narrative: null, note: 'There isn’t enough comparable evidence for this postcode yet.' };
     const { narrative } = await priceNarrative(body, range, { userId, deadline, charge: () => aiCharge(req, 'listing.price_guide', PRICE_LIMITS) });
     return {
       low: range.low, high: range.high, basis: range.basis, position: range.position, askingVsMidPct: range.askingVsMidPct, narrative,
-      label: 'AI explanation of Streetkey’s indicative range. Not a valuation: the figures come from demonstration comparables, not the AI.',
+      label: range.basis.demo
+        ? 'AI explanation of Streetkey’s indicative range. Not a valuation: the figures come from demonstration comparables, not the AI.'
+        : 'AI explanation of where the price sits against HM Land Registry sold prices nearby. Not a valuation: the figures come from the sold prices, not the AI.',
     };
   });
 

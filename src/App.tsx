@@ -21,6 +21,7 @@ const Sources = lazy(() => import('./pages/Sources'));
 const Privacy = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Privacy })));
 const Terms = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Terms })));
 const AccessibilityPage = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Accessibility })));
+const DataSources = lazy(() => import('./pages/Legal').then((m) => ({ default: m.DataSources })));
 const Estimator = lazy(() => import('./pages/Estimator'));
 const Investment = lazy(() => import('./pages/Investment'));
 const Studio = lazy(() => import('./pages/Studio'));
@@ -182,6 +183,7 @@ export default function App() {
         <Route path="privacy" element={<Privacy />} />
         <Route path="terms" element={<Terms />} />
         <Route path="accessibility" element={<AccessibilityPage />} />
+        <Route path="data-sources" element={<DataSources />} />
         <Route path="estimate" element={<PropertyRoute page={Estimator} />} />
         {/* An imported refurbishment figure (its amount, where it came from and the design it's for) is read once, so a new one starts afresh. */}
         <Route path="invest" element={<PropertyRoute page={Investment} keyParams={['refurb', 'from', 'label']} />} />

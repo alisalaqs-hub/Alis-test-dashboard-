@@ -28,7 +28,7 @@ built-in rules) to `https://alisalaqs-hub.github.io/Alis-test-dashboard-/`. It r
 | Company formed; ICO registration (≈ £52/yr) | You |
 | Complete [bracketed] details in Privacy/Terms/Accessibility; solicitor review | You + solicitor |
 | Replace fictional listings with real ones (agent feeds / verified owner listings) | Dev |
-| Connect official data: HM Land Registry Price Paid, EPC register, EA flood, postcodes | Dev |
+| Connect official data | Sold prices, house price index, flood risk and postcodes: done. EPC register: add `EPC_API_TOKEN` (free, you). Still to do: schools, journey times, planning (dev) |
 | QS review of refurbishment rate library | QS consultant |
 | Backend: accounts, database, image storage, moderation, AI | Done: see 08-backend; deploy it and set the keys |
 | OpenAI: add credit, set a monthly limit, use a fresh API key | You |

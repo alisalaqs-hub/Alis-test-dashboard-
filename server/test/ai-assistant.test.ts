@@ -116,7 +116,7 @@ describe('Ask Streetkey: grounded answers', () => {
       const first = ai.calls('chat')[0].body;
       expect(first.model).toBe('gpt-5'); // role 'main'
       expect(first.response_format.json_schema).toMatchObject({ name: 'streetkey_answer', strict: true });
-      expect(first.tools.map((t: any) => t.function.name).sort()).toEqual(['compare_homes', 'design_cost', 'get_property', 'investment_check', 'mortgage_payment', 'refurb_estimate', 'search_homes', 'stamp_duty']);
+      expect(first.tools.map((t: any) => t.function.name).sort()).toEqual(['compare_homes', 'design_cost', 'flood_risk', 'get_property', 'investment_check', 'mortgage_payment', 'refurb_estimate', 'search_homes', 'sold_prices', 'stamp_duty']);
       expect(first.tools.every((t: any) => t.function.strict)).toBe(true);
       expect(first.max_completion_tokens).toBeLessThanOrEqual(1500);
       expect(first.messages[0].content).toMatch(/^You are Streetkey’s AI/);

@@ -197,7 +197,7 @@ export function listingDraftAccountType(): 'owner' | 'landlord' {
 /* ───────── price guide ───────── */
 export interface PriceGuideResult {
   low: number | null; high: number | null; position: 'below' | 'within' | 'above' | null; askingVsMidPct?: number | null;
-  basis: { n: number; scope: string; perM2: number; method: string; evidence: 'sales' | 'rentals' | 'assumed-yield'; demo: true } | null;
+  basis: { n: number; scope: string; perM2: number; method: string; evidence: 'sales' | 'rentals' | 'assumed-yield'; demo: boolean } | null;
   narrative: { explanation: string; position: string; advice: string[] } | null; note?: string; label?: string;
 }
 export const priceGuide = (b: { postcode: string; type: string; beds: number; floorArea: number; condition: string; channel: 'sale' | 'rent'; askingPrice?: number | null }) =>

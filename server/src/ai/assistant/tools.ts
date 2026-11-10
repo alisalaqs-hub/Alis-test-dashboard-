@@ -15,6 +15,11 @@ import { estimateRefurb, hiddenDefectRisks, regionFromPostcode, REGIONS } from '
 import { describeQuery, parseQuery, runSearch } from '../../../../src/engine/search';
 import { transactionTax, type BuyerType, type Nation } from '../../../../src/engine/tax';
 import { rentalScenario, valuationScenario } from '../../../../src/engine/valuation';
+import { FLOOD_BAND_MEANING, SOLD_TYPE_LABEL } from '../../../../src/engine/evidence';
+import { config } from '../../config';
+import { floodRisk } from '../../data/flood';
+import { soldAround } from '../../data/official';
+import { resolvePlace } from '../../data/postcodes';
 import { q } from '../../db';
 import { untrusted, type Tool } from '../core';
 import { ensureLiveRegistry } from '../registry';
@@ -378,10 +383,58 @@ function mortgagePayment(a: Infer<typeof MortgageArgs>) {
   };
 }
 
+/* ───────────── official data: real sold prices and flood risk ───────────── */
+const PlaceArgs = S.obj({ place: S.str('A full UK postcode (e.g. "E17 4PP"), a postcode district (e.g. "E17") or a town or city name (e.g. "Leeds")') });
+const noPlace = { error: 'That place was not recognised. Ask the person for a full postcode, a postcode district or a town.' };
+const dataOffNote = { error: 'Official data lookups are not available on this site just now.' };
+
+/** What homes actually sold for around a place (HM Land Registry Price Paid Data) and the local authority's average price (UK House Price Index). */
+async function soldPrices(a: Infer<typeof PlaceArgs>) {
+  if (config.data.disabled) return dataOffNote;
+  const place = await resolvePlace(String(a.place ?? ''));
+  if (!place) return noPlace;
+  const d = await soldAround(place);
+  const average = d.hpi ? { localAuthority: d.hpi.district, month: d.hpi.month, averagePrice: d.hpi.averagePrice, changeOverAYearPct: d.hpi.annualChangePct, byType: d.hpi.byType.map((t) => ({ type: SOLD_TYPE_LABEL[t.type], averagePrice: t.averagePrice })) } : null;
+  if (d.coverage !== 'england-wales') return { place: place.label, country: place.country, note: 'HM Land Registry sold prices cover England and Wales only, so there are none for this place.', localAuthorityAverage: average };
+  return {
+    source: 'HM Land Registry Price Paid Data: real registered sale prices, not estimates',
+    place: place.label, localAuthority: place.district, area: `within about ${d.radiusM} m of ${place.kind === 'postcode' ? 'the postcode' : 'the centre'}`,
+    last12Months: {
+      sales: d.stats.count, medianPrice: d.stats.median, middleHalfFrom: d.stats.low, middleHalfTo: d.stats.high,
+      byType: d.stats.byType.map((t) => ({ type: SOLD_TYPE_LABEL[t.type], sales: t.count, medianPrice: t.median })),
+    },
+    medianByYear: d.stats.byYear.slice(-5).map((y) => ({ year: y.year, sales: y.count, medianPrice: y.median })),
+    mostRecentSales: d.sales.slice(0, 6).map((x) => ({ address: `${x.address}, ${x.postcode}`, price: x.price, date: x.date, type: SOLD_TYPE_LABEL[x.type], tenure: x.tenure })),
+    localAuthorityAverage: average,
+    incomplete: d.partial ? 'HM Land Registry could not be reached for part of this area, so some sales may be missing.' : undefined,
+    notes: ['Sold prices do not record size, bedrooms or condition, so they show the local market rather than the value of one home.', 'Not a valuation.'],
+    page: `/prices?q=${encodeURIComponent(place.label)}`,
+  };
+}
+
+/** Long-term flood risk and current warnings at a place (Environment Agency, England only). */
+async function floodRiskTool(a: Infer<typeof PlaceArgs>) {
+  if (config.data.disabled) return dataOffNote;
+  const place = await resolvePlace(String(a.place ?? ''));
+  if (!place) return noPlace;
+  const f = await floodRisk(place.lat, place.lng, { country: place.country, approximate: true });
+  if (f.coverage !== 'england') return { place: place.label, country: place.country, note: 'The Environment Agency’s flood maps cover England only. Wales, Scotland and Northern Ireland publish their own.' };
+  const band = (s: typeof f.riversAndSea) => (s ? { atThisPoint: s.here, meaning: FLOOD_BAND_MEANING[s.here], highestWithin100Metres: s.nearby } : 'could not be read just now');
+  return {
+    source: 'Environment Agency national flood risk assessment and live flood warnings',
+    place: place.label, readAt: place.kind === 'postcode' ? 'the centre of the postcode, not the building itself' : 'the centre of the place, so it says little about any one street',
+    riversAndSea: band(f.riversAndSea), surfaceWater: band(f.surfaceWater),
+    warningsInForceNow: f.warnings.map((w) => ({ severity: w.severity, area: w.area })),
+    floodWarningAreasNearby: f.warningAreas,
+    notes: ['Long-term risk is the chance of flooding in any year. It is not a survey: a conveyancer’s flood report covers the property itself.'],
+  };
+}
+
 /** Human-readable names for the website ("Based on: …"). */
 export const TOOL_LABELS: Record<string, string> = {
   search_homes: 'Streetkey search', get_property: 'Property intelligence', compare_homes: 'Comparison', stamp_duty: 'Stamp duty calculator',
   refurb_estimate: 'Refurbishment estimator', design_cost: 'Design cost engine', investment_check: 'Investment analyser', mortgage_payment: 'Mortgage calculator',
+  sold_prices: 'HM Land Registry sold prices', flood_risk: 'Environment Agency flood risk',
 };
 
 export const TOOLS: Tool[] = [
@@ -393,4 +446,6 @@ export const TOOLS: Tool[] = [
   { name: 'design_cost', description: 'Cost to redo one room (kitchen, bathroom, living room or bedroom) at a finish level, adjusted for the region.', parameters: DesignArgs, run: designCostTool },
   { name: 'investment_check', description: 'Buy-to-let check for a home for sale: gross and net yield, monthly cash flow, cash needed, purchase tax and lender stress test.', parameters: InvestArgs, run: investmentCheck },
   { name: 'mortgage_payment', description: 'Monthly mortgage payment (repayment and interest-only) for a loan, rate and term.', parameters: MortgageArgs, run: mortgagePayment },
+  { name: 'sold_prices', description: 'What homes actually sold for around a postcode, postcode district or town in England or Wales (real HM Land Registry records): sales and median price in the last 12 months, by property type and by year, the most recent sales, and the local authority’s official average price and yearly change.', parameters: PlaceArgs, run: soldPrices },
+  { name: 'flood_risk', description: 'Flood risk at a postcode or place in England (Environment Agency): long-term risk from rivers and the sea and from surface water, and any flood warnings in force now.', parameters: PlaceArgs, run: floodRiskTool },
 ];

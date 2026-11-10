@@ -4,6 +4,7 @@ import { api, ApiError, mediaUrl } from '../lib/api';
 import type { ListingStatus, PhotoDTO } from '../lib/apiTypes';
 import { useServer } from '../lib/server';
 import { SignIn } from './Account';
+import { EpcLookup, PriceEvidence, useRealRange, useSoldNear } from '../components/official/ListingForm';
 import { altTextProblem, areaEvidence, buildListing, complianceChecks, normalisePostcode, placeFieldProblem, POSTCODE_RE, streetOnly, type Check, type ListingInput } from '../engine/listings';
 import type { Condition, Era, PropertyType } from '../engine/refurb';
 import { PROPERTIES, type Property } from '../data/properties';
@@ -636,6 +637,9 @@ function ListPropertyForm() {
   const range = ev ? (f.listing === 'rent'
     ? { low: Math.round((ev.rentPerM2 * f.floorArea * 0.92) / 25) * 25, high: Math.round((ev.rentPerM2 * f.floorArea * 1.08) / 25) * 25 }
     : { low: Math.round((ev.refurbishedPerM2 * f.floorArea * condAdj * 0.92) / 1000) * 1000, high: Math.round((ev.refurbishedPerM2 * f.floorArea * condAdj * 1.08) / 1000) * 1000 }) : null;
+  // On the live site a sale is checked against real sold prices nearby (HM Land Registry); the demo evidence above is the fallback.
+  const soldNear = useSoldNear(normalisePostcode(f.postcode), online && step === 4 && f.listing === 'sale' && POSTCODE_RE.test(f.postcode));
+  const realRange = useRealRange(soldNear, f.type, f.price);
   // The same checks the server applies (on the live site a photo is required, as it is there).
   const addressProblem = placeFieldProblem(f.addressLine, 'addressLine');
   const townProblem = placeFieldProblem(f.town, 'town');
@@ -939,6 +943,8 @@ function ListPropertyForm() {
             <Choice id="lp-condition" label="Condition" value={(f.condition ?? 'fair') as Condition} onChange={(v) => set('condition', v)} options={[{ value: 'good', label: 'Good' }, { value: 'fair', label: 'Fair' }, { value: 'poor', label: 'Needs work' }, { value: 'derelict', label: 'Major works' }]} />
             <div className="field"><span id="lp-features">Features</span><div className="chips" role="group" aria-labelledby="lp-features">{FEATURES.map((x) => <button key={x} type="button" aria-pressed={f.features.includes(x)} className={`save-btn${f.features.includes(x) ? ' on' : ''}`} onClick={() => set('features', f.features.includes(x) ? f.features.filter((y) => y !== x) : [...f.features, x])}>{x}</button>)}
               {customFeatures.map((x) => <button key={x} type="button" className="save-btn on" aria-label={`Remove feature: ${x}`} onClick={() => set('features', f.features.filter((y) => y !== x))}>{x} <span aria-hidden="true">×</span></button>)}</div></div>
+            <EpcLookup postcode={normalisePostcode(f.postcode)} addressLine={f.addressLine} valid={POSTCODE_RE.test(f.postcode)}
+              onUse={(c) => { if (c.band) set('epc', c.band); }} />
             <p className="xs muted">Don’t know your EPC? Find it free on the government EPC register (find-energy-certificate.service.gov.uk). It’s a legal requirement before marketing.</p>
           </>}
           {step === 3 && <>
@@ -982,17 +988,20 @@ function ListPropertyForm() {
           {step === 4 && <>
             <h3>{f.listing === 'rent' ? 'Monthly rent' : 'Asking price'}</h3>
             <div className="input-prefix"><span>£</span><input className="input num" style={{ fontSize: 22 }} type="number" aria-label={f.listing === 'rent' ? 'Monthly rent in pounds' : 'Asking price in pounds'} value={f.price || ''} placeholder={f.listing === 'rent' ? 'e.g. 1650' : 'e.g. 450000'} onChange={(e) => set('price', Number(e.target.value) || 0)} /></div>
-            <div className="callout info small">
-              <b><Icon name="spark" size={14} /> Streetkey price check</b>{' '}
-              {range ? <>{f.listing === 'rent'
-                ? (rentLets
-                  ? <>Similar rentals in the wider region suggest <b className="num">{gbp(range.low)}–{gbp(range.high)} pcm</b> for {f.floorArea}m² ({rentLets} demo rental comparable{rentLets === 1 ? '' : 's'}).</>
-                  : <>There are no rental comparables for this region yet, so this uses sale prices in {ev!.scope} ({ev!.n} demo comparable{ev!.n === 1 ? '' : 's'}) at an assumed {ASSUMED_YIELD_PCT}% gross yield: <b className="num">{gbp(range.low)}–{gbp(range.high)} pcm</b> for {f.floorArea}m².</>)
-                : <>Similar homes in {ev!.scope} suggest <b className="num">{gbpK(range.low)}–{gbpK(range.high)}</b> for {f.floorArea}m² in {f.condition} condition ({ev!.n} demo comparable{ev!.n === 1 ? '' : 's'}).</>}
-                {f.price > 0 && <> Your price is <b>{f.price > range.high ? 'above' : f.price < range.low ? 'below' : 'within'}</b> that range.{f.price > range.high * 1.05 ? ' Homes priced above the evidence tend to get views but few enquiries.' : ''}</>}</> : 'Add a valid postcode to see a price check.'}
-              <div className="xs muted" style={{ marginTop: 6 }}>Indicative only — not a valuation. Production uses HM Land Registry sold prices.</div>
-            </div>
-            {online ? <PriceExplain f={f} localRange={range} onSignIn={signInHere} /> : range && <AiUnavailable reason="offline" feature="The AI price explanation" fallback="The Streetkey price check above still applies." />}
+            {soldNear.status === 'loading' && <p className="od-status" role="status">Getting sold prices near {normalisePostcode(f.postcode)} from HM Land Registry…</p>}
+            {realRange ? <PriceEvidence near={soldNear} range={realRange} type={f.type} price={f.price} /> : soldNear.status !== 'loading' && (
+              <div className="callout info small">
+                <b><Icon name="spark" size={14} /> Streetkey price check</b>{' '}
+                {range ? <>{f.listing === 'rent'
+                  ? (rentLets
+                    ? <>Similar rentals in the wider region suggest <b className="num">{gbp(range.low)}–{gbp(range.high)} pcm</b> for {f.floorArea}m² ({rentLets} demo rental comparable{rentLets === 1 ? '' : 's'}).</>
+                    : <>There are no rental comparables for this region yet, so this uses sale prices in {ev!.scope} ({ev!.n} demo comparable{ev!.n === 1 ? '' : 's'}) at an assumed {ASSUMED_YIELD_PCT}% gross yield: <b className="num">{gbp(range.low)}–{gbp(range.high)} pcm</b> for {f.floorArea}m².</>)
+                  : <>Similar homes in {ev!.scope} suggest <b className="num">{gbpK(range.low)}–{gbpK(range.high)}</b> for {f.floorArea}m² in {f.condition} condition ({ev!.n} demo comparable{ev!.n === 1 ? '' : 's'}).</>}
+                  {f.price > 0 && <> Your price is <b>{f.price > range.high ? 'above' : f.price < range.low ? 'below' : 'within'}</b> that range.{f.price > range.high * 1.05 ? ' Homes priced above the evidence tend to get views but few enquiries.' : ''}</>}</> : 'Add a valid postcode to see a price check.'}
+                <div className="xs muted" style={{ marginTop: 6 }}>Indicative only — not a valuation. This uses Streetkey’s demonstration comparables{online && f.listing === 'sale' ? ', because there aren’t enough recent sold prices near this postcode' : ''}.</div>
+              </div>
+            )}
+            {online ? <PriceExplain f={f} localRange={realRange && realRange.low != null && realRange.high != null ? { low: realRange.low, high: realRange.high } : range} onSignIn={signInHere} /> : range && <AiUnavailable reason="offline" feature="The AI price explanation" fallback="The Streetkey price check above still applies." />}
             {f.listing === 'rent' && <p className="xs muted">Rental adverts must show a fixed rent. You can’t invite or accept offers above it.</p>}
           </>}
           {step === 5 && <>

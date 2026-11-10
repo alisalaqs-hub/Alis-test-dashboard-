@@ -146,5 +146,5 @@ Implemented relationally (Postgres) with an edge table, not a separate graph DB,
 | AI agents | Deterministic runs plus AI proposals that need human approval; approval queue and audit log in browser storage |
 | Engagement data | **Simulated** (seeded) for the demo listings; real views, saves and enquiries are recorded for live listings |
 | Demo listings, comparables, market inputs, portfolio | **Fictional demonstration data** |
-| Official data (HM Land Registry, EPC register, flood, Ofsted, journey times), maps | Not connected yet; maps are schematic SVG |
+| Official data | **Connected:** HM Land Registry sold prices and the UK House Price Index, Environment Agency flood risk and warnings, the EPC register (with a free token), postcodes.io; cached in PostgreSQL. Not connected yet: Ofsted, journey times, planning. Maps are schematic SVG |
 | Payments, identity and title checks, public partner API, billing | Not built |

@@ -4,7 +4,8 @@
  * elsewhere. On a static host with no server (GitHub Pages, previews) every call fails
  * fast and the site stays in demo mode.
  */
-import type { AiImageDTO, CheckDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, SavedSearchDTO, UserDTO } from './apiTypes';
+import type { EpcCertificate, EpcSummary, FloodResult } from '../engine/evidence';
+import type { AiImageDTO, CheckDTO, DataStatusDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, OfficialListingDTO, SavedSearchDTO, SoldPricesDTO, UserDTO } from './apiTypes';
 
 export const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
@@ -33,7 +34,7 @@ async function request<T>(method: string, path: string, body?: unknown, opts: { 
   if (!r.ok) throw new ApiError(r.status, json?.error?.message ?? `Something went wrong (${r.status}).`, json?.error?.code, json?.error?.fields ?? {});
   return json as T;
 }
-const get = <T>(p: string) => request<T>('GET', p);
+const get = <T>(p: string, o?: { timeout?: number }) => request<T>('GET', p, undefined, o);
 const post = <T>(p: string, b?: unknown, o?: { timeout?: number }) => request<T>('POST', p, b ?? {}, o);
 const patch = <T>(p: string, b: unknown) => request<T>('PATCH', p, b);
 const put = <T>(p: string, b?: unknown) => request<T>('PUT', p, b ?? {});
@@ -134,6 +135,17 @@ export const api = {
     users: (q = '') => get<{ items: { id: string; email: string; name: string; role: string; accountType: string; emailVerified: boolean; createdAt: string }[] }>(`/api/admin/users${qs({ q })}`),
     setRole: (id: string, role: 'member' | 'admin') => post<{ ok: true }>(`/api/admin/users/${id}/role`, { role }),
     audit: () => get<{ items: { id: number; action: string; subject: string | null; detail: unknown; at: string; actor: string | null }[] }>('/api/admin/audit?limit=100'),
+  },
+  /** Official open data: HM Land Registry sold prices, Environment Agency flood risk, the energy certificate register. */
+  data: {
+    status: () => get<DataStatusDTO>('/api/data/status'),
+    /** Sold prices around a full postcode, a postcode district or a town. The first lookup of an area can take a few seconds. */
+    sold: (q: string, o: { radius?: number; years?: number } = {}) => get<SoldPricesDTO>(`/api/data/sold${qs({ q, radius: o.radius, years: o.years })}`, { timeout: 28_000 }),
+    flood: (q: string) => get<{ place: SoldPricesDTO['place']; flood: FloodResult; attribution: string[] }>(`/api/data/flood${qs({ q })}`, { timeout: 20_000 }),
+    /** Sold prices nearby, where the asking price sits, flood risk and the energy certificate for one listing. */
+    listing: (ref: string) => get<OfficialListingDTO>(`/api/data/listings/${encodeURIComponent(ref)}`, { timeout: 28_000 }),
+    epcSearch: (postcode: string) => get<{ items: EpcSummary[]; attribution: string[] }>(`/api/data/epc/search${qs({ postcode })}`),
+    epcCertificate: (number: string) => get<{ certificate: EpcCertificate; attribution: string[] }>(`/api/data/epc/certificate${qs({ number })}`),
   },
   orgs: {
     create: (b: { name: string; kind: string; redressScheme?: string }) => post<{ id: string; verified: boolean; note: string }>('/api/orgs', b),

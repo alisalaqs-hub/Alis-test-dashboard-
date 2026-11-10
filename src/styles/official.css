@@ -1,0 +1,76 @@
+/* Official open data: sold prices, house price index, flood risk, energy certificates. */
+
+.tag-source { background: var(--sage-soft); color: var(--sage); border-color: color-mix(in srgb, var(--sage) 35%, transparent); }
+.od-attribution { margin: 14px 0 0; line-height: 1.5; max-width: 900px; }
+.od-h { font-size: 15px; margin: 0 0 10px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.od-h .xs { font-weight: 500; }
+.od-nowrap { white-space: nowrap; }
+
+/* year-by-year medians */
+.od-years { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.od-years li { display: grid; grid-template-columns: 44px minmax(40px, 1fr) 64px 64px; align-items: center; gap: 10px; font-size: 13.5px; }
+.od-years .od-year { color: var(--muted); }
+.od-bar { height: 10px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+.od-bar i { display: block; height: 100%; border-radius: 6px; background: var(--accent); }
+
+/* house price index */
+.od-hpi-main { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 10px; }
+.od-big { font-size: 1.7rem; line-height: 1.1; font-weight: 800; letter-spacing: -0.02em; }
+.od-spark { flex: 0 1 220px; min-width: 110px; }
+.od-up { color: var(--sage); }
+.od-down { color: color-mix(in srgb, var(--danger) 85%, var(--ink)); }
+.od-types { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px 14px; margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.od-types dt { font-size: 11.5px; color: var(--muted); }
+.od-types dd { margin: 0; font-weight: 700; }
+
+/* sold price table */
+.od-sales td:first-child { min-width: 180px; }
+
+/* asking price against sold prices */
+.od-verdict { margin: 10px 0 14px; font-size: 14.5px; line-height: 1.5; }
+.od-scale { position: relative; height: 26px; border-radius: 13px; background: var(--surface-2); }
+.od-scale i { position: absolute; top: 0; bottom: 0; display: block; }
+.od-band { background: color-mix(in srgb, var(--sage) 30%, var(--surface-2)); border-radius: 13px; }
+.od-mid { width: 2px; margin-left: -1px; background: var(--sage); }
+.od-ask { width: 14px; height: 14px; top: 6px !important; bottom: auto !important; margin-left: -7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--surface), 0 0 0 4px var(--ink); }
+.od-scale-labels { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+.od-method { margin-top: 10px; font-size: 13px; }
+.od-method summary { cursor: pointer; color: var(--muted); font-weight: 600; min-height: 24px; }
+.od-method ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; color: var(--ink-2); }
+
+/* flood risk */
+.od-flood { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid transparent; white-space: nowrap; }
+.od-flood-very-low { background: var(--sage-soft); color: var(--sage); border-color: color-mix(in srgb, var(--sage) 35%, transparent); }
+.od-flood-low { background: var(--blue-soft); color: var(--blue); border-color: color-mix(in srgb, var(--blue) 35%, transparent); }
+.od-flood-medium { background: var(--gold-soft); color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
+.od-flood-high { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); color: color-mix(in srgb, var(--danger) 85%, var(--ink)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.od-flood-row { display: flex; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.od-flood-row:first-of-type { margin-top: 6px; }
+.od-flood-row > div:first-child { flex: 1 1 200px; }
+.od-flood-bands { display: flex; gap: 16px; flex-wrap: wrap; }
+.od-flood-bands > div { max-width: 210px; }
+.od-flood-bands .xs { margin-top: 3px; }
+.od-warning { margin: 10px 0 2px; border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
+
+/* search states */
+.od-status { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 14px; }
+.od-status::before { content: ''; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: od-spin 0.9s linear infinite; }
+@keyframes od-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .od-status::before { animation: none; border-top-color: var(--line); } }
+
+@media (max-width: 599px) {
+  .od-years li { grid-template-columns: 40px minmax(30px, 1fr) 58px; }
+  .od-years li .xs { display: none; }
+  .od-hpi-main { flex-direction: column; align-items: stretch; }
+  .od-spark { flex: none; }
+}
+
+/* filter chips (property type) */
+.od-filter .chip[aria-pressed='true'] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* EPC lookup in the listing form */
+.od-epc { padding: 12px; }
+.od-epc-list { display: grid; gap: 2px; max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px; }
+.od-epc-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 6px; border-radius: 8px; font-size: 13.5px; cursor: pointer; min-height: 24px; }
+.od-epc-item:hover { background: var(--surface-2); }
+.od-epc-item input { margin-top: 3px; flex: none; }

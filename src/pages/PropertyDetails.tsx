@@ -12,6 +12,7 @@ import { gbp, gbpK, HouseArt, Section, Stat, Tag } from '../components/ui';
 import { useStore } from '../store';
 import { api, ApiError } from '../lib/api';
 import { isServerRef } from '../lib/listingAdapter';
+import { EpcValue, FloodValue, OfficialListingPanel, PriceCheckStat, useOfficialListing } from '../components/official/ListingData';
 import { useServer } from '../lib/server';
 
 /** The next few viewing slots: Saturday mornings and weekday evenings. */
@@ -111,6 +112,8 @@ export default function PropertyDetails() {
 function PropertyDetailsInner({ property: p }: { property: Property }) {
   const { online } = useServer();
   const live = online && isServerRef(p.id);
+  // Real listings get official data (sold prices, flood risk, the energy certificate); demo homes keep their demo figures.
+  const official = useOfficialListing(p.id, live);
   const { saved, compare, toggleSaved, toggleCompare, requestViewing, viewings } = useStore();
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [consent, setC] = useState(getConsent());
@@ -178,9 +181,11 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           {!rental && <section className="card ai-card">
             <div className="card-head"><div><div className="eyebrow">Streetkey intelligence</div><h3>See beyond this property</h3></div><Link className="btn sm" to={`/property/${p.id}/intelligence`}>Full intelligence profile →</Link></div>
             <div className="grid g4 keep2">
-              <Link to={`/property/${p.id}/intelligence`} style={{ textDecoration: 'none' }}><Stat label={<>Price check <Tag kind="est" /></>} value={val.verdict} sub={`As-is ${gbpK(val.asIs.low)}–${gbpK(val.asIs.high)}`} /></Link>
+              {live
+                ? <Link to={`/property/${p.id}/intelligence`} style={{ textDecoration: 'none' }}><PriceCheckStat official={official} /></Link>
+                : <Link to={`/property/${p.id}/intelligence`} style={{ textDecoration: 'none' }}><Stat label={<>Price check <Tag kind="est" /></>} value={val.verdict} sub={`As-is ${gbpK(val.asIs.low)}–${gbpK(val.asIs.high)}`} /></Link>}
               <Link to={`/estimate?property=${p.id}`} style={{ textDecoration: 'none' }} onClick={() => track('refurb_sim', p.id)}><Stat label="Refurb estimate" value={gbpK(est.total)} sub={`${gbpK(est.low)}–${gbpK(est.high)}`} /></Link>
-              <Link to={`/invest?property=${p.id}`} style={{ textDecoration: 'none' }}><Stat label="Rent potential" value={p.type === 'commercial' ? '—' : `${gbp(rent.mid)} pcm`} sub={p.type === 'commercial' ? 'See development' : `${rent.evidence} let comp(s)`} /></Link>
+              <Link to={`/invest?property=${p.id}`} style={{ textDecoration: 'none' }}><Stat label={live ? <>Rent potential <Tag kind="est" /></> : 'Rent potential'} value={p.type === 'commercial' ? '—' : `${gbp(rent.mid)} pcm`} sub={p.type === 'commercial' ? 'See development' : live ? 'Streetkey model, not local lettings' : `${rent.evidence} let comp(s)`} /></Link>
               <Link to={`/studio?property=${p.id}`} style={{ textDecoration: 'none' }}><Stat label="Deal score" value={`${ds.total} · ${ds.grade}`} sub="Visualise improvements →" /></Link>
             </div>
           </section>}
@@ -188,7 +193,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           <Section title="About this property">
             {p.description && <p style={{ marginBottom: 10 }}>{p.description}</p>}
             <ul className="ticks">{p.features.map((f) => <li key={f}>{f}</li>)}</ul>
-            <p className="small muted" style={{ marginTop: 10 }}>{p.commute.minutes} minutes to {p.commute.to} ({p.commute.mode}); {p.station.name} is a {p.station.walkMins}-minute walk.</p>
+            {p.commute.minutes > 0 && p.station.walkMins > 0 && <p className="small muted" style={{ marginTop: 10 }}>{p.commute.minutes} minutes to {p.commute.to} ({p.commute.mode}); {p.station.name} is a {p.station.walkMins}-minute walk.</p>}
           </Section>
 
           <div className="grid g2">
@@ -199,12 +204,14 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
                 <dt>Council tax</dt><dd>{p.councilTax}</dd>
                 {p.serviceChargeAnnual != null && <><dt>Service charge</dt><dd>{gbp(p.serviceChargeAnnual)} p.a.</dd></>}
                 {p.groundRentAnnual != null && <><dt>Ground rent</dt><dd>{gbp(p.groundRentAnnual)} p.a.</dd></>}
-                <dt>Flood risk</dt><dd>{p.risks.flood}</dd>
-                <dt>Conservation area</dt><dd>{p.risks.conservationArea ? 'Yes' : 'No'}</dd>
-                <dt>EPC</dt><dd>{p.epc.current} → potential {p.epc.potential}</dd>
+                <dt>Flood risk</dt><dd>{live ? <FloodValue official={official} /> : p.risks.flood}</dd>
+                {!live && <><dt>Conservation area</dt><dd>{p.risks.conservationArea ? 'Yes' : 'No'}</dd></>}
+                <dt>EPC</dt><dd>{live ? <EpcValue entered={p.epc.current} official={official} /> : <>{p.epc.current} → potential {p.epc.potential}</>}</dd>
               </dl>
             </Section>
           </div>
+
+          <OfficialListingPanel official={official} price={p.price} rental={rental} where={p.postcode || p.district} />
 
           <Section title="Documents" right={<Tag kind="live">Document vault</Tag>}>
             <ul className="clean">{(p.documents ?? ['EPC', 'Floor plan']).map((d) => <li key={d} className="row between"><span className="small">📄 {d}</span>{/requested/.test(d) ? <Tag kind="demo">Requested</Tag> : <button className="btn ghost sm" onClick={() => track('document_open', p.id, { doc: d })}>View</button>}</li>)}</ul>

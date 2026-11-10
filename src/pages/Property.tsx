@@ -11,6 +11,9 @@ import { engagementFor, insightsFor, totals, benchmark } from '../engine/engagem
 import { AssistantPanel } from '../components/Assistant';
 import { propertySkills } from '../ai/skills';
 import { KnowledgeGraph } from '../components/KnowledgeGraph';
+import { OfficialListingPanel, useOfficialListing } from '../components/official/ListingData';
+import { isServerRef } from '../lib/listingAdapter';
+import { useServer } from '../lib/server';
 
 function extensionScenario(p: Property) {
   if (p.extensionPotential === 'none' || p.type === 'flat') return null;
@@ -48,6 +51,10 @@ export default function PropertyPage() {
   const eng = useMemo(() => ({ t: totals(engagementFor(p)), bm: benchmark(p), ins: insightsFor(p) }), [p]);
   const tax = transactionTax(p.price, p.nation, 'additional');
   const rental = p.listing === 'rent';
+  // Real listings get official data (sold prices, flood risk); demo homes keep their demo comparables and constraint values.
+  const { online } = useServer();
+  const live = online && isServerRef(p.id);
+  const official = useOfficialListing(p.id, live);
   const { est, ds } = ctx;
   const plays = [
     { name: 'Refurbish & resell / refinance', cost: est.total, uplift: p.estGdv - p.price, net: ds.uplift },
@@ -159,33 +166,40 @@ export default function PropertyPage() {
             ))}
           </Section>}
 
-          <div className="grid g2">
-            <Section title="Comparables" kicker="Evidence" right={<Tag kind="demo" />}>
-              <div className="table-wrap" tabIndex={0}><table className="t">
-                <thead><tr><th>Address</th><th className="r">Price</th><th>Date</th></tr></thead>
-                <tbody>{p.comparables.map((c) => <tr key={c.address}><td>{c.address}<div className="xs muted">{c.beds} bed · {c.distanceM}m · {c.kind}{c.refurbished ? ' · refurbished' : ''}</div></td><td className="r num">{c.kind === 'let' ? `${gbp(c.price)} pcm` : gbpK(c.price)}</td><td className="small">{c.date}</td></tr>)}</tbody>
-              </table></div>
-              {p.comparables.length === 0 && <p className="small muted">No comparables in demo set.</p>}
-              <div className="hr" />
-              <div className="row between small"><span className="muted">Area price index, 24m</span><span className="num">{(p.areaIndex[23] - 100).toFixed(1)}%</span></div>
-              <Spark data={p.areaIndex} />
-              <div className="xs muted">Production source: HM Land Registry Price Paid + UK HPI (OGL).</div>
-            </Section>
-            <Section title="Constraints & risk" kicker="Planning · environment">
-              <dl className="kv">
-                <dt>Flood (rivers & sea)</dt><dd><Tag kind={p.risks.flood === 'medium' || p.risks.flood === 'high' ? 'warn' : 'ok'}>{p.risks.flood}</Tag></dd>
-                <dt>Subsidence (shrink-swell)</dt><dd><Tag kind={p.risks.subsidence === 'low' ? 'ok' : 'warn'}>{p.risks.subsidence}</Tag></dd>
-                <dt>Radon</dt><dd><Tag kind={p.risks.radon === 'low' ? 'ok' : 'warn'}>{p.risks.radon}</Tag></dd>
-                <dt>Conservation area</dt><dd>{p.risks.conservationArea ? <Tag kind="warn">Yes</Tag> : <Tag kind="ok">No</Tag>}</dd>
-                <dt>Article 4 direction</dt><dd>{p.risks.article4 ? <Tag kind="warn">Yes</Tag> : <Tag kind="ok">No</Tag>}</dd>
-                <dt>Listed building</dt><dd>{p.risks.listed ? <Tag kind="warn">Yes</Tag> : <Tag kind="ok">No</Tag>}</dd>
-              </dl>
-              <div className="hr" />
-              <div className="eyebrow" style={{ marginBottom: 6 }}>Nearby planning</div>
-              <ul className="clean small">{p.planningNearby.map((a) => <li key={a.ref}><span className="mono xs">{a.ref}</span> · {a.desc} · <b className={a.decision === 'Approved' ? 'pos' : a.decision === 'Refused' ? 'neg' : ''}>{a.decision}</b> <span className="muted">({a.distanceM}m)</span></li>)}{!p.planningNearby.length && <li className="muted">None in demo data.</li>}</ul>
-              <div className="callout" style={{ marginTop: 10 }}>Not a planning opinion. Constraint layers are demo values; production uses EA flood maps, BGS GeoSure, Historic England, planning.data.gov.uk and LPA feeds. Seek a planning consultant / architect before relying on development potential.</div>
-            </Section>
-          </div>
+          {live ? (
+            <>
+              <OfficialListingPanel official={official} price={p.price} rental={rental} where={p.postcode || p.district} />
+              <div className="callout info small">Subsidence, radon, conservation areas, listed status and nearby planning applications aren’t connected for real listings yet, so they aren’t shown. Your conveyancer’s searches cover them.</div>
+            </>
+          ) : (
+            <div className="grid g2">
+              <Section title="Comparables" kicker="Evidence" right={<Tag kind="demo" />}>
+                <div className="table-wrap" tabIndex={0}><table className="t">
+                  <thead><tr><th>Address</th><th className="r">Price</th><th>Date</th></tr></thead>
+                  <tbody>{p.comparables.map((c) => <tr key={c.address}><td>{c.address}<div className="xs muted">{c.beds} bed · {c.distanceM}m · {c.kind}{c.refurbished ? ' · refurbished' : ''}</div></td><td className="r num">{c.kind === 'let' ? `${gbp(c.price)} pcm` : gbpK(c.price)}</td><td className="small">{c.date}</td></tr>)}</tbody>
+                </table></div>
+                {p.comparables.length === 0 && <p className="small muted">No comparables in demo set.</p>}
+                <div className="hr" />
+                <div className="row between small"><span className="muted">Area price index, 24m</span><span className="num">{(p.areaIndex[23] - 100).toFixed(1)}%</span></div>
+                <Spark data={p.areaIndex} />
+                <div className="xs muted">Production source: HM Land Registry Price Paid + UK HPI (OGL).</div>
+              </Section>
+              <Section title="Constraints & risk" kicker="Planning · environment">
+                <dl className="kv">
+                  <dt>Flood (rivers & sea)</dt><dd><Tag kind={p.risks.flood === 'medium' || p.risks.flood === 'high' ? 'warn' : 'ok'}>{p.risks.flood}</Tag></dd>
+                  <dt>Subsidence (shrink-swell)</dt><dd><Tag kind={p.risks.subsidence === 'low' ? 'ok' : 'warn'}>{p.risks.subsidence}</Tag></dd>
+                  <dt>Radon</dt><dd><Tag kind={p.risks.radon === 'low' ? 'ok' : 'warn'}>{p.risks.radon}</Tag></dd>
+                  <dt>Conservation area</dt><dd>{p.risks.conservationArea ? <Tag kind="warn">Yes</Tag> : <Tag kind="ok">No</Tag>}</dd>
+                  <dt>Article 4 direction</dt><dd>{p.risks.article4 ? <Tag kind="warn">Yes</Tag> : <Tag kind="ok">No</Tag>}</dd>
+                  <dt>Listed building</dt><dd>{p.risks.listed ? <Tag kind="warn">Yes</Tag> : <Tag kind="ok">No</Tag>}</dd>
+                </dl>
+                <div className="hr" />
+                <div className="eyebrow" style={{ marginBottom: 6 }}>Nearby planning</div>
+                <ul className="clean small">{p.planningNearby.map((a) => <li key={a.ref}><span className="mono xs">{a.ref}</span> · {a.desc} · <b className={a.decision === 'Approved' ? 'pos' : a.decision === 'Refused' ? 'neg' : ''}>{a.decision}</b> <span className="muted">({a.distanceM}m)</span></li>)}{!p.planningNearby.length && <li className="muted">None in demo data.</li>}</ul>
+                <div className="callout" style={{ marginTop: 10 }}>Not a planning opinion. Constraint layers are demo values; production uses EA flood maps, BGS GeoSure, Historic England, planning.data.gov.uk and LPA feeds. Seek a planning consultant / architect before relying on development potential.</div>
+              </Section>
+            </div>
+          )}
 
           <div className="grid g2">
             <Section title="EPC upgrade pathway" kicker="Energy" right={<Tag kind="est" />}>

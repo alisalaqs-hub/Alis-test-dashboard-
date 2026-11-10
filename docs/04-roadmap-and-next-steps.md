@@ -85,12 +85,13 @@ Costs assume a blended UK fully loaded rate of ~£110k per engineer-year (~£9.2
 
 * **Back end:** accounts, listings with photos, enquiries, saved searches and alerts, agent BLM feeds, admin, trust & safety, UK GDPR export and erasure, on Netlify Functions + PostgreSQL (see [08](08-backend.md)).
 * **AI across the site** on OpenAI, grounded in the engines: assistant with tools, conversational search, listing tools, inbox screening and triage, trust review, photo-real room redesign, estimates from photos, investment verdicts, dashboard briefings. Cost controls (site budget with a safety reserve, per-person caps, automatic pause when out of credit) and a fake OpenAI for testing.
+* **Official data:** real sold prices and the House Price Index (HM Land Registry), flood risk and live warnings (Environment Agency) and energy certificates (EPC register) on the Sold prices page, real listing pages, the listing form and the assistant, cached in the database with the licences' attribution.
 * **Quality pass:** an end-to-end and adversarial review found about 180 issues across security, cost, accessibility and correctness; all confirmed ones were fixed and re-checked.
 
 ## Next implementation steps (next 6 weeks)
 
 1. **Go live:** deploy from GitHub to Netlify, add Netlify Database (London or Frankfurt, functions in the same region), set `OPENAI_API_KEY` with credit and a monthly limit, `ADMIN_EMAIL`, Resend and the domain. Remove the preview label only after the checklist in [07](07-going-live.md).
-2. **Data foundations:** ingest HM Land Registry Price Paid, the EPC register, flood risk and conservation areas for 3 launch regions; UPRN matching; replace demo comparables in `valuation.ts`.
+2. **Data foundations, next layer:** add the EPC token; match sold prices to EPC floor areas (price per m²) and feed real evidence into the valuation, rent and deal-score models for real listings; add Ofsted, journey times and planning data.
 3. **Real listing supply:** sign the first agent feed agreements (per-branch keys are ready); invite private sellers in one launch area.
 4. **Verified owner:** identity check (certified IDSP) and HM Land Registry title match before the "Verified owner" badge.
 5. **Payments:** Stripe for listing upgrades, agency subscriptions and API plans.

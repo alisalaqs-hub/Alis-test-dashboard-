@@ -6,6 +6,10 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { PROPERTIES } from '../../../../src/data/properties';
+import { evidenceRange, SOLD_TYPE_LABEL, soldTypeFor } from '../../../../src/engine/evidence';
+import { config } from '../../config';
+import { soldAround } from '../../data/official';
+import { lookupPostcode } from '../../data/postcodes';
 import { areaEvidence } from '../../../../src/engine/listings';
 import { regionFromPostcode } from '../../../../src/engine/refurb';
 import { cached, chatJSON, HOUSE_RULES, untrusted } from '../core';
@@ -43,10 +47,37 @@ export function rentalComparables(postcode: string): number {
 export interface PriceRange {
   low: number; high: number; mid: number;
   /** evidence: which comparables the £/m² comes from ('assumed-yield' = sale values at ASSUMED_YIELD_PCT, no rental comparables). */
-  basis: { n: number; scope: string; perM2: number; method: string; evidence: 'sales' | 'rentals' | 'assumed-yield'; demo: true };
+  /** demo: false when the range is the middle half of real HM Land Registry sold prices nearby (perM2 is then 0: sold prices don't record size). */
+  basis: { n: number; scope: string; perM2: number; method: string; evidence: 'sales' | 'rentals' | 'assumed-yield'; demo: boolean };
   position: 'below' | 'within' | 'above' | null;
   /** Asking price vs the middle of the range, whole per cent (computed here, so the narrative may quote it). */
   askingVsMidPct: number | null;
+}
+
+/**
+ * The range from real sold prices: the middle half of what similar homes nearby sold for in the last two to three
+ * years (HM Land Registry). Sales only, and only when official data is switched on and there is enough evidence;
+ * otherwise null, and the caller falls back to priceRange() below.
+ */
+export async function officialPriceRange(i: PriceGuideIn): Promise<PriceRange | null> {
+  if (i.channel !== 'sale' || config.data.disabled) return null;
+  const place = await lookupPostcode(i.postcode);
+  if (!place) return null;
+  const sold = await soldAround(place, { years: 3 });
+  if (sold.coverage !== 'england-wales') return null;
+  const type = soldTypeFor(i.type);
+  const r = evidenceRange(sold.sales, { type, price: i.askingPrice ?? null });
+  if (r.basis === 'none' || r.low == null || r.mid == null || r.high == null) return null;
+  const what = r.basis === 'same-type' && type ? `${SOLD_TYPE_LABEL[type].toLowerCase()} homes` : 'homes of all types';
+  return {
+    low: r.low, high: r.high, mid: r.mid,
+    basis: {
+      n: r.count, scope: `within about ${sold.radiusM} m of ${place.label}`, perM2: 0, evidence: 'sales', demo: false,
+      method: `The middle half of the prices paid for ${r.count} ${what} sold within about ${sold.radiusM} m in the last ${r.months} months (HM Land Registry sold prices).`,
+    },
+    position: r.position === 'unknown' ? null : r.position,
+    askingVsMidPct: r.askingVsMid == null ? null : Math.round(r.askingVsMid * 100),
+  };
 }
 
 export function priceRange(i: PriceGuideIn): PriceRange | null {
@@ -122,19 +153,24 @@ export async function priceNarrative(i: PriceGuideIn, range: PriceRange, meta: {
   const rent = i.channel === 'rent';
   const deadline = meta.deadline ?? Date.now() + PRICE_TIMING.budgetMs;
   const allowedMoney = [range.low, range.high, ...(i.askingPrice ? [i.askingPrice] : [])];
-  const allowedPct = [8, ...(range.basis.evidence === 'assumed-yield' ? [ASSUMED_YIELD_PCT] : []), ...(range.askingVsMidPct != null ? [Math.abs(range.askingVsMidPct)] : [])];
+  const real = !range.basis.demo;
+  const allowedPct = [...(real ? [] : [8]), ...(range.basis.evidence === 'assumed-yield' ? [ASSUMED_YIELD_PCT] : []), ...(range.askingVsMidPct != null ? [Math.abs(range.askingVsMidPct)] : [])];
   const facts = [
     `Listing: ${rent ? 'to let (monthly rent)' : 'for sale'}`,
     `Property: ${i.beds}-bedroom ${typeWord(i.type)}, ${Math.round(i.floorArea)} m², ${i.condition} condition`,
     `Streetkey indicative range: ${fmt(range.low, rent)} to ${fmt(range.high, rent)}`,
-    `Basis: ${range.basis.method} The comparables are demonstration data, not sold prices.`,
+    real
+      ? `Basis: ${range.basis.method} These are real sold prices, but they don’t record floor area, bedrooms or condition.`
+      : `Basis: ${range.basis.method} The comparables are demonstration data, not sold prices.`,
     i.askingPrice ? `Asking ${rent ? 'rent' : 'price'}: ${fmt(i.askingPrice, rent)} (${range.position} the range; ${Math.abs(range.askingVsMidPct ?? 0)}% ${(range.askingVsMidPct ?? 0) >= 0 ? 'above' : 'below'} its middle)` : `Asking ${rent ? 'rent' : 'price'}: not set yet`,
   ].join('\n');
   const system = [
     HOUSE_RULES,
     'You explain Streetkey’s indicative price range to a private seller or landlord and suggest how to position the listing.',
     `The only £ figures you may write are ${allowedMoney.map((m) => gbpText(m)).join(', ')}. The only percentages you may write are ${allowedPct.map((p) => `${p}%`).join(', ')}. Do not calculate or estimate any other figure (no other prices, rents, yields, costs or percentages).`,
-    'It is an indicative range from limited demonstration evidence, not a valuation: say so once, briefly.',
+    real
+      ? 'The range is the middle half of real nearby sold prices, which don’t record size, bedrooms or condition. It shows the local market, not the value of this home: say so once, briefly. A larger or newly renovated home can fairly sit above it and a smaller or unmodernised one below it.'
+      : 'It is an indicative range from limited demonstration evidence, not a valuation: say so once, briefly.',
     rent ? 'This is a letting: the rent must be advertised as one fixed monthly figure. Never suggest inviting offers, bids or a rent that is negotiable upwards.' : 'Do not suggest pressure tactics or misleading price claims.',
     'Advice should be practical: presentation, photos, accurate details, realistic pricing, reviewing interest after a few weeks. British English, no emojis.',
   ].join('\n');

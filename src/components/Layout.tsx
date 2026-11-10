@@ -97,7 +97,7 @@ export default function Layout() {
 
       <footer className="site"><div>
         <span className="row" style={{ gap: 10 }}><StreetkeyBow size={22} /> <span><b>Streetkey</b> — See Beyond the Property. {online ? 'Early access · demo listings are labelled “Demo data”. Estimates are not advice.' : 'Public preview · listings and figures are demonstration data.'}</span></span>
-        <nav aria-label="Legal"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/accessibility">Accessibility</Link><Link to="/sources">Listing feeds</Link></nav>
+        <nav aria-label="Legal"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/accessibility">Accessibility</Link><Link to="/data-sources">Data sources</Link><Link to="/sources">Listing feeds</Link></nav>
       </div></footer>
 
       <nav className="tabbar" aria-label="App">

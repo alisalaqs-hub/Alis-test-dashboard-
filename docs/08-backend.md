@@ -39,6 +39,7 @@ Browser ── static site (dist/, from Netlify's CDN)
    - `OPENAI_API_KEY`: from platform.openai.com → API keys. Add credit and set a monthly limit there.
    - `ADMIN_EMAIL`: your email address (see step 5).
    - `RESEND_API_KEY` and `EMAIL_FROM` (e.g. `Streetkey <hello@yourdomain.co.uk>`): from resend.com after verifying your domain. Optional at first.
+   - `EPC_API_TOKEN`: optional, free. It lets Streetkey check energy ratings against the EPC register (see *Official data* below).
    - Optional: `AI_DAILY_TOKEN_BUDGET`, `AI_DAILY_TOKENS_PER_USER`, `AI_DAILY_TOKENS_PER_IP`, `AI_DAILY_IMAGES_PER_USER`, `AI_DAILY_IMAGES_SITE`, `AI_DAILY_REQUESTS_PER_USER`, `AI_DAILY_REQUESTS_PER_IP`, `AI_AUTO_APPROVE_LOW_RISK`, `AI_DISABLED` (defaults and meanings in `.env.example`).
 4. **Redeploy** (Deploys → *Trigger deploy*). The build applies the database migrations.
 5. **Make yourself admin.** Open the site, *Sign in → Create account* with the same address as `ADMIN_EMAIL`, then click the confirmation link in the email (or, if email isn't set up yet, find the link in Netlify → *Logs → Functions → api*). Once confirmed you're the admin (this only works while no admin exists).
@@ -80,6 +81,42 @@ Leave the `OPENAI_*_MODEL` settings blank and Streetkey picks the best models yo
 - Fast models for parsing and classification, caching of repeatable results, jobs for slow work, consent before photos are analysed.
 - Every call is recorded in `ai_usage` (tokens, latency, purpose, who it was charged to as an id; never prompts or outputs). Calls whose answer had to be thrown away (cut short, refused, invalid) are recorded as failures.
 - Set a monthly spend limit in your OpenAI account too.
+
+## Official data: sold prices, flood risk and energy certificates
+
+Real listings and the *Sold prices* page use official open data. Demo listings keep their demonstration figures, labelled as such.
+
+| Data | Source | Covers | Needs |
+|---|---|---|---|
+| Sold prices (every registered sale, with address, date, type and tenure) | HM Land Registry Price Paid Data, through its public SPARQL endpoint | England and Wales | Nothing |
+| Average price and yearly change for the local authority | UK House Price Index (HM Land Registry / ONS) | UK local authorities | Nothing |
+| Long-term flood risk from rivers and the sea and from surface water; flood warnings in force | Environment Agency: national flood risk assessment (NaFRA2) map service and the flood-monitoring API | England | Nothing |
+| Energy certificates (rating, potential, floor area, date) | *Get energy performance of buildings data* (MHCLG), the service that replaced epc.opendatacommunities.org in 2026 | England and Wales | `EPC_API_TOKEN` |
+| Postcode and place locations | postcodes.io | UK | Nothing |
+
+**Where it shows up**
+
+- **Sold prices page** (`/prices`): search a full postcode, a postcode district or a town; sales newest first, the median and middle half for the last 12 months, medians by property type and by year, and the area's official average.
+- **Real listing pages:** where the asking price sits against nearby sold prices, what sold nearby, the area average, flood risk, and the energy rating checked against the register. Private sellers stay private: their data is centred on the same rounded position the advert shows, sales carry no distances, and the certificate number is withheld.
+- **List a property:** a sale price is checked against real sold prices (and the AI price explanation uses them); *Find my certificate* fills in the energy rating from the register.
+- **Ask Streetkey:** the assistant can quote sold prices and flood risk through two tools (`sold_prices`, `flood_risk`), and its figure check accepts only what they return.
+
+**Endpoints:** `GET /api/data/status`, `GET /api/data/sold?q=`, `GET /api/data/flood?q=`, `GET /api/data/listings/:ref`, and for signed-in people `GET /api/data/epc/search?postcode=` and `GET /api/data/epc/certificate?number=`.
+
+**How it behaves**
+
+- Every answer is stored in PostgreSQL (migration 015): sold prices per postcode for 30 days (HM Land Registry publishes monthly), flood risk for 30 days, warnings for 15 minutes, certificates for 180 days. Repeat visits don't call the public services again.
+- HM Land Registry's endpoint takes one request at a time and refuses the rest, so Streetkey sends one query per search (covering every nearby postcode), queues its calls, retries a refusal twice, then leaves the endpoint alone for a minute and answers from what is stored. Searching by postcode prefix takes it 15 seconds or more, so areas are always asked for as a list of exact postcodes.
+- About one flood-map request in ten hangs, so each has a short timeout and a second request is sent if the first hasn't answered in 1.5 seconds. If one map can't be read, the other is still shown and the answer isn't stored, so the next visit tries again.
+- Each part fails on its own: a slow flood map never hides the sold prices, and pages say plainly when a source couldn't be reached.
+- Lookups are rate limited per visitor (30 a minute, 600 a day; EPC 20 a minute per signed-in person), so the site can't be used as a bulk download.
+- `OFFICIAL_DATA_DISABLED=true` switches every lookup off.
+
+**Getting the EPC token:** go to get-energy-performance-data.communities.gov.uk → *Start now* → *Use a developer API* → sign in or create a GOV.UK One Login → copy the bearer token from *My account* into `EPC_API_TOKEN` in Netlify and redeploy. The data includes address-level records, which count as personal data: Streetkey only looks a certificate up for a home being listed and never offers a browsable register.
+
+**Licences:** all four sources are under the Open Government Licence v3.0, with the attribution shown on each page and collected at `/data-sources`. Address data in the sold prices and certificates belongs to Royal Mail and Ordnance Survey and is used only for the purposes they permit (property price information; energy efficiency in the sale and rental markets).
+
+**Not covered:** Scotland and Northern Ireland have no open sold-price data in this form; flood maps for Wales, Scotland and Northern Ireland come from their own agencies. Pages say so instead of showing nothing.
 
 ## Listings, photos, feeds and alerts
 
@@ -142,7 +179,8 @@ GitHub Actions runs all of these on every push (`.github/workflows/ci.yml`).
 ## Not built yet
 
 - Payments (Stripe) for listing upgrades, agency subscriptions and API plans.
-- Real property data: HM Land Registry prices, the EPC register, Ofsted, TfL/National Rail journey times, flood risk (the intelligence profile still uses demonstration figures for these).
+- More official data: Ofsted school ratings, journey times, planning applications, conservation areas, subsidence and radon (not shown for real listings yet); sold prices matched to EPC floor areas for a price per square metre; flood maps for Wales and Scotland.
+- Valuation, rent and deal-score models for real listings still use Streetkey's demonstration evidence and are labelled as estimates; the price check on real listings uses real sold prices.
 - Identity and HM Land Registry title checks for a "Verified owner" badge.
 - Documents (EPC certificates, floor plans, leases) with AI extraction; map search with PostGIS.
 - Lettings management tools (tenancies, deposits, compliance reminders).

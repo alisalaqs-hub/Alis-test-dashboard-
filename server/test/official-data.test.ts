@@ -5,8 +5,9 @@ import { q } from '../src/db';
 import { addressKey, epcForAddress } from '../src/data/epc';
 import { parseCsv } from '../src/data/http';
 import { fetchSales, formatAddress } from '../src/data/landRegistry';
-import { client, jpegWithExif, LISTING, makeAdmin, multipart, signUp } from './helpers';
+import { client, getApp, jpegWithExif, LISTING, makeAdmin, multipart, signUp } from './helpers';
 import { fakeOfficial, type FakePostcode, type FakeSale } from './official-fakes';
+import { mockOpenAI, reply } from './openai-mock';
 
 const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
 const HOME = { lat: 51.5906, lng: -0.0185 };
@@ -343,6 +344,91 @@ describe('official data for a listing', () => {
       await publish(l);
       expect((await client().get(`/api/data/listings/${l.ref}`)).json).toMatchObject({ epc: null, epcStatus: 'no-match' });
     } finally { g.restore(); }
+  });
+});
+
+describe('AI price guide on real sold prices', () => {
+  it('explains where a sale price sits against HM Land Registry sold prices, and keeps demonstration evidence for rentals', async () => {
+    const f = official();
+    const ai = mockOpenAI({ chat: () => reply.json({ explanation: 'Nearby terraced homes sold in this range.', position: 'Your price is above it.', advice: ['Check your photos.'] }) });
+    try {
+      const { c } = await signUp();
+      const sale = await c.post('/api/ai/listing/price-guide', { postcode: 'E17 4QH', type: 'terraced', beds: 3, floorArea: 92, condition: 'fair', channel: 'sale', askingPrice: 700_000 });
+      expect(sale.status).toBe(200);
+      expect(sale.json.basis).toMatchObject({ demo: false, evidence: 'sales', perM2: 0 });
+      expect(sale.json.basis.method).toMatch(/middle half of the prices paid for \d+ terraced homes sold within about \d+ m in the last \d+ months \(HM Land Registry sold prices\)/);
+      expect(sale.json.low).toBeLessThan(sale.json.high);
+      expect(sale.json.position).toBe('above');
+      expect(sale.json.label).toMatch(/HM Land Registry sold prices/);
+      const prompt = JSON.stringify(ai.calls('chat')[0].body.messages);
+      expect(prompt).toMatch(/real sold prices/);
+      expect(prompt).not.toMatch(/demonstration/);
+      const rent = await c.post('/api/ai/listing/price-guide', { postcode: 'E17 4QH', type: 'terraced', beds: 3, floorArea: 92, condition: 'fair', channel: 'rent', askingPrice: 1800 });
+      expect(rent.json.basis.demo).toBe(true);
+      // with official data switched off, sales fall back to the demonstration evidence too
+      config.data.disabled = true;
+      const off = await c.post('/api/ai/listing/price-guide', { postcode: 'E17 4QH', type: 'terraced', beds: 3, floorArea: 93, condition: 'fair', channel: 'sale', askingPrice: 700_000 });
+      expect(off.json.basis.demo).toBe(true);
+    } finally { ai.restore(); f.restore(); }
+  });
+});
+
+describe('Ask Streetkey with official data', () => {
+  const lastTool = (body: { messages: { content: string }[] }) => JSON.parse(body.messages.at(-1)!.content);
+  const answer = (text: string) => reply.json({ reply: text, propertyIds: [], actions: [], followUps: [] });
+  const chat = async (text: string, ip: string) => {
+    const r = await (await getApp()).inject({ method: 'POST', url: '/api/ai/chat', payload: { messages: [{ role: 'user', content: text }] }, remoteAddress: ip });
+    return { status: r.statusCode, json: r.json() as { reply: string; grounding: string; sources: string[] } };
+  };
+
+  it('quotes real sold prices and flood risk, and its figure check accepts them', async () => {
+    const f = official({ flood: { riversAndSea: { wide: ['High'], close: ['Medium'] }, surfaceWater: { wide: [], close: [] } } });
+    let sold: { last12Months: { sales: number; medianPrice: number }; localAuthorityAverage: { averagePrice: number; changeOverAYearPct: number }; source: string } | undefined;
+    const ai = mockOpenAI({
+      chat: (body, n) => {
+        if (n === 0) return reply.tools([{ name: 'sold_prices', args: { place: 'E17 4PP' } }, { name: 'flood_risk', args: { place: 'E17 4PP' } }]);
+        const results = body.messages.filter((m: { role: string }) => m.role === 'tool').map((m: { content: string }) => JSON.parse(m.content));
+        sold = results.find((r: { last12Months?: unknown }) => r.last12Months);
+        const flood = results.find((r: { riversAndSea?: unknown }) => r.riversAndSea);
+        return answer(`HM Land Registry records ${sold!.last12Months.sales} sales near E17 4PP in the last 12 months, with a median of **£${sold!.last12Months.medianPrice.toLocaleString('en-GB')}**. `
+          + `The Waltham Forest average is £${sold!.localAuthorityAverage.averagePrice.toLocaleString('en-GB')}, up ${sold!.localAuthorityAverage.changeOverAYearPct}% in a year. `
+          + `The Environment Agency rates flood risk from rivers and the sea as ${flood.riversAndSea.atThisPoint} at the postcode centre.`);
+      },
+    });
+    try {
+      const r = await chat('What do homes sell for near E17 4PP, and does it flood?', '10.77.0.1');
+      expect(r.status).toBe(200);
+      expect(sold!.source).toMatch(/HM Land Registry/);
+      expect(sold!.last12Months).toMatchObject({ sales: 9 });
+      expect(r.json.reply).toContain(`£${sold!.last12Months.medianPrice.toLocaleString('en-GB')}`);
+      expect(r.json.reply).toContain('£532,212');
+      expect(r.json.reply).toMatch(/medium at the postcode centre/);
+      expect(r.json.grounding).toBe('checked');
+      expect(r.json.sources.sort()).toEqual(['Environment Agency flood risk', 'HM Land Registry sold prices']);
+    } finally { ai.restore(); f.restore(); }
+  });
+
+  it('a made-up sold price is still removed, and unknown places and Scotland get honest answers', async () => {
+    const f = official();
+    let seen: unknown[] = [];
+    const ai = mockOpenAI({
+      chat: (body, n) => {
+        if (n === 0) return reply.tools([{ name: 'sold_prices', args: { place: 'Nowhereville' } }, { name: 'sold_prices', args: { place: 'EH1 1YZ' } }, { name: 'flood_risk', args: { place: 'EH1 1YZ' } }]);
+        if (body.response_format?.json_schema?.name === 'streetkey_answer_fix') return answer('I couldn’t find sold prices for that place.');
+        seen = body.messages.filter((m: { role: string }) => m.role === 'tool').map((m: { content: string }) => lastTool({ messages: [m] }));
+        return answer('Homes there sell for about £987,654 on average.');
+      },
+    });
+    try {
+      const r = await chat('What do homes sell for in Nowhereville and Edinburgh?', '10.77.0.2');
+      // tool results arrive in the order they finish, so look for each by what it says
+      expect(seen).toHaveLength(3);
+      expect(seen).toContainEqual(expect.objectContaining({ error: expect.stringMatching(/not recognised/) }));
+      expect(seen).toContainEqual(expect.objectContaining({ country: 'Scotland', note: expect.stringMatching(/England and Wales only/) }));
+      expect(seen).toContainEqual(expect.objectContaining({ country: 'Scotland', note: expect.stringMatching(/flood maps cover England only/) }));
+      expect(r.json.reply).not.toContain('987,654');
+      expect(r.json.grounding).not.toBe('checked');
+    } finally { ai.restore(); f.restore(); }
   });
 });
 

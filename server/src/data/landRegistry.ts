@@ -40,12 +40,29 @@ function inTurn<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * When the endpoint keeps refusing (it allows roughly one request every second or two), stop
+ * asking for a minute: pages then answer at once from what is stored instead of each waiting.
+ */
+let restUntil = 0;
+const REST_MS = 60_000;
+
 /** Run a query and return its rows as objects keyed by column name. */
 async function sparql(query: string, timeoutMs = 12_000): Promise<Record<string, string>[]> {
-  const r = await inTurn(() => fetchData(config.data.landRegistryUrl, {
-    source: 'land-registry', method: 'POST', accept: 'text/csv', timeoutMs, retries: 3, backoffMs: [700, 1500, 3000],
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `query=${encodeURIComponent(`${PREFIXES}\n${query}`)}`,
-  }));
+  const busy = () => new DataError('land-registry', 'HM Land Registry is busy just now. Please try again in a minute.', 503, 'land_registry_busy');
+  if (Date.now() < restUntil) throw busy();
+  const r = await inTurn(async () => {
+    if (Date.now() < restUntil) throw busy();
+    try {
+      return await fetchData(config.data.landRegistryUrl, {
+        source: 'land-registry', method: 'POST', accept: 'text/csv', timeoutMs, retries: 2, backoffMs: [800, 1800],
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `query=${encodeURIComponent(`${PREFIXES}\n${query}`)}`,
+      });
+    } catch (e) {
+      if (!config.isTest) restUntil = Date.now() + REST_MS;
+      throw e;
+    }
+  });
   if (r.status !== 200) throw new DataError('land-registry', 'HM Land Registry couldn’t answer that just now. Please try again in a moment.');
   const rows = parseCsv(await r.text());
   const head = rows.shift() ?? [];
