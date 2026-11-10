@@ -19,6 +19,8 @@ export default defineConfig({
       RESEND_API_KEY: '',
       AI_JOBS_MODE: 'sync',
       STORAGE_DRIVER: 'local',
+      // Official data services are only called in tests that set up stand-ins for them (server/test/official-fakes.ts).
+      OFFICIAL_DATA_DISABLED: 'true',
     },
     setupFiles: ['server/test/setup.ts'],
   },

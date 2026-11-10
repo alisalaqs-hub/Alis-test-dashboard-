@@ -22,6 +22,8 @@ import { aiInboxRoutes } from './routes/ai-inbox';
 import { aiImportRoutes } from './routes/ai-import';
 import { aiPropertyRoutes } from './routes/ai-property';
 import { aiBriefingRoutes } from './routes/ai-briefing';
+import { DataError } from './data/http';
+import { dataRoutes } from './routes/data';
 import { actorScope, AiError } from './ai/core';
 import { clearHooks } from './ai/hooks';
 import { adminRoutes } from './routes/admin';
@@ -99,6 +101,10 @@ export async function buildApp(): Promise<FastifyInstance> {
       if (err.status === 429 && err.fields?.retryAfter) reply.header('Retry-After', err.fields.retryAfter);
       return reply.code(err.status).send({ error: { code: err.code, message: err.message, fields: err.fields } });
     }
+    if (err instanceof DataError) {
+      if (!config.isTest) req.log.warn({ source: err.source, code: err.code }, 'official data unavailable');
+      return reply.code(err.status).send({ error: { code: err.code, message: err.message } });
+    }
     if (err instanceof AiError) {
       if (!config.isTest) req.log.warn({ code: err.code, err: err.message.slice(0, 300) }, 'ai error');
       return reply.code(err.status).send({ error: { code: err.code, message: err.userMessage } });
@@ -143,6 +149,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(aiPropertyRoutes);
   await app.register(aiBriefingRoutes);
   await app.register(eventRoutes);
+  await app.register(dataRoutes);
 
   // Uploaded media (local storage driver).
   if (config.storage.driver === 'local') {

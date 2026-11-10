@@ -109,6 +109,23 @@ export const config = {
     /** Per-call timeout for background jobs (image editing, photo analysis). */
     timeoutMs: int(env.AI_TIMEOUT_MS, 240_000),
   },
+  /**
+   * Official open data: HM Land Registry sold prices and house price index, Environment Agency flood risk,
+   * the energy certificate (EPC) register and postcodes.io. All are called from the server only and cached in the database.
+   */
+  data: {
+    /** OFFICIAL_DATA_DISABLED=true stops every call to these services (pages then say the data isn't available). */
+    disabled: bool(env.OFFICIAL_DATA_DISABLED, false),
+    landRegistryUrl: (env.LAND_REGISTRY_SPARQL_URL ?? 'https://landregistry.data.gov.uk/landregistry/query').replace(/\/$/, ''),
+    floodMapsUrl: (env.EA_FLOOD_MAPS_URL ?? 'https://environment.data.gov.uk/spatialdata').replace(/\/$/, ''),
+    floodWarningsUrl: (env.EA_FLOOD_WARNINGS_URL ?? 'https://environment.data.gov.uk/flood-monitoring').replace(/\/$/, ''),
+    postcodesUrl: (env.POSTCODES_URL ?? 'https://api.postcodes.io').replace(/\/$/, ''),
+    /** Energy certificates: a free bearer token from get-energy-performance-data.communities.gov.uk (GOV.UK One Login). Without it EPC lookups are off. */
+    epcUrl: (env.EPC_API_URL ?? 'https://api.get-energy-performance-data.communities.gov.uk').replace(/\/$/, ''),
+    epcToken: env.EPC_API_TOKEN ?? '',
+    /** Sent with every request so the services can see who is calling. */
+    userAgent: `Streetkey/1.0 (+${publicUrl})`,
+  },
   jobs: {
     /** How queued AI jobs run: 'inline' (same process, after the response), 'netlify' (background function), 'sync' (tests: run before responding). */
     mode: (env.AI_JOBS_MODE || (runtime === 'netlify' ? 'netlify' : nodeEnv === 'test' ? 'sync' : 'inline')) as 'inline' | 'netlify' | 'sync',

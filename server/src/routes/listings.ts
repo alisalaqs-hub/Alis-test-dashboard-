@@ -24,7 +24,7 @@ export async function viewerOf(req: FastifyRequest) {
   return { userId: req.user?.id ?? null, orgIds: await orgIdsFor(req.user?.id), admin: req.user?.role === 'admin' };
 }
 
-async function loadByRef(ref: string) {
+export async function loadByRef(ref: string) {
   return one<ListingRow>(`${LISTING_SELECT} WHERE l.ref = $1`, [ref]);
 }
 

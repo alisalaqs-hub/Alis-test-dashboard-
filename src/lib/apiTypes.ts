@@ -3,6 +3,8 @@
  * Shared by server/src (Node) and src (browser), so keep it free of runtime imports.
  */
 import type { SavedSearchFilters } from './ai/search';
+import type { EpcBand, EvidenceRange, FloodResult, HpiSummary, SoldSale, SoldStats } from '../engine/evidence';
+
 export type ListingStatus = 'draft' | 'pending' | 'live' | 'under_offer' | 'sold' | 'let' | 'withdrawn' | 'rejected';
 export type SourceKindDTO = 'owner' | 'landlord' | 'agent-feed' | 'agent';
 
@@ -82,3 +84,41 @@ export interface SavedSearchDTO { id: string; query: string; mode: string; alert
 export interface AiImageDTO { id: string; room: string; style: string; brief: string | null; status: 'running' | 'done' | 'failed'; url: string | null; sourceUrl: string | null; model: string; error: string | null; createdAt: string }
 
 export interface ApiErrorBody { error: { code: string; message: string; fields?: Record<string, string> } }
+
+/* ───────────── Official open data (HM Land Registry, Environment Agency, EPC register) ───────────── */
+
+/** What the server can look up right now. */
+export interface DataStatusDTO { enabled: boolean; soldPrices: boolean; flood: boolean; epc: boolean }
+
+/** Sold prices around a place. */
+export interface SoldPricesDTO {
+  place: { kind: 'postcode' | 'outcode' | 'place'; label: string; district: string | null; country: string | null };
+  /** HM Land Registry's Price Paid Data covers England and Wales only. */
+  coverage: 'england-wales' | 'not-covered';
+  /** How far from the centre the sales reach, in metres. */
+  radiusM: number;
+  years: number;
+  /** Standard residential sales, newest first (at most 300). */
+  sales: SoldSale[];
+  /** Every sale found, including those not listed above. */
+  totalSales: number;
+  stats: SoldStats;
+  hpi: HpiSummary | null;
+  /** True when some postcodes couldn't be refreshed from HM Land Registry just now. */
+  partial: boolean;
+  attribution: string[];
+}
+
+/** Official data for one live listing. Private sellers' exact location is never revealed. */
+export interface OfficialListingDTO {
+  ref: string;
+  sold: Pick<SoldPricesDTO, 'coverage' | 'radiusM' | 'years' | 'sales' | 'totalSales' | 'stats' | 'hpi' | 'partial'> | null;
+  /** Where the asking price sits against nearby sold prices (sale listings only). */
+  range: EvidenceRange | null;
+  flood: FloodResult | null;
+  /** The home's energy certificate from the register, when it can be matched with confidence. */
+  epc: { band: EpcBand | null; potentialBand: EpcBand | null; score: number | null; registeredOn: string | null; expired: boolean; floorAreaM2: number | null; certificateNumber: string | null; matchesListing: boolean | null } | null;
+  /** 'not-configured' when the site has no EPC access token, 'no-match' when no certificate could be matched. */
+  epcStatus: 'ok' | 'not-configured' | 'no-match' | 'unavailable';
+  attribution: string[];
+}
