@@ -16,7 +16,8 @@ import '../styles/journey.css';
  * Streetkey journey: the homepage's living background.
  * A Victorian terrace, drawn as a fine-line architectural elevation, that plays a
  * home buyer's story on a loop (Look → Buy → Move in → Live → Grow). Every figure
- * comes from the engines and the demo listings.
+ * comes from the engines and the demo listings. On completion the buyers walk along
+ * the pavement, up the path and in through their front door; then the lights come on.
  *
  * Interactive: hover a house for its price or sold price, click a house to open it,
  * gentle parallax. Callouts are placed so they never sit under the search panel.
@@ -33,6 +34,8 @@ const BUY_FOR_SALE = [3, 4, 5, 7]; // for sale on the buyer's street (hero is th
 const SOLD_ON = [0, 1, 2, 6];   // the street's recent sold prices
 const SCHOOL: [number, number] = [1447, 404]; // the board school, under its bell turret
 const LINE: [number, number] = [930, 459];    // the railway viaduct
+const BUYERS = [1052, 1066];    // where the couple stand while they look
+const HERO_DOOR = bayX(HERO) + doorX(mirrored(HERO)); // centre line of the buyer's front door
 const VB_FULL = [0, 0, 1600, 900] as const;
 const VB_COMPACT = [700, 300, 920, 603] as const;
 // Per-bay character: brick or painted fronts, door colours, hedge or railings.
@@ -130,7 +133,8 @@ export function JourneyScene() {
   const m = useLayoutBoxes(root, [compact, stage]);
 
   const summary = `A Victorian street where a home buyer's story plays on a loop. Look: every home on the street comes priced. `
-    + `Buy: offer accepted at ${gbp(s.hero.price)}, stamp duty as a first-time buyer ${gbp(s.ftbTax)}. Move in: keys collected. `
+    + `Buy: offer accepted at ${gbp(s.hero.price)}, stamp duty as a first-time buyer ${gbp(s.ftbTax)}. `
+    + `Move in: keys collected; the buyers walk up the path and in through their front door, and the lights come on. `
     + `Live: ${s.school ? `${s.school.rating} school ${s.school.distanceKm} km away, ` : ''}${s.hero.commute.minutes} min to ${s.hero.commute.to}. `
     + `Grow: renovate (about ${gbpK(s.heroWorks)}) and convert the loft (about ${gbpK(s.loft?.cost ?? 0)}); estimated value after works ${gbpK(s.hero.estGdv + (s.loft?.valueUplift ?? 0))}, EPC ${s.hero.epc.current} to ${s.epcTarget}.`;
   const running = playing && visible;
@@ -222,7 +226,7 @@ export function JourneyScene() {
               const board: 'sale' | 'sold' | null = forSale ? 'sale' : sold ? 'sold' : null;
               const dx = doorX(mm);
               return (
-                <g key={k} style={style} className={`j-house${hover === i ? ' is-hover' : ''}`}
+                <g key={k} style={style} className={`j-house${hover === i ? ' is-hover' : ''}${isHero && st === 2 ? ' is-entering' : ''}`}
                   onPointerEnter={() => setHover(i)} onPointerLeave={() => setHover(null)} onClick={() => nav(s.buyerHouse[i].to)}>
                   {body}
                   <g transform={`translate(${x} 0)`}>
@@ -234,7 +238,7 @@ export function JourneyScene() {
                       </g>
                     )}
                     {isHero && <g className={`j-grow${on(st === 4)}`}><Grow m={mm} P={P} /></g>}
-                    <g className={`j-board${on(!!board)}`}><Board cx={bayCentre(mm)} kind={board ?? 'sale'} P={P} /></g>
+                    <g className={`j-board${on(!!board)}`}><Board cx={bayCentre(mm)} kind={board ?? (isHero && st >= 1 ? 'sold' : 'sale')} P={P} /></g>
                     <rect className="j-hit" x={0} y={RIDGE - 40} width={BAY} height={GROUND - RIDGE + 40} />
                   </g>
                 </g>
@@ -249,8 +253,15 @@ export function JourneyScene() {
             <Lamps P={P} />
 
             {/* Scale figures and the van: quiet silhouettes, as on an architect's drawing */}
-            <g className={`j-np j-buyer${on(st === 0)}`}><Figure x={1052} kind="woman" P={P} /><Figure x={1066} kind="man" P={P} /></g>
-            <g className={`j-np j-family${on(st >= 2)}`}><Figure x={1082} kind="woman" P={P} /><Figure x={1146} kind="man" P={P} flip /></g>
+            {/* The buyers look, buy, then (on completion) walk to their door and go in; the family is out on the street afterwards. */}
+            <g className={`j-np j-buyer${on(st <= 2)}${st >= 2 ? ' enter' : ''}`}>
+              {BUYERS.map((x, n) => (
+                <g key={x} className="j-anim j-walk" style={{ ['--dx' as string]: `${HERO_DOOR - x}px`, ['--wd' as string]: `${n * 420}ms` } as CSSProperties}>
+                  <g className="j-anim j-step"><Figure x={x} kind={n ? 'man' : 'woman'} P={P} /></g>
+                </g>
+              ))}
+            </g>
+            <g className={`j-np j-family${on(st >= 3)}`}><Figure x={1082} kind="woman" P={P} /><Figure x={1146} kind="man" P={P} flip /></g>
             <g className={`j-np j-kid${on(st >= 3)}`}><Figure x={1093} kind="child" P={P} /></g>
             <Trees P={P} />
             <LampLight P={P} />

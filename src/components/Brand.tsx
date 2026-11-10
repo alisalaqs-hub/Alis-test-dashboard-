@@ -1,34 +1,33 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * Streetkey identity: a key whose blade is a street of six houses, with an
+ * Streetkey identity: a key whose blade is a short street of four houses, with an
  * orange locator dot in the bow. Wordmark "streetkey" with "key" in orange.
  *
  * Header lockup aligns the wordmark baseline with the street (blade top).
  * Interactive: on hover/focus the key turns and the windows light in sequence;
  * the locator dot follows the pointer. Night theme lights the windows.
  * Reduced motion: no turn and no dot tracking (windows still light).
+ * Colours come from --logo-key (the key), --logo-dot and --logo-word-2 ("key"), set in styles.css.
  */
-export const HOUSES = [
+export const HOUSES: { poly: string; wins: number[][]; chimney?: number }[] = [
   { poly: '172,125 172,95 193,72 214,95 214,125', wins: [[179, 104, 13, 13], [197, 107, 10, 18]] },
   { poly: '220,125 220,85 241,60 262,85 262,125', wins: [[227, 104, 13, 13], [245, 107, 10, 18]] },
-  { poly: '268,125 268,96 289,74 310,96 310,125', wins: [[275, 104, 13, 13], [293, 107, 10, 18]] },
-  { poly: '316,125 316,80 337,52 358,80 358,125', wins: [[330.5, 86, 13, 12], [323, 104, 13, 13], [341, 107, 10, 18]], chimney: true },
-  { poly: '364,125 364,92 385,68 406,92 406,125', wins: [[371, 104, 13, 13], [389, 107, 10, 18]] },
-  { poly: '412,125 412,86 433,62 454,86 454,125', wins: [[419, 104, 13, 13], [437, 107, 10, 18]] },
+  { poly: '268,125 268,80 289,52 310,80 310,125', wins: [[282.5, 86, 13, 12], [275, 104, 13, 13], [293, 107, 10, 18]], chimney: 294 },
+  { poly: '316,125 316,92 337,68 358,92 358,125', wins: [[323, 104, 13, 13], [341, 107, 10, 18]] },
 ];
-// Tight bounds of the artwork: ring outer edge (20..160, 40..180), blade to x=500, chimney top y=44.
-const VB = { x: 18, y: 38, w: 486, h: 144 };
+// Tight bounds of the artwork: ring outer edge (20..160, 40..180), blade to x=404, chimney top y=44.
+const VB = { x: 18, y: 38, w: 390, h: 144 };
 
 export function StreetkeyMark({ height = 26, interactive = false, dotRef }: { height?: number; interactive?: boolean; dotRef?: React.Ref<SVGCircleElement> }) {
   return (
     <svg className={`sk-mark${interactive ? ' is-interactive' : ''}`} viewBox={`${VB.x} ${VB.y} ${VB.w} ${VB.h}`} height={height} width={(height * VB.w) / VB.h} aria-hidden="true">
       <g className="sk-mark-rig">
         <circle cx="90" cy="110" r="57" fill="none" stroke="currentColor" strokeWidth="26" />
-        <path d="M140 125 H500 V172 H470 V151 H445 V166 H425 V151 H140 Z" fill="currentColor" />
+        <path d="M140 125 H404 V172 H374 V151 H349 V166 H329 V151 H140 Z" fill="currentColor" />
         {HOUSES.map((h, i) => (
           <g key={i} className="sk-mark-house" style={{ ['--i' as string]: i }}>
-            {h.chimney && <rect x="342" y="44" width="8" height="28" fill="currentColor" />}
+            {h.chimney && <rect x={h.chimney} y="44" width="8" height="28" fill="currentColor" />}
             <polygon points={h.poly} fill="currentColor" />
             {h.wins.map(([x, y, w, hh]) => <rect key={`${x}-${y}`} className="sk-mark-win" x={x} y={y} width={w} height={hh} />)}
           </g>

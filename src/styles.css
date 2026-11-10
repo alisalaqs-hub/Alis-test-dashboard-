@@ -619,12 +619,14 @@ h1, h2, h3, h4 { font-family: var(--display); font-weight: 800; letter-spacing: 
 
 
 /* ===== v0.6 · Header logo (interactive) & hero street backdrop ===== */
-.logo { perspective: 600px; }
-.wordmark-lockup { display: inline-flex; align-items: flex-end; gap: 9px; color: var(--ink); line-height: 1; }
+/* Logo colours, all in one place: the key, the dot in its bow, and the two halves of the word. */
+.logo { perspective: 600px; --logo-key: var(--ink); --logo-dot: var(--accent); --logo-word: var(--ink); --logo-word-2: var(--accent); }
+.wordmark-lockup { display: inline-flex; align-items: flex-end; gap: 9px; color: var(--logo-word, var(--ink)); line-height: 1; }
 .wordmark-lockup .wordmark { font-size: 27px; line-height: 1; }
-.sk-mark { display: block; flex: none; color: var(--ink); overflow: visible; transition: transform 900ms cubic-bezier(.65, 0, .35, 1); }
+.wordmark-lockup .wordmark .k { color: var(--logo-word-2, var(--accent)); }
+.sk-mark { display: block; flex: none; color: var(--logo-key, var(--ink)); overflow: visible; transition: transform 900ms cubic-bezier(.65, 0, .35, 1); }
 .sk-mark-win { fill: var(--paper); transition: fill 260ms ease calc(var(--i) * 70ms); }
-.sk-mark-dot { fill: var(--accent); transition: transform 140ms linear; }
+.sk-mark-dot { fill: var(--logo-dot, var(--accent)); transition: transform 140ms linear; }
 .logo:hover .sk-mark, .logo:focus-visible .sk-mark { transform: rotateX(360deg); }
 .logo:hover .sk-mark-win, .logo:focus-visible .sk-mark-win { fill: #FFC24B; }
 :root[data-theme='dark'] .sk-mark-win { fill: #FFC24B; }

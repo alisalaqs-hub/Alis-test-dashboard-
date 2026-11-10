@@ -30,9 +30,15 @@
 .j-van { transform: translateX(46px); transition: opacity 450ms ease, transform 1200ms cubic-bezier(.16, .8, .24, 1); }
 .j-van.on { transform: none; }
 /* the front door opens onto a lit hall */
-.j-leaf { transform-box: fill-box; transform-origin: 0 50%; transition: transform 900ms cubic-bezier(.55, 0, .2, 1) 300ms; }
+.j-leaf { transform-box: fill-box; transform-origin: 0 50%; transition: transform 700ms cubic-bezier(.55, 0, .2, 1) 150ms; }
 .j-leaf.m { transform-origin: 100% 50%; }
 .j-doorway.on .j-leaf { transform: scaleX(0.14); }
+/* completion: the buyers walk along the pavement, up the path and in through the door, one after the other;
+   the house lights come on once they are inside */
+.j-walk { transform-box: fill-box; transform-origin: 50% 100%; }
+.j-buyer.enter .j-walk { animation: j-enter 2.5s linear var(--wd, 0ms) forwards; }
+.j-buyer.enter .j-step { animation: j-step 0.3s ease-in-out 10 alternate; }
+.j-house.is-entering .j-lw { transition-delay: calc(2500ms + var(--n, 0) * 90ms); }
 
 /* motion (all paused together; reduced motion shows the end state) */
 .j-dot.hop { animation: j-hop 3.4s linear forwards; }
@@ -43,6 +49,13 @@
 .j-cloud2 { animation-duration: 48s; animation-direction: alternate-reverse; }
 .j-tw { animation: j-tw 3s ease-in-out infinite alternate; animation-delay: var(--t, 0s); }
 .journey.is-paused .j-anim, .journey.is-paused .j-dot { animation-play-state: paused; }
+@keyframes j-enter {
+  0% { transform: none; opacity: 1; animation-timing-function: cubic-bezier(.4, 0, .6, 1); }
+  42% { transform: translate(var(--dx), 0); opacity: 1; animation-timing-function: cubic-bezier(.4, 0, .7, 1); }
+  80% { transform: translate(var(--dx), -54px) scale(0.88); opacity: 1; animation-timing-function: ease-out; }
+  100% { transform: translate(var(--dx), -57px) scale(0.8); opacity: 0; }
+}
+@keyframes j-step { from { transform: translateY(0); } to { transform: translateY(-1.3px); } }
 @keyframes j-ping { 0% { transform: scale(0.45); opacity: 0.42; } 70%, 100% { transform: scale(1.7); opacity: 0; } }
 @keyframes j-train { from { transform: translateX(-560px); } to { transform: translateX(1780px); } }
 @keyframes j-cloud { from { transform: translateX(-60px); } to { transform: translateX(80px); } }
@@ -127,6 +140,9 @@
   .journey .j-anim, .journey .j-dot { animation: none !important; }
   .j-far, .j-mid, .j-grow, .j-van, .j-card, .j-stem, .j-tick, .j-bar { transform: none !important; }
   .j-leaf { transition: none; }
+  /* no walking: on completion the buyers are simply indoors and the lights are on */
+  .j-buyer.enter .j-walk { opacity: 0; }
+  .j-house.is-entering .j-lw { transition-delay: 0ms; }
   .j-note, .j-note.on, .j-card, .j-note.on .j-card { transition: opacity 200ms ease !important; }
 }
 @media (prefers-reduced-motion: reduce) { .j-train.on { transform: translateX(560px); } }

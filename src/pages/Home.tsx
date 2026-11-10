@@ -35,7 +35,6 @@ export default function Home() {
           <div className="hero-copy">
             <div className="row" style={{ gap: 8 }}><span className="label-mono">Find</span><Tag kind="demo">Demo data</Tag></div>
             <h1 id="hero-h">Find a home<i className="stop">.</i><br /><span>Unlock the whole street<b className="stop">.</b></span></h1>
-            <p className="hero-sub">Every home comes with its value, the true cost of works, schools, travel, energy and what it could become — before you book a viewing.</p>
             <SmartSearch />
           </div>
         </div>
