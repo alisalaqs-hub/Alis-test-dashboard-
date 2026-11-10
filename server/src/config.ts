@@ -48,7 +48,7 @@ export const config = {
   /** Connections per process: small on serverless (many short-lived instances), larger on a server. */
   databasePoolMax: int(env.DATABASE_POOL_MAX, runtime === 'netlify' ? 3 : 10),
   /** Serve the built website (dist/) from the same server, so one address hosts everything. */
-  serveSite: bool(env.SERVE_SITE, true),
+  serveSite: bool(env.SERVE_SITE, runtime !== 'netlify'),
   siteDir: path.resolve(ROOT, env.SITE_DIR ?? 'dist'),
   session: {
     cookie: 'sk_session',

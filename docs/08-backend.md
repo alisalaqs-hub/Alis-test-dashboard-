@@ -167,10 +167,12 @@ For website work with hot reload, run `npm run dev` alongside the server and set
 | `npm test` | Engine and website logic tests |
 | `npm run server:test` | API and AI features against a real `streetkey_test` database, with a fake OpenAI |
 | `npm run typecheck` / `npm run server:typecheck` | TypeScript, website and server |
-| `npm run netlify:bundle-check -- --run` | Bundles the Netlify functions like Netlify does and runs the API bundle against PostgreSQL |
+| `npm run netlify:bundle-check -- --run` | Checks the Netlify functions will start on Netlify: scans the installed packages, builds each function bundled and as Netlify ships it, and runs the API both ways against PostgreSQL |
 | `npm run a11y` | axe WCAG 2.2 AA audit (see the script header for options) |
 
 GitHub Actions runs all of these on every push (`.github/workflows/ci.yml`).
+
+**Pinned packages.** Netlify's function runtime will not let an older-style (CommonJS) package load a package published only as an ES module; when that happens every `/api` request fails with `ERR_REQUIRE_ESM`. Two libraries the server's own packages depend on (`cookie` and `content-disposition`) have moved to ES-module-only releases, so `package.json` pins them to their last compatible versions under `overrides`. Leave those pins in place when updating packages. The bundle check fails if a new clash appears, and names the package to pin.
 
 ## Other hosts
 

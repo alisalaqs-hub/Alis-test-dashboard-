@@ -56,5 +56,16 @@
     "vite": "^8.3.6",
     "vite-plugin-singlefile": "^2.3.4",
     "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "light-my-request": {
+      "cookie": "1.1.1"
+    },
+    "@fastify/cookie": {
+      "cookie": "1.1.1"
+    },
+    "@fastify/static": {
+      "content-disposition": "2.0.1"
+    }
   }
 }

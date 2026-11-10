@@ -5,7 +5,6 @@
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -151,16 +150,22 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(eventRoutes);
   await app.register(dataRoutes);
 
+  // Serving files from disk is only needed on a Node host (uploads on local disk, and the website itself).
+  // On Netlify the CDN serves the site and a function serves media, so the static-file package is never
+  // loaded there: it pulls in an ES-module-only dependency that Netlify's function runtime can't require().
+  const hasSiteFiles = config.serveSite && fs.existsSync(path.join(config.siteDir, 'index.html'));
+  const fastifyStatic = config.storage.driver === 'local' || hasSiteFiles ? (await import('@fastify/static')).default : null;
+
   // Uploaded media (local storage driver).
-  if (config.storage.driver === 'local') {
+  if (config.storage.driver === 'local' && fastifyStatic) {
     fs.mkdirSync(config.storage.localDir, { recursive: true });
     await app.register(fastifyStatic, { root: config.storage.localDir, prefix: '/media/', decorateReply: false, maxAge: '30d', immutable: true });
   }
 
   // The website (one address for site + API). Hashed assets cache for a year; index.html never.
   const siteIndex = path.join(config.siteDir, 'index.html');
-  const hasSite = config.serveSite && fs.existsSync(siteIndex);
-  if (hasSite) {
+  const hasSite = hasSiteFiles;
+  if (hasSite && fastifyStatic) {
     await app.register(fastifyStatic, {
       root: config.siteDir, prefix: '/', wildcard: false, index: false,
       setHeaders: (res, file) => res.header('Cache-Control', file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache'),
