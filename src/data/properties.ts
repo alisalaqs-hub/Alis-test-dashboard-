@@ -96,7 +96,7 @@ export const PROPERTIES: Property[] = [
       { ref: 'DEMO/2025/1188', desc: 'Single-storey side-return extension', decision: 'Approved', distanceM: 140 },
       { ref: 'DEMO/2026/0730', desc: 'Change of use C3 → C4 HMO', decision: 'Refused', distanceM: 300 },
     ],
-    agent: 'Northbank Estates (demo agent)', daysOnMarket: 41, photoHue: 18,
+    agent: 'Northbank Estates (example agent)', daysOnMarket: 41, photoHue: 18,
   },
   {
     id: 'cro-002', title: 'Interwar semi in need of modernisation', street: 'Larchfield Road (fictional)', district: 'CR0', postcode: 'CR0 6TN', town: 'Croydon, London', nation: 'england',
@@ -113,7 +113,7 @@ export const PROPERTIES: Property[] = [
       { address: 'Birdhurst Ct (comp B)', price: 530_000, date: '2026-01', beds: 3, distanceM: 410, kind: 'sold', refurbished: true },
     ],
     planningNearby: [{ ref: 'DEMO/2026/0098', desc: 'Two-storey side extension', decision: 'Approved', distanceM: 180 }],
-    agent: 'Southline Property (demo agent)', daysOnMarket: 63, photoHue: 32,
+    agent: 'Southline Property (example agent)', daysOnMarket: 63, photoHue: 32,
   },
   {
     id: 'mcr-003', title: 'End-terrace, six-bed HMO candidate near Oxford Road corridor', street: 'Cranwell Street (fictional)', district: 'M14', postcode: 'M14 5RB', town: 'Fallowfield, Manchester', nation: 'england',
@@ -130,7 +130,7 @@ export const PROPERTIES: Property[] = [
       { address: 'Ladybarn Ln (room let)', price: 720, date: '2026-09', beds: 1, distanceM: 400, kind: 'let', refurbished: true },
     ],
     planningNearby: [{ ref: 'DEMO/2025/2201', desc: 'C3 → C4 HMO (Article 4 area)', decision: 'Refused', distanceM: 220 }, { ref: 'DEMO/2026/0310', desc: 'Sui generis 7-bed HMO', decision: 'Pending', distanceM: 510 }],
-    agent: 'Mancunian Homes (demo agent)', daysOnMarket: 12, photoHue: 8,
+    agent: 'Mancunian Homes (example agent)', daysOnMarket: 12, photoHue: 8,
   },
   {
     id: 'lds-004', title: 'Through-terrace back-to-back conversion, Headingley', street: 'Bramwell Mount (fictional)', district: 'LS6', postcode: 'LS6 3JG', town: 'Headingley, Leeds', nation: 'england',
@@ -144,7 +144,7 @@ export const PROPERTIES: Property[] = [
     areaIndex: idx(100, 0.22), rentDemand: 82,
     comparables: [{ address: 'Bramwell Mt (comp A)', price: 249_000, date: '2026-06', beds: 3, distanceM: 70, kind: 'sold', refurbished: true }],
     planningNearby: [{ ref: 'DEMO/2026/0555', desc: 'Replacement timber sash windows (conservation area)', decision: 'Approved', distanceM: 40 }],
-    agent: 'Aire Valley Lettings (demo agent)', daysOnMarket: 29, photoHue: 40,
+    agent: 'Aire Valley Lettings (example agent)', daysOnMarket: 29, photoHue: 40,
   },
   {
     id: 'bri-005', title: 'Georgian maisonette, Clifton — share of freehold', street: 'Royal Parade Mews (fictional)', district: 'BS8', postcode: 'BS8 4LD', town: 'Clifton, Bristol', nation: 'england',
@@ -158,7 +158,7 @@ export const PROPERTIES: Property[] = [
     areaIndex: idx(100, 0.08), rentDemand: 77,
     comparables: [{ address: 'Royal Parade (comp A)', price: 460_000, date: '2026-01', beds: 2, distanceM: 90, kind: 'sold', refurbished: true }],
     planningNearby: [{ ref: 'DEMO/2026/0127/LBC', desc: 'Listed building consent: internal alterations', decision: 'Approved', distanceM: 30 }],
-    agent: 'Avon & Co (demo agent)', daysOnMarket: 18, photoHue: 210,
+    agent: 'Avon & Co (example agent)', daysOnMarket: 18, photoHue: 210,
   },
   {
     id: 'bhm-006', title: 'Former corner shop with flat over — commercial to resi', street: 'Stanmore Corner (fictional)', district: 'B29', postcode: 'B29 6EP', town: 'Selly Oak, Birmingham', nation: 'england',
@@ -185,7 +185,7 @@ export const PROPERTIES: Property[] = [
     priceHistory: [{ date: '2009-04', price: 98_000, event: 'Sold' }, { date: '2026-07', price: 172_500, event: 'Listed' }, { date: '2026-09', price: 165_000, event: 'Reduced' }],
     areaIndex: idx(100, 0.42), rentDemand: 79,
     comparables: [{ address: 'Arnside Tce (comp)', price: 189_000, date: '2026-05', beds: 3, distanceM: 110, kind: 'sold', refurbished: true }],
-    planningNearby: [], agent: 'Mersey Moves (demo agent)', daysOnMarket: 88, photoHue: 25,
+    planningNearby: [], agent: 'Mersey Moves (example agent)', daysOnMarket: 88, photoHue: 25,
   },
   {
     id: 'shf-008', title: 'Detached 1970s family home — EPC upgrade opportunity', street: 'Fernhill Rise (fictional)', district: 'S11', postcode: 'S11 9PL', town: 'Ecclesall, Sheffield', nation: 'england',
@@ -199,7 +199,7 @@ export const PROPERTIES: Property[] = [
     areaIndex: idx(100, 0.18), rentDemand: 61,
     comparables: [{ address: 'Fernhill Rise (comp)', price: 625_000, date: '2026-02', beds: 4, distanceM: 180, kind: 'sold', refurbished: true }],
     planningNearby: [{ ref: 'DEMO/2025/0884', desc: 'Two-storey rear extension', decision: 'Approved', distanceM: 250 }],
-    agent: 'Peak Residential (demo agent)', daysOnMarket: 34, photoHue: 120,
+    agent: 'Peak Residential (example agent)', daysOnMarket: 34, photoHue: 120,
   },
   {
     id: 'cdf-009', title: 'Victorian terrace, Roath — Welsh LTT applies', street: 'Penylan Close (fictional)', district: 'CF24', postcode: 'CF24 3BW', town: 'Roath, Cardiff', nation: 'wales',
@@ -212,7 +212,7 @@ export const PROPERTIES: Property[] = [
     priceHistory: [{ date: '2013-10', price: 158_000, event: 'Sold' }, { date: '2026-10', price: 249_950, event: 'Listed' }],
     areaIndex: idx(100, 0.2), rentDemand: 80,
     comparables: [{ address: 'Penylan Cl (comp)', price: 320_000, date: '2026-03', beds: 3, distanceM: 160, kind: 'sold', refurbished: true }],
-    planningNearby: [], agent: 'Taff Homes (demo agent)', daysOnMarket: 22, photoHue: 0,
+    planningNearby: [], agent: 'Taff Homes (example agent)', daysOnMarket: 22, photoHue: 0,
   },
   {
     id: 'gla-010', title: 'Red sandstone tenement flat, Shawlands — LBTT applies', street: 'Kilmory Drive (fictional)', district: 'G41', postcode: 'G41 3SL', town: 'Shawlands, Glasgow', nation: 'scotland',
@@ -225,7 +225,7 @@ export const PROPERTIES: Property[] = [
     priceHistory: [{ date: '2016-05', price: 151_000, event: 'Sold' }, { date: '2026-10', price: 215_000, event: 'Offers over' }],
     areaIndex: idx(100, 0.27), rentDemand: 84,
     comparables: [{ address: 'Kilmory Dr (comp)', price: 238_000, date: '2026-06', beds: 2, distanceM: 60, kind: 'sold', refurbished: true }],
-    planningNearby: [], agent: 'Clydeside Estates (demo agent)', daysOnMarket: 9, photoHue: 15,
+    planningNearby: [], agent: 'Clydeside Estates (example agent)', daysOnMarket: 9, photoHue: 15,
   },
   {
     id: 'not-011', title: 'To let: refurbished 2-bed flat, Nottingham city centre', street: 'Lace Market Yard (fictional)', district: 'NG1', postcode: 'NG1 1PB', town: 'Nottingham', nation: 'england',
@@ -236,7 +236,7 @@ export const PROPERTIES: Property[] = [
     schools: [], risks: { flood: 'low', conservationArea: true, article4: false, listed: false, subsidence: 'low', radon: 'low' },
     priceHistory: [{ date: '2026-10', price: 1_250, event: 'Listed to let' }], areaIndex: idx(100, 0.15), rentDemand: 72,
     comparables: [{ address: 'Lace Market (let comp)', price: 1_275, date: '2026-08', beds: 2, distanceM: 120, kind: 'let', refurbished: true }],
-    planningNearby: [], agent: 'Trent Lettings (demo agent)', daysOnMarket: 4, photoHue: 260,
+    planningNearby: [], agent: 'Trent Lettings (example agent)', daysOnMarket: 4, photoHue: 260,
   },
   {
     id: 'bri-012', title: 'To let: 3-bed family house with garden, Bishopston', street: 'Ashgrove Walk (fictional)', district: 'BS7', postcode: 'BS7 8QR', town: 'Bishopston, Bristol', nation: 'england',
@@ -247,7 +247,7 @@ export const PROPERTIES: Property[] = [
     schools: [{ name: 'Bishop Road Primary (demo)', rating: 'Outstanding', distanceKm: 0.4 }],
     risks: { flood: 'very low', conservationArea: false, article4: false, listed: false, subsidence: 'low', radon: 'low' },
     priceHistory: [{ date: '2026-10', price: 2_150, event: 'Listed to let' }], areaIndex: idx(100, 0.11), rentDemand: 89,
-    comparables: [], planningNearby: [], agent: 'Avon & Co (demo agent)', daysOnMarket: 3, photoHue: 150,
+    comparables: [], planningNearby: [], agent: 'Avon & Co (example agent)', daysOnMarket: 3, photoHue: 150,
   },
 ];
 
@@ -271,7 +271,7 @@ PROPERTIES.push(
       { ref: 'DEMO/2025/3301', desc: 'Conversion of single dwelling into 4 self-contained flats', decision: 'Approved', distanceM: 160 },
       { ref: 'DEMO/2026/0412', desc: 'Conversion into 5 flats with rear dormer', decision: 'Refused', distanceM: 310 },
     ],
-    agent: 'Southline Property (demo agent)', daysOnMarket: 74, photoHue: 28, conversionPotential: 'strong', use: 'residential',
+    agent: 'Southline Property (example agent)', daysOnMarket: 74, photoHue: 28, conversionPotential: 'strong', use: 'residential',
     documents: ['EPC', 'Floor plan', 'Title register (requested)'],
   },
   {
@@ -285,7 +285,7 @@ PROPERTIES.push(
     priceHistory: [{ date: '2012-03', price: 205_000, event: 'Sold' }, { date: '2026-10', price: 335_000, event: 'Listed' }],
     areaIndex: idx(100, 0.16), rentDemand: 90,
     comparables: [{ address: 'Marsh Lane Ct (comp, refurbished)', price: 372_000, date: '2026-05', beds: 2, distanceM: 40, kind: 'sold', refurbished: true }, { address: 'Marsh Lane Ct (let)', price: 1_925, date: '2026-09', beds: 2, distanceM: 40, kind: 'let', refurbished: true }],
-    planningNearby: [], agent: 'Northbank Estates (demo agent)', daysOnMarket: 15, photoHue: 200, serviceChargeAnnual: 1_150, groundRentAnnual: 0, use: 'residential',
+    planningNearby: [], agent: 'Northbank Estates (example agent)', daysOnMarket: 15, photoHue: 200, serviceChargeAnnual: 1_150, groundRentAnnual: 0, use: 'residential',
     documents: ['EPC', 'Floor plan', 'Lease', 'Service charge accounts 2025', 'LPE1 (requested)'],
   },
   {
@@ -299,7 +299,7 @@ PROPERTIES.push(
     areaIndex: idx(100, 0.12), rentDemand: 78,
     comparables: [{ address: 'Station Rd conversion (1-bed unit)', price: 255_000, date: '2026-03', beds: 1, distanceM: 400, kind: 'sold', refurbished: true }, { address: 'Station Rd conversion (2-bed unit)', price: 335_000, date: '2026-05', beds: 2, distanceM: 400, kind: 'sold', refurbished: true }],
     planningNearby: [{ ref: 'DEMO/2025/PA/0218', desc: 'Prior approval Class MA: office to 30 flats (similar 1980s block)', decision: 'Approved', distanceM: 450 }, { ref: 'DEMO/2026/A4/001', desc: 'Article 4 direction removing Class MA (town centre core)', decision: 'Pending', distanceM: 0 }],
-    agent: 'Herts Commercial (demo agent)', daysOnMarket: 58, photoHue: 215, conversionPotential: 'strong', use: 'commercial',
+    agent: 'Herts Commercial (example agent)', daysOnMarket: 58, photoHue: 215, conversionPotential: 'strong', use: 'commercial',
     documents: ['EPC (non-domestic)', 'Floor plans', 'Measured survey', 'Asbestos register'],
   },
 );

@@ -1,5 +1,5 @@
 // Accessibility audit: run `npm run build && npx vite preview --port 4173` first, then `npm run a11y`.
-// Injects axe-core on every route (light/dark, desktop/mobile) and reports WCAG 2.2 A/AA violations.
+// Injects axe-core on every route (desktop/mobile; the site has one daylight theme) and reports WCAG 2.2 A/AA violations.
 // Against the live server (signed-in pages too):
 //   A11Y_BASE=http://localhost:8787 A11Y_EMAIL=admin@example.com A11Y_PASSWORD='…' npm run a11y
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
@@ -11,7 +11,7 @@ const routes = [...(process.env.A11Y_EMAIL ? SIGNED_IN : ['account', 'admin']), 
 (async () => {
   const b = await chromium.launch();
   const summary = {};
-  for (const scheme of ['light', 'dark']) for (const vp of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  for (const scheme of ['light']) for (const vp of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
     const ctx = await b.newContext({ viewport: vp, colorScheme: scheme, reducedMotion: 'reduce', bypassCSP: true }); // the live server's CSP blocks injected scripts (as it should)
     if (process.env.A11Y_EMAIL) { const r = await ctx.request.post(BASE + '/api/auth/login', { data: { email: process.env.A11Y_EMAIL, password: process.env.A11Y_PASSWORD } }); if (!r.ok()) throw new Error('A11Y login failed'); }
     const p = await ctx.newPage();

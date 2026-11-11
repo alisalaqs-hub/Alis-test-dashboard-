@@ -115,7 +115,7 @@ export default function Developer() {
     ],
   }), [m, scheme, count, total, appraisal, build, contingencyPct, profitPct, land, headroom, months, sellOut, absorption, sensitivity, opps]);
   const briefingFallback = (
-    <BriefingFallback title="Appraisal check (built-in rules)" items={[
+    <BriefingFallback title="Appraisal check" items={[
       <>Residual land value {gbpK(appraisal.residual)} against a land asking price of {gbpK(land)}: {headroom >= 0 ? `${gbpK(headroom)} headroom` : `${gbpK(-headroom)} short`}.</>,
       ...oversupplied.map((a) => <>{a.t.label}: {a.n} units could take up to {a.monthsHigh.toFixed(0)} months to sell.</>),
       ...(count !== total ? [<>The mix has {count} units against a target of {total}.</>] : []),
@@ -127,7 +127,7 @@ export default function Developer() {
       <div className="page-head">
         <div><div className="eyebrow">Developer intelligence</div><h2 style={{ marginTop: 6 }}>What should I build — and what can I pay for the land?</h2>
           <p className="muted" style={{ marginTop: 6 }}>Explore demand by unit type, test a unit mix, and run a residual land appraisal. Scenarios show ranges, not point predictions.</p></div>
-        <div className="row"><Tag kind="demo">Demonstration market inputs</Tag><Tag kind="live">Land Registry · ONS · planning pipeline · Streetkey search demand</Tag></div>
+        <div className="row"><Tag kind="demo">Example market inputs</Tag></div>
       </div>
 
       <div className="card flat filters">

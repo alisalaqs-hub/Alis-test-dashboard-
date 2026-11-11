@@ -2,12 +2,13 @@ import type { CSSProperties, ReactNode } from 'react';
 import { BAY, Figure, type Pal } from './art';
 
 /**
- * Inside the buyer's home: a cutaway of the house drawn over its front, in three layers that the
- * story reveals in turn (classes on the wrapping <g className="j-in">, see journey.css):
+ * Inside the buyer's home: a cutaway of the house drawn over its front. Once the camera has closed
+ * in, three layers follow each other in one continuous move (timed in journey.css, all keyed off
+ * the wrapping <g className="j-in go">):
  *
- *   model   the plans, as a blueprint: rooms, stairs, sizes, the unconverted loft
- *   built   each room is finished in turn (loft conversion first, then down the house)
- *   lived   furniture, lights and the family
+ *   the model   the plans, as a blueprint: rooms, stairs, sizes, the unconverted loft
+ *   the works   a finish sweeps down the house, room after room, with the crew at work
+ *   the home    furniture, lights and the family
  *
  * House-local coordinates, like the rest of the street art: x 0..160 across the front, y in drawing
  * units (ridge 500, pavement 770). `m` mirrors the plan for houses with the door on the right; text is
@@ -22,14 +23,12 @@ const BP = { day: '#1B2B5E', night: '#101A3C', line: '#E4EBFF', accent: '#FF9A47
 const ROOM = { loft: '#F1ECE2', bath: '#DCE9EC', bed: '#E3E8DB', hall: '#EFE6D6', living: '#ECE3D3', breast: '#DDD1BC', timber: '#C6A77B', tile: '#C3DAE0', white: '#FDFBF7', ink: '#2B3142' };
 
 export interface InsideFacts {
-  /** e.g. "92 m²" and "3 bed" for the plans. */
+  /** e.g. "92 m²" and "3 bed", written on the plans. */
   area: string; beds: string;
-  /** Tags shown as each part of the works finishes, from the cost engine. */
-  loft: string; bathroom: string; rewire: string; decorate: string;
 }
 
 type Kids = { children?: ReactNode };
-/** A finished room: its wall colour wipes across, then its fittings fade in. `k` is its turn in the works. */
+/** A finished room: its wall colour wipes across, then its fittings fade in. `k` is its turn in the sweep. */
 function Room({ k, x, y, w, h, fill, children }: Kids & { k: number; x: number; y: number; w: number; h: number; fill: string }) {
   const style = { ['--k' as string]: k, ['--w' as string]: `${w}px` } as CSSProperties;
   return (
@@ -42,17 +41,6 @@ function Room({ k, x, y, w, h, fill, children }: Kids & { k: number; x: number; 
 }
 /** A piece of furniture: drops into place on moving in. `i` is its turn. */
 const Fur = ({ i, children }: Kids & { i: number }) => <g className="j-fur" style={{ ['--i' as string]: i } as CSSProperties}>{children}</g>;
-/** A small label on the plans or the works. */
-function Tag({ x, y, text, accent = false, k }: { x: number; y: number; text: string; accent?: boolean; k?: number }) {
-  const w = text.length * 2.9 + 7;
-  return (
-    <g className={k == null ? 'j-in-label' : 'j-fit j-tag j-in-label'} style={k == null ? undefined : ({ ['--k' as string]: k } as CSSProperties)}>
-      <rect x={x - w / 2} y={y - 5} width={w} height={8} rx={4} fill={accent ? BP.accent : '#0E1424'} fillOpacity={accent ? 1 : 0.82} />
-      <text x={x} y={y + 0.9} textAnchor="middle" fontSize={4.6} fontWeight={800} letterSpacing={0.3} fill={accent ? '#0E1424' : '#FFFFFF'}>{text}</text>
-    </g>
-  );
-}
-
 export function Inside({ m, P, facts }: { m: boolean; P: Pal; facts: InsideFacts }) {
   // Mirror a position (and a width) for a door-on-the-right house.
   const f = (x: number, w = 0) => (m ? BAY - x - w : x);
@@ -96,7 +84,7 @@ export function Inside({ m, P, facts }: { m: boolean; P: Pal; facts: InsideFacts
         </g>
       </g>
 
-      {/* ── the works: each room is finished in turn ── */}
+      {/* ── the works: a finish sweeps down the house ── */}
       <g className="j-built">
         <Room k={0} x={L} y={LOFT_TOP} w={R - L} h={LOFT_FLOOR - LOFT_TOP} fill={ROOM.loft}>
           {[34, 100].map((x) => (
@@ -145,10 +133,6 @@ export function Inside({ m, P, facts }: { m: boolean; P: Pal; facts: InsideFacts
           <rect x={L} y={GROUND_FLOOR} width={R - L} height={BASE - GROUND_FLOOR} fill={P.night ? '#2A3358' : '#D9CDB8'} />
           <path d={`M${L} ${GROUND_FLOOR}H${R}`} {...edge} />
         </g>
-        <Tag k={0} x={80} y={546} text={facts.loft} accent />
-        <Tag k={1} x={f(30.5)} y={574} text={facts.bathroom} />
-        <Tag k={2} x={f(100)} y={574} text={facts.rewire} />
-        <Tag k={4} x={f(88)} y={662} text={facts.decorate} />
       </g>
 
       {/* ── the crew, while the works are on ── */}

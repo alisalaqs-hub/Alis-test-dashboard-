@@ -4,7 +4,7 @@ import { getProperty, PROPERTIES, type Property } from '../data/properties';
 import { dealScore, epcPathway, loftScenario, ownershipForecast, refurbInputFor } from '../engine/insights';
 import { estimateRefurb } from '../engine/refurb';
 import { transactionTax } from '../engine/tax';
-import { gbp, gbpK, HouseArt, Meter, pct, Section, Spark, Stat, Tag } from '../components/ui';
+import { gbp, gbpK, HouseArt, Meter, pct, Section, Spark, Stat, streetName, Tag } from '../components/ui';
 import { valuationScenario, rentalScenario } from '../engine/valuation';
 import { developmentOptions } from '../engine/development';
 import { engagementFor, insightsFor, totals, benchmark } from '../engine/engagement';
@@ -74,9 +74,9 @@ export default function PropertyPage() {
       <div className="grid g2" style={{ gap: 20 }}>
         <div className="card" style={{ padding: 0, overflow: 'hidden', minHeight: 260 }}><HouseArt hue={p.photoHue} type={p.type} /></div>
         <div className="stack" style={{ gap: 12 }}>
-          <div className="row">{p.source ? <Tag kind={p.source.kind === 'agent-feed' ? 'ok' : 'neutral'}>{p.source.name}</Tag> : <Tag kind="demo">Fictional listing</Tag>}{p.source && !p.source.verified && !imported && <Tag kind="demo">Verification pending</Tag>}{p.visibility === 'private' && <Tag kind="neutral">Private to you</Tag>}{p.listing === 'auction' && <Tag kind="warn">Auction · guide price</Tag>}<Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag><Tag kind="neutral">Council tax {p.councilTax}</Tag></div>
+          <div className="row">{p.source ? <Tag kind={p.source.kind === 'agent-feed' ? 'ok' : 'neutral'}>{p.source.name}</Tag> : <Tag kind="demo">Example listing</Tag>}{p.source && !p.source.verified && !imported && <Tag kind="demo">Verification pending</Tag>}{p.visibility === 'private' && <Tag kind="neutral">Private to you</Tag>}{p.listing === 'auction' && <Tag kind="warn">Auction · guide price</Tag>}<Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag><Tag kind="neutral">Council tax {p.councilTax}</Tag></div>
           <h2>{p.title}</h2>
-          <div className="muted">{p.street}, {p.town} · {p.postcode}</div>
+          <div className="muted">{streetName(p.street)}, {p.town} · {p.postcode}</div>
           {originalUrl && <a href={originalUrl} target="_blank" rel="noopener noreferrer" className="small">View the original listing ↗<span className="sr-only"> (opens in a new tab)</span></a>}
           {imported && <p className="xs muted" style={{ margin: 0 }}>Imported by you from another website and private to you. Figures below are Streetkey estimates from the details you checked, not the original listing’s.</p>}
           <div className="row" style={{ alignItems: 'flex-end', gap: 18 }}>
@@ -143,7 +143,7 @@ export default function PropertyPage() {
             <p className="xs muted" style={{ marginTop: 8 }}>England permitted-development rules (GPDO) simplified as configured Nov 2026; planning layers are demo data. Structural, legal and planning matters need professional verification.</p>
           </section>
 
-          {showEngagement && <Section title="Market response" kicker="Engagement (aggregated, simulated)" right={<Link className="btn ghost sm" to="/owner">Owner dashboard →</Link>}>
+          {showEngagement && <Section title="Market response" kicker="Example figures" right={<Link className="btn ghost sm" to="/owner">Owner dashboard →</Link>}>
             <div className="grid g4 keep2">
               <Stat label="Views (28d)" value={eng.t.views.toLocaleString('en-GB')} />
               <Stat label="Unique visitors" value={eng.t.unique.toLocaleString('en-GB')} />

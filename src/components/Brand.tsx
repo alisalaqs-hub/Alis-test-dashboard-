@@ -6,7 +6,7 @@ import { useEffect, useRef } from 'react';
  *
  * Header lockup aligns the wordmark baseline with the street (blade top).
  * Interactive: on hover/focus the key turns and the windows light in sequence;
- * the locator dot follows the pointer. Night theme lights the windows.
+ * the locator dot follows the pointer.
  * Reduced motion: no turn and no dot tracking (windows still light).
  * Colours come from --logo-key (the key), --logo-dot and --logo-word-2 ("key"), set in styles.css.
  */

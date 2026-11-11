@@ -32,7 +32,7 @@ export default function Prices() {
           <h2 style={{ marginTop: 6 }}>What homes really sold for</h2>
           <p className="muted" style={{ margin: '6px 0 0' }}>Every sale registered with HM Land Registry in England and Wales, with the official average price for the area.</p>
         </div>
-        <div className="row">{status === 'offline' ? <Tag kind="demo">Demo sales</Tag> : <SourceTag>HM Land Registry</SourceTag>}</div>
+        <div className="row">{status === 'offline' ? <Tag kind="demo">Example sales</Tag> : <SourceTag>HM Land Registry</SourceTag>}</div>
       </div>
       <form className="smart-box" style={{ maxWidth: 640 }} role="search" onSubmit={(e) => { e.preventDefault(); search(q); }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} maxLength={80} placeholder="Postcode, district or town, e.g. E17 4PP, E17 or Leeds" aria-label="Postcode, postcode district or town" autoComplete="postal-code" enterKeyHint="search" />
@@ -148,14 +148,14 @@ function DemoSales({ term }: { term: string }) {
   const idx = rows[0]?.near.areaIndex;
   return (
     <>
-      <div className="callout info">This preview has no connection to the live site, so these are <b>demonstration sales</b> for fictional homes. The live site shows real sold prices from HM Land Registry.</div>
+      <div className="callout info">Live sold prices from HM Land Registry are unavailable right now, so these are <b>example sales</b>, for illustration only.</div>
       <div className="grid g3">
-        <div className="card"><Stat label="Sales in the last 12 months" value={recent.length} sub={term ? `in “${term}”` : 'all demo areas'} /></div>
+        <div className="card"><Stat label="Sales in the last 12 months" value={recent.length} sub={term ? `in “${term}”` : 'all example areas'} /></div>
         <div className="card"><Stat label="Median sold price (12m)" value={median ? gbpK(median) : '—'} /></div>
         <div className="card"><Stat label="Area trend (24m)" value={idx ? `${(idx[23] - 100).toFixed(1)}%` : '—'} />{idx && <Spark data={idx} height={36} />}</div>
       </div>
-      <Section title={`${rows.length} demo sales`} kicker="Most recent first" right={<Tag kind="demo" />}>
-        {rows.length === 0 ? <p className="small muted">No demo sales for that search. Try Walthamstow, Croydon, Manchester, Leeds, Bristol, Cardiff or Glasgow.</p> :
+      <Section title={`${rows.length} example sales`} kicker="Most recent first" right={<Tag kind="demo" />}>
+        {rows.length === 0 ? <p className="small muted">No example sales for that search. Try Walthamstow, Croydon, Manchester, Leeds, Bristol, Cardiff or Glasgow.</p> :
           <div className="table-wrap" tabIndex={0}><table className="t"><thead><tr><th>Address</th><th>Beds</th><th className="r">Price</th><th>Date</th></tr></thead>
             <tbody>{rows.map((r) => <tr key={r.key}><td className="small"><b>{r.address.replace(' (fictional)', '')}</b><div className="xs muted">{r.area} · {r.note} · <Link to={`/property/${r.near.id}`}>nearby listing</Link></div></td><td className="num">{r.beds}</td><td className="r num">{gbp(r.price)}</td><td className="small">{r.date}</td></tr>)}</tbody></table></div>}
       </Section>

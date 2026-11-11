@@ -49,7 +49,7 @@ export default function Marketplace() {
           <div className="card"><Stat label="Streetkey benchmark (ex VAT, excl. contingency/fees)" value={gbpK(benchTotal)} /></div>
           {cmp.map((c) => <div className="card" key={c.contractor}><Stat label={c.contractor.replace(' (demo)', '')} value={gbpK(c.quotedTotal)} tone={c.missing.length ? 'neg' : undefined} sub={`${c.programmeWeeks} weeks · ${c.missing.length ? `${c.missing.length} trades missing` : 'complete scope'}`} /></div>)}
         </div>
-        <Section title="Trade-by-trade comparison" kicker="Variance vs benchmark (±25% flagged)" right={<Tag kind="demo">Demo quotes</Tag>}>
+        <Section title="Trade-by-trade comparison" kicker="Variance vs benchmark (±25% flagged)" right={<Tag kind="demo">Example quotes</Tag>}>
           <div className="table-wrap" tabIndex={0}><table className="t">
             <thead><tr><th>Trade</th><th className="r">Benchmark</th>{cmp.map((c) => <th key={c.contractor} className="r">{c.contractor.split(' ')[0]} {c.contractor.split(' ')[1]}</th>)}</tr></thead>
             <tbody>{bench.byTrade.map((t, k) => (

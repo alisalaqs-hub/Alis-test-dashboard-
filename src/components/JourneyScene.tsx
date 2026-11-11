@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { getProperty } from '../data/properties';
 import { estimateRefurb } from '../engine/refurb';
 import { epcPathway, loftScenario, refurbInputFor } from '../engine/insights';
@@ -7,7 +7,7 @@ import { transactionTax } from '../engine/tax';
 import { gbp, gbpK } from './ui';
 import {
   Backdrop, BAY, BAYS, Board, bayCentre, bayX, Defs, DAY, DOT_Y, fanPath, Figure, GROUND, Grow, Ground, KERB, Lamps, LampLight,
-  mirrored, NIGHT, POTS_TOP, RIDGE, TreeShadows, Trees, Van, winRect, WINS, doorX,
+  mirrored, POTS_TOP, RIDGE, TreeShadows, Trees, Van, winRect, WINS, doorX,
 } from './journey/art';
 import { Inside, type InsideFacts } from './journey/inside';
 import { JourneyNotes, type Box, type NoteSpec, type View } from './journey/Notes';
@@ -15,29 +15,26 @@ import '../styles/journey.css';
 
 /**
  * Streetkey journey: the homepage's living background.
- * A Victorian terrace, drawn as a fine-line architectural elevation, that plays a
- * home buyer's story on a loop (Look → Buy → Move in → Live → Grow). Every figure
- * comes from the engines and the demo listings. On completion the buyers walk along
- * the pavement, up the path and in through their front door; then the lights come on.
+ * A Victorian terrace, drawn as a fine-line architectural elevation, that plays a home buyer's
+ * story on a quick loop (about 16 seconds): Look, Buy, Completion, Inside, Live. Every figure
+ * comes from the engines and the example listings.
  *
- * A proposed longer story is previewed with ?story=inside: after the sale the camera closes in on
- * the home and its front gives way to the inside: the plans as a model, the renovation room by
- * room, then the family moved in, before the view returns to the street.
+ * On completion the buyers walk along the pavement, up the path and in through their front door.
+ * The camera then closes in on the home and its front gives way to the inside in one continuous
+ * move: the plans as a model, the rooms finished, then furnished with the family at home, before
+ * the view returns to the street (src/components/journey/inside.tsx; timings in journey.css).
  *
  * Interactive: hover a house for its price or sold price, click a house to open it,
  * gentle parallax. Callouts are placed so they never sit under the search panel.
  * Accessibility: the drawing and its callouts are aria-hidden (a visually hidden
  * summary describes the story); the small pause button is always available
  * (WCAG 2.2.2); reduced motion starts paused with no movement; the story pauses
- * when it's off-screen. Night theme = the street at dusk.
+ * when it's off-screen.
  */
-/** How long each chapter of the story stays on screen (the chapters inside the home take a little longer). */
-const STAGE_MS = 3600;
-type Chapter = 'look' | 'buy' | 'keys' | 'model' | 'works' | 'home' | 'live' | 'grow';
-const STORY: Chapter[] = ['look', 'buy', 'keys', 'live', 'grow'];
-const STORY_INSIDE: Chapter[] = ['look', 'buy', 'keys', 'model', 'works', 'home', 'live'];
-const CHAPTER_MS: Partial<Record<Chapter, number>> = { model: 3800, works: 5000, home: 4400 };
-const INSIDE_CHAPTERS: Chapter[] = ['model', 'works', 'home'];
+type Chapter = 'look' | 'buy' | 'keys' | 'inside' | 'live';
+const STORY: Chapter[] = ['look', 'buy', 'keys', 'inside', 'live'];
+/** How long each chapter stays on screen. */
+const CHAPTER_MS: Record<Chapter, number> = { look: 2800, buy: 2400, keys: 2600, inside: 5400, live: 3000 };
 const HOUSES = Array.from({ length: 8 }, (_, i) => ({ i, x: bayX(i), cx: bayX(i) + BAY / 2, m: mirrored(i) }));
 const HERO = 5;                 // the buyer's home
 const BUY_FOR_SALE = [3, 4, 5, 7]; // for sale on the buyer's street (hero is the 3rd)
@@ -54,8 +51,6 @@ const WALL = [0, 1, 0, 2, 0, 1, 3, 0, 4, 1, 0];
 const DOOR = [3, 1, 0, 4, 2, 3, 1, 0, 5, 2, 4];
 const HEDGE = [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1];
 const ROOF = ['rgba(255,255,255,.07)', 'transparent', 'rgba(20,24,40,.05)', 'rgba(255,255,255,.12)', 'transparent', 'rgba(20,24,40,.08)', 'rgba(255,255,255,.04)'];
-/** At night some windows are lit, some not; the same pattern every time. */
-const nightLit = (k: number, n: number) => ((Math.imul(k * 7 + n * 13 + 29, 2654435761) >>> 0) % 100) < 52;
 
 // The locator dot: hops between the homes for sale (Look), then rests on the home.
 const T = (i: number, lift = 0) => `transform:translate(${bayX(i) + BAY / 2}px,${DOT_Y - lift}px)`;
@@ -64,16 +59,6 @@ const EASE = 'animation-timing-function:cubic-bezier(.45,0,.55,1)';
 const DOT_CSS = `.j-dot{${T(HERO)}}`
   + `@keyframes j-hop{0%,9%{${T(3)};${EASE}}17%{${MID(3, 4, 16)};${EASE}}25%,36%{${T(4)};${EASE}}50%{${MID(4, 7, 34)};${EASE}}64%,74%{${T(7)};${EASE}}82%{${MID(7, 5, 22)};${EASE}}90%,100%{${T(HERO)}}}`;
 
-function useNight() {
-  const get = () => { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : !!window.matchMedia?.('(prefers-color-scheme: dark)').matches; };
-  const [night, setNight] = useState(get);
-  useEffect(() => {
-    const mo = new MutationObserver(() => setNight(get())); mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    const mq = window.matchMedia?.('(prefers-color-scheme: dark)'); const on = () => setNight(get()); mq?.addEventListener?.('change', on);
-    return () => { mo.disconnect(); mq?.removeEventListener?.('change', on); };
-  }, []);
-  return night;
-}
 function useMedia(q: string) {
   const [c, setC] = useState(() => !!window.matchMedia?.(q).matches);
   useEffect(() => { const mq = window.matchMedia?.(q); const on = () => setC(!!mq?.matches); mq?.addEventListener?.('change', on); return () => mq?.removeEventListener?.('change', on); }, [q]);
@@ -111,14 +96,7 @@ function useStory() {
     const loft = loftScenario(hero);
     const works = estimateRefurb(refurbInputFor(hero));
     const heroWorks = works.total;
-    const trade = (...names: string[]) => works.byTrade.filter((t) => names.includes(t.trade)).reduce((n, t) => n + t.total, 0);
-    // Labels inside the home (the ?story=inside preview), all from the cost engine.
-    const inside: InsideFacts = {
-      area: `${hero.floorArea} m²`, beds: `${hero.beds} bed`,
-      loft: loft ? `LOFT +${loft.area} m²` : 'LOFT ROOM',
-      bathroom: `BATHROOM ${gbpK(trade('Bathroom'))}`, rewire: `REWIRE ${gbpK(trade('Electrical'))}`,
-      decorate: `PLASTER & DECORATE ${gbpK(trade('Plastering', 'Decoration'))}`,
-    };
+    const inside: InsideFacts = { area: `${hero.floorArea} m²`, beds: `${hero.beds} bed` };
     const epc = epcPathway(hero);
     const epcTarget = epc.steps[epc.steps.length - 1]?.band ?? hero.epc.potential;
     const school = [...hero.schools].sort((a, b) => (b.rating === 'Outstanding' ? 1 : 0) - (a.rating === 'Outstanding' ? 1 : 0))[0];
@@ -138,13 +116,9 @@ function useStory() {
 
 export function JourneyScene() {
   const s = useStory();
-  const night = useNight();
-  const P = night ? NIGHT : DAY;
+  const P = DAY;
   const compact = useMedia('(max-width: 599px)');
   const nav = useNavigate();
-  const [params] = useSearchParams();
-  const story = params.get('story') === 'inside' ? STORY_INSIDE : STORY;
-  const insideStory = story === STORY_INSIDE;
   const descId = useId();
   const reduce = useMemo(() => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches, []);
   const [stage, setStage] = useState(0);
@@ -156,26 +130,22 @@ export function JourneyScene() {
   const m = useLayoutBoxes(root, [compact, stage]);
 
   const after = gbpK(s.hero.estGdv + (s.loft?.valueUplift ?? 0));
-  const opening = `A Victorian street where a home buyer's story plays on a loop. Look: every home on the street comes priced. `
-    + `Buy: offer accepted at ${gbp(s.hero.price)}, stamp duty as a first-time buyer ${gbp(s.ftbTax)}. `;
-  const living = `Live: ${s.school ? `${s.school.rating} school ${s.school.distanceKm} km away, ` : ''}${s.hero.commute.minutes} min to ${s.hero.commute.to}.`;
-  const summary = insideStory
-    ? `${opening}Completion: keys collected; the buyers walk up the path and in through their front door. `
-      + `Inside: the view moves into the home and shows its plans as a model: ${s.inside.beds}, ${s.inside.area}, loft not yet converted. `
-      + `Renovation: the rooms are finished one by one (about ${gbpK(s.heroWorks)})${s.loft ? ` and the loft is converted, adding ${s.loft.area} m²` : ''}; EPC ${s.hero.epc.current} to ${s.epcTarget}. `
-      + `Moved in: the home is furnished and the family is inside; estimated value after works ${after}. Then the view returns to the street. ${living}`
-    : `${opening}Move in: keys collected; the buyers walk up the path and in through their front door, and the lights come on. ${living} `
-      + `Grow: renovate (about ${gbpK(s.heroWorks)}) and convert the loft (about ${gbpK(s.loft?.cost ?? 0)}); estimated value after works ${after}, EPC ${s.hero.epc.current} to ${s.epcTarget}.`;
+  const summary = `A Victorian street where a home buyer's story plays on a loop. Look: every home on the street comes priced. `
+    + `Buy: offer accepted at ${gbp(s.hero.price)}, stamp duty as a first-time buyer ${gbp(s.ftbTax)}. `
+    + `Completion: keys collected; the buyers walk up the path and in through their front door. `
+    + `Inside: the view moves into the home, shows its plans (${s.inside.beds}, ${s.inside.area}), then the rooms renovated (about ${gbpK(s.heroWorks)})${s.loft ? `, the loft converted (${s.loft.area} m² more)` : ''} `
+    + `and the family moved in; estimated value after works ${after}, EPC ${s.hero.epc.current} to ${s.epcTarget}. `
+    + `Live: back on the street, ${s.school ? `${s.school.rating} school ${s.school.distanceKm} km away, ` : ''}${s.hero.commute.minutes} min to ${s.hero.commute.to}.`;
   const running = playing && visible;
-  const st = stage % story.length;
-  const ch = story[st];
+  const st = stage % STORY.length;
+  const ch = STORY[st];
 
   // Move the story on by itself while it's playing and on screen.
   useEffect(() => {
     if (!running) return;
-    const t = window.setTimeout(() => setStage((x) => (x + 1) % story.length), CHAPTER_MS[ch] ?? STAGE_MS);
+    const t = window.setTimeout(() => setStage((x) => (x + 1) % STORY.length), CHAPTER_MS[ch]);
     return () => window.clearTimeout(t);
-  }, [running, stage, nonce, story, ch]);
+  }, [running, stage, nonce, ch]);
 
   // Pause when off-screen.
   useEffect(() => {
@@ -209,10 +179,10 @@ export function JourneyScene() {
   }, [m.w, m.h, vbx, vby, vbw, vbh]);
 
   const on = (c: boolean) => (c ? ' on' : '');
-  /** True from chapter `c` onwards (false when this story has no such chapter). */
-  const past = (c: Chapter) => { const n = story.indexOf(c); return n >= 0 && st >= n; };
+  /** True from chapter `c` onwards. */
+  const past = (c: Chapter) => st >= STORY.indexOf(c);
   /** Inside the home: the camera is close in, and the street's hover labels are off. */
-  const inside = INSIDE_CHAPTERS.includes(ch);
+  const inside = ch === 'inside';
   const hov = inside ? null : hover;
   // How far the camera can close in: the home's roof has to stay inside the scene.
   const topU = view.sc ? vby - view.oy / view.sc : vby;
@@ -230,20 +200,15 @@ export function JourneyScene() {
   notes.push({ id: 'keys', on: ch === 'keys', at: [ridge(HERO)], title: 'Completion', value: 'Keys collected', accent: true, dot: true });
   if (s.school) notes.push({ id: 'school', on: ch === 'live', at: [SCHOOL], title: `${s.school.rating} school`, value: `${s.school.distanceKm} km`, d: 1 });
   notes.push({ id: 'travel', on: ch === 'live', at: [LINE], title: `To ${s.hero.commute.to}`, value: `${s.hero.commute.minutes} min`, accent: true });
-  notes.push({ id: 'grow', on: ch === 'grow', at: [ridge(HERO)], title: 'Value after works', value: after, rows: compact ? undefined : [...(s.loft ? [['Loft conversion', `+${s.loft.area} m²`] as [string, string]] : []), ['Energy rating', `EPC ${s.hero.epc.current} → ${s.epcTarget}`]], accent: true, dot: true });
-  if (insideStory) {
-    // Inside the home the labels sit beside it, level with the first floor.
-    const beside = [camPt([bayX(HERO) + BAY, 630])];
-    notes.push({ id: 'model', on: ch === 'model', at: beside, title: 'The model', value: `${s.inside.beds} · ${s.inside.area}`, rows: compact ? undefined : [['Loft', 'not yet converted']], accent: true });
-    notes.push({ id: 'works', on: ch === 'works', at: beside, title: 'Renovation', value: `≈ ${gbpK(s.heroWorks)}`, rows: compact ? undefined : [...(s.loft ? [['Loft conversion', `+${s.loft.area} m²`] as [string, string]] : []), ['Energy rating', `EPC ${s.hero.epc.current} → ${s.epcTarget}`]], accent: true });
-    notes.push({ id: 'home', on: ch === 'home', at: beside, title: 'Moved in', value: 'Welcome home', rows: compact ? undefined : [['Value after works', after]], accent: true });
-  }
+  // Inside the home one label sits beside it, level with the first floor, and arrives as the rooms are finished.
+  notes.push({ id: 'home', on: inside, at: [camPt([bayX(HERO) + BAY, 630])], title: 'After the works', value: after, d: 28, accent: true,
+    rows: compact ? undefined : [['Renovation', `≈ ${gbpK(s.heroWorks)}`], ...(s.loft ? [['Loft conversion', `+${s.loft.area} m²`] as [string, string]] : []), ['Energy rating', `EPC ${s.hero.epc.current} → ${s.epcTarget}`]] });
   const hoverNote: NoteSpec | null = hov == null ? null
     : { id: 'hover', on: true, at: [ridge(hov)], title: s.buyerHouse[hov].title, value: s.buyerHouse[hov].value, dot: hov === HERO && st > 0 };
 
   return (
     <>
-      <div ref={root} className={`journey${running ? '' : ' is-paused'}${night ? ' night' : ''}${hov != null ? ' hovering' : ''}${inside ? ' is-inside' : ''}`} data-stage={st} data-chapter={ch}>
+      <div ref={root} className={`journey${running ? '' : ' is-paused'}${hov != null ? ' hovering' : ''}${inside ? ' is-inside' : ''}`} data-stage={st} data-chapter={ch}>
         <svg key={nonce} viewBox={`${vbx} ${vby} ${vbw} ${vbh}`} preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
           <style>{DOT_CSS}</style>
           <Defs P={P} />
@@ -254,9 +219,9 @@ export function JourneyScene() {
           <g className="j-near">
             {BAYS.map((k, n) => {
               const x = bayX(k), mm = mirrored(k), story = k >= 0 && k < 8;
-              const lit = WINS.map((_, w) => (story && storyLit(k)) || (night && nightLit(k, w)));
-              const fanLit = (story && storyLit(k)) || (night && nightLit(k, 6));
-              const style = { ['--wall' as string]: P.walls[WALL[n]], ['--door' as string]: P.doors[DOOR[n]], ['--roof' as string]: night ? 'transparent' : ROOF[n % ROOF.length], ['--i' as string]: n } as CSSProperties;
+              const lit = WINS.map(() => story && storyLit(k));
+              const fanLit = story && storyLit(k);
+              const style = { ['--wall' as string]: P.walls[WALL[n]], ['--door' as string]: P.doors[DOOR[n]], ['--roof' as string]: ROOF[n % ROOF.length], ['--i' as string]: n } as CSSProperties;
               const body = (
                 <>
                   <use href={mm ? '#j-front-b' : '#j-front-a'} x={x} />
@@ -285,10 +250,10 @@ export function JourneyScene() {
                         <polygon points={`${dx - 13},752 ${dx + 13},752 ${dx + 22},770 ${dx - 22},770`} fill="url(#j-spill)" />
                       </g>
                     )}
-                    {isHero && <g className={`j-grow${on(ch === 'grow' || (insideStory && ch === 'live'))}`}><Grow m={mm} P={P} /></g>}
+                    {isHero && <g className={`j-grow${on(ch === 'live')}`}><Grow m={mm} P={P} /></g>}
                     <g className={`j-board${on(!!board)}`}><Board cx={bayCentre(mm)} kind={board ?? (isHero && st >= 1 ? 'sold' : 'sale')} P={P} /></g>
-                    {isHero && insideStory && (
-                      <g className={`j-in${on(inside)}${past('works') ? ' built' : ''}${ch === 'works' ? ' building' : ''}${past('home') ? ' lived' : ''}`}>
+                    {isHero && (
+                      <g className={`j-in${on(inside)}${past('inside') ? ' go' : ''}`}>
                         <Inside m={mm} P={P} facts={s.inside} />
                       </g>
                     )}
@@ -307,9 +272,9 @@ export function JourneyScene() {
 
             {/* Scale figures and the van: quiet silhouettes, as on an architect's drawing */}
             {/* The buyers look, buy, then (on completion) walk to their door and go in; the family is out on the street afterwards. */}
-            <g className={`j-np j-buyer${on(st <= story.indexOf('keys'))}${past('keys') ? ' enter' : ''}`}>
+            <g className={`j-np j-buyer${on(st <= STORY.indexOf('keys'))}${past('keys') ? ' enter' : ''}`}>
               {BUYERS.map((x, n) => (
-                <g key={x} className="j-anim j-walk" style={{ ['--dx' as string]: `${HERO_DOOR - x}px`, ['--wd' as string]: `${n * 420}ms` } as CSSProperties}>
+                <g key={x} className="j-anim j-walk" style={{ ['--dx' as string]: `${HERO_DOOR - x}px`, ['--wd' as string]: `${n * 280}ms` } as CSSProperties}>
                   <g className="j-anim j-step"><Figure x={x} kind={n ? 'man' : 'woman'} P={P} /></g>
                 </g>
               ))}
@@ -318,11 +283,11 @@ export function JourneyScene() {
             <g className={`j-np j-kid${on(past('live'))}`}><Figure x={1093} kind="child" P={P} /></g>
             <Trees P={P} />
             <LampLight P={P} />
-            <g className={`j-np j-van${on(insideStory ? ch === 'home' : ch === 'keys')}`}><Van x={1166} P={P} /></g>
+            <g className={`j-np j-van${on(inside)}`}><Van x={1166} P={P} /></g>
 
             <g className={`j-np j-dot${ch === 'look' ? ' hop' : ''}${on(!inside)}`}>
               <circle r="16" className="j-anim j-halo" fill="#F07415" />
-              <circle r="6.6" fill="#F07415" stroke={night ? '#121A33' : '#FFFFFF'} strokeWidth="2.4" />
+              <circle r="6.6" fill="#F07415" stroke="#FFFFFF" strokeWidth="2.4" />
             </g>
           </g>
           </g>

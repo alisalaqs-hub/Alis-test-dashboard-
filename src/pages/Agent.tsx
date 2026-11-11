@@ -71,7 +71,7 @@ export default function Agent() {
     const ordered = [...rows].sort((a, b) => a.gap - b.gap || a.p.id.localeCompare(b.p.id));
     return {
       title: 'Northbank Estates · branch listings',
-      scope: `Demonstration branch: ${ordered.length} fictional sale listings with simulated engagement over the last ${PERIOD_DAYS} days.`,
+      scope: `Example branch: ${ordered.length} example sale listings with example engagement figures over the last ${PERIOD_DAYS} days.`,
       asOf: PERIOD_END,
       metrics: [
         { label: 'Active listings', value: ordered.length },
@@ -102,13 +102,13 @@ export default function Agent() {
         };
       }),
       notes: [
-        'Engagement figures are simulated for this demonstration.',
+        'Engagement figures on this page are examples.',
         'Conversion is enquiries plus viewing requests per unique visitor; a gap against comparables is flagged only when the 95% intervals don’t overlap.',
       ],
     };
   }, [rows, tot.v, tot.u, tot.e, queue.length]);
   const briefingFallback = (
-    <BriefingFallback title="Needs attention (built-in rules)" items={[...attention].sort((a, b) => a.gap - b.gap).slice(0, 4).map((r) => (
+    <BriefingFallback title="Needs attention" items={[...attention].sort((a, b) => a.gap - b.gap).slice(0, 4).map((r) => (
       <><Link to={propertyLink(r.p.id)}><b>{street(r.p)}</b></Link>: {r.flag?.toLowerCase()}, {pct(r.t.enquiryRate.p)} conversion against {pct(r.bm.rate.p)} for comparables</>
     ))} />
   );
@@ -127,7 +127,7 @@ export default function Agent() {
       <div className="page-head">
         <div><div className="eyebrow">Estate agent command centre</div><h2 style={{ marginTop: 6 }}>Northbank Estates · portfolio intelligence</h2>
           <p className="muted" style={{ marginTop: 6 }}>Every listing’s engagement, conversion, quality and pricing evidence in one place. Streetkey drafts reports and listing changes; nothing is published or sent without your approval.</p></div>
-        <div className="row"><Tag kind="demo">Simulated engagement</Tag><Tag kind="live">CRM sync: Reapit · Alto · Street · Jupix</Tag></div>
+        <div className="row"><Tag kind="demo">Example data</Tag></div>
       </div>
 
       <div className="grid g4 keep2">

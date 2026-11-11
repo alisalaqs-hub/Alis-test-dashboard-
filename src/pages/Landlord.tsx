@@ -92,7 +92,7 @@ export default function Landlord() {
     ],
   }), [compliance, tasks, rentRoll, forecast]);
   const briefingFallback = (
-    <BriefingFallback title="Coming up (built-in rules)" items={[
+    <BriefingFallback title="Coming up" items={[
       ...compliance.slice(0, 3).map((c) => <><b>{c.unit}</b> {c.item}: {c.d < 0 ? 'overdue' : `due in ${c.d} days`} ({c.due})</>),
       <>Arrears of {gbp(ARREARS)} on U2 (9 days): talk to the tenant early and keep a record.</>,
     ]} />
@@ -109,7 +109,7 @@ export default function Landlord() {
       <div className="page-head">
         <div><div className="eyebrow">Lettings & property management</div><h2 style={{ marginTop: 6 }}>Landlord dashboard</h2>
           <p className="muted" style={{ marginTop: 6 }}>Portfolio of 4 fictional units. Built around England’s Renters’ Rights Act regime: periodic assured tenancies, no section 21, annual section 13 rent increases.</p></div>
-        <div className="row"><Tag kind="demo" /><Tag kind="live">Open banking rent feed · deposit scheme APIs</Tag></div>
+        <div className="row"><Tag kind="demo">Example data</Tag></div>
       </div>
 
       <div className="grid g4 keep2">

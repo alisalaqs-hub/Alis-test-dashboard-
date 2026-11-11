@@ -7,22 +7,22 @@
 | Tagline | *See Beyond the Property.* — full stop in orange. Hero line: “Find a home. Unlock the whole street.” |
 | Mark | A key whose blade is a short street of four houses, with an orange locator dot in the bow (`src/components/Brand.tsx`). Compact bow-and-dot mark for favicon and tight spaces. |
 | Palette | Navy `#0E1424` · Orange `#F07415` (the key) · Window glow `#FFC24B` (insight) · Warm paper `#F7F5F0` · Night blue `#34437A` (insights/AI on light) |
-| Night theme (dark) | From the logo's night street: ground `#121A33`, surface `#1A2446`, text `#F7F5F0`, orange `#FF8A3D`, glow `#FFC24B` |
+| Themes | One daylight theme. Night mode was removed in November 2026 (no toggle; devices set to dark still get the daylight site). |
 | Type | Plus Jakarta Sans only (self-hosted, variable 200–800). Figures use tabular numerals. Labels: 11.5px, 700, uppercase, 0.16em tracking. |
 | Shapes | 12px buttons, 16px cards and search, fully rounded pills and tags |
 | Insight pill | Navy pill, amber icon (from the logo's house tags) — used for anything Streetkey's AI or engines tell you |
 | Header logo (interactive) | Key-and-street mark + wordmark, wordmark baseline aligned to the key's street line (`StreetkeyWordmark` in `src/components/Brand.tsx`). Hover/focus turns the key and lights the windows in sequence; the locator dot follows the pointer; Night theme lights the windows; clicking it on the home page unlocks the hero street. Reduced motion: no turn, no tracking. |
-| Hero background | `src/components/JourneyScene.tsx`: the whole homepage hero is a living street, drawn as a fine-line architectural elevation of a Victorian terrace, that plays a home buyer's story on a loop behind the search: Look (the locator dot hops between homes for sale, prices pop up) → Buy (offer accepted, SOLD board, first-time-buyer stamp duty) → Move in (removal van, keys; the buyers walk along the pavement, up the path and in through their front door, then the lights come on) → Live (Outstanding school, train to the City with commute time) → Grow (renovation and loft, value after works, EPC pathway). Each chapter lasts 3.6 s. Every figure comes from the engines and demo listings. Interactive: hover a house for its price or sold price, click to open it, pointer parallax; the header logo restarts it. Callouts are placed clear of the search panel and of each other; on phones they show just the headline figure. Night theme = the street at dusk. A small pause/play button sits in the top-right corner (WCAG 2.2.2); reduced motion starts paused with no movement (no walking: the buyers are simply indoors); it also pauses off-screen; a visually hidden summary describes the story for screen readers. Phones/tablets: the street runs as a band under the search. A proposed longer story is built but not switched on (preview it by adding `?story=inside` to the homepage address): after the sale the camera closes in on the home and its front gives way to the inside, showing the plans as a model, the renovation room by room with figures from the cost engine, then the family moved in, before returning to the street (`src/components/journey/inside.tsx`). |
+| Hero background | `src/components/JourneyScene.tsx`: the whole homepage hero is a living street, drawn as a fine-line architectural elevation of a Victorian terrace, that plays a home buyer's story on a quick loop of about 16 seconds behind the search. Look (the locator dot hops between homes for sale, prices pop up) → Buy (offer accepted, SOLD board, first-time-buyer stamp duty) → Completion (the buyers walk along the pavement, up the path and in through their front door) → Inside (the camera closes in on the home and its front gives way to the inside in one continuous move: the plans as a blueprint model, a finish sweeping down the rooms with a crew at work, then furniture, lights and the family, with one label for the value after works, the renovation cost, the loft and the EPC; `src/components/journey/inside.tsx`) → Live (back on the street: Outstanding school, train to the City with commute time). Every figure comes from the engines and example listings. Interactive: hover a house for its price or sold price, click to open it, pointer parallax; the header logo restarts it. Callouts are placed clear of the search panel and of each other; on phones they show just the headline figure. A small pause/play button sits in the top-right corner (WCAG 2.2.2); reduced motion starts paused with no movement (no walking, zoom, wipes or drops); it also pauses off-screen; a visually hidden summary describes the story for screen readers. Phones/tablets: the street runs as a band under the search. |
 | Product visual | “Look inside” lens on a listing (`src/components/XRay.tsx`) revealing its plans with live figures |
 
 ### Colour roles
 * **Navy** = text, primary surfaces, insight pills.
 * **Orange** = the key and primary actions. Orange fills carry **navy** text (6.3:1); orange as text on light uses `--accent-ink #B24D00` (4.87:1). White on orange is never used.
 * **Glow amber** = insight highlights on navy (11.4:1).
-* Focus ring: navy 3px (light), glow amber (Night) — the brand file's orange outline fails 3:1 on paper.
+* Focus ring: navy 3px — the brand file's orange outline fails 3:1 on paper.
 
 ## Accessibility — WCAG 2.2 AA
-**Automated audit:** axe-core run against **21 routes × light/dark × desktop (1280px)/mobile (390px) = 84 page views** with tags `wcag2a, wcag2aa, wcag21a, wcag21aa, wcag22aa` → **0 violations** (Nov 2026). Script: see "Re-running the audit" below.
+**Automated audit:** axe-core run against **21 routes × desktop (1280px)/mobile (390px) = 42 page views** (one daylight theme since November 2026) with tags `wcag2a, wcag2aa, wcag21a, wcag21aa, wcag22aa` → **0 violations** (Nov 2026). Script: see "Re-running the audit" below.
 
 Fixed during the audit: low-contrast buttons/labels on navy panels, keyboard access to scrollable tables and code blocks, unlabelled selects and inputs in tables, a low-contrast widget caption.
 
@@ -36,7 +36,7 @@ Fixed after the AI features were added (Nov 2026): text links in AI panels (`.li
 * `prefers-reduced-motion`: animations/transitions disabled; X-ray lens stops auto-moving and is controlled by the user or the "See through" button.
 * X-ray graphics are `aria-hidden`; the same annotations are exposed as a list for screen readers; the toggle uses `aria-pressed`.
 * Charts always have numeric labels or tables; deal grades use letters, not colour alone.
-* `lang="en-GB"`, `theme-color` per scheme, safe-area insets for iOS home indicator.
+* `lang="en-GB"`, one `theme-color` and `color-scheme: light`, safe-area insets for iOS home indicator.
 
 **Still to do (manual)**
 * Screen-reader walkthroughs with VoiceOver (iOS/macOS) and NVDA (Windows); 200% / 400% zoom and reflow checks; usability sessions with disabled users.

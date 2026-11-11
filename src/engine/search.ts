@@ -255,8 +255,8 @@ export function runSearch(q: SearchQuery, pool = PROPERTIES): SearchHit[] {
     if (q.minYield && ds.grossYield < q.minYield) { score -= 15; cautions.push(`Gross yield ${(ds.grossYield * 100).toFixed(1)}% below ${(q.minYield * 100).toFixed(1)}%`); }
     else if (q.minYield) reasons.push(`Gross yield ${(ds.grossYield * 100).toFixed(1)}%`);
 
-    if (p.risks.flood === 'medium' || p.risks.flood === 'high') cautions.push(`Flood risk: ${p.risks.flood} (EA demo layer)`);
-    if (p.risks.subsidence !== 'low') cautions.push(`Subsidence susceptibility: ${p.risks.subsidence} (BGS demo layer)`);
+    if (p.risks.flood === 'medium' || p.risks.flood === 'high') cautions.push(`Flood risk: ${p.risks.flood}`);
+    if (p.risks.subsidence !== 'low') cautions.push(`Subsidence susceptibility: ${p.risks.subsidence}`);
     hits.push({ property: p, score, reasons, cautions, dealGrade: ds.grade, estProfit });
   }
   return hits.sort((a, b) => b.score - a.score);

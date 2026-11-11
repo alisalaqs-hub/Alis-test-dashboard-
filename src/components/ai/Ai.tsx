@@ -200,9 +200,9 @@ export function AiUnavailable({ reason, signedOut, feature = 'This AI feature', 
   const signIn = useSignInPath();
   if (reason === 'checking') return null;
   const instead = (rules: string) => (fallback ? <> {fallback}</> : noFallback ? null : <> {rules}</>);
-  if (reason === 'offline') return <p className="ai-unavailable small">{feature} runs on the live Streetkey site.{instead('This preview uses Streetkey’s built-in rules instead.')}</p>;
-  if (reason === 'disabled') return <p className="ai-unavailable small">{feature} isn’t switched on yet.{instead('Streetkey’s built-in rules are used instead.')}</p>;
-  if (reason === 'paused') return <p className="ai-unavailable small">{feature} is temporarily unavailable.{instead('Streetkey’s built-in rules are used instead.')}</p>;
+  if (reason === 'offline') return <p className="ai-unavailable small">{feature} isn’t available right now.{instead('Streetkey’s standard calculations are used instead.')}</p>;
+  if (reason === 'disabled') return <p className="ai-unavailable small">{feature} isn’t switched on yet.{instead('Streetkey’s standard calculations are used instead.')}</p>;
+  if (reason === 'paused') return <p className="ai-unavailable small">{feature} is temporarily unavailable.{instead('Streetkey’s standard calculations are used instead.')}</p>;
   if (signedOut) {
     const cta = 'Sign in or create a free account';
     return <p className="ai-unavailable small">{onSignIn ? <button type="button" className="linkish" onClick={onSignIn}>{cta}</button> : <Link to={signIn}>{cta}</Link>} to use {inlineFeatureName(feature)}.</p>;

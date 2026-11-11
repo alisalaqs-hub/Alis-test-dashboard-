@@ -1,6 +1,6 @@
 /* ===== Homepage journey: the street as a living background =====
    A fine-line elevation of a Victorian terrace; callouts are hairline annotations.
-   Motion is brisk (a 3.6 s chapter) and only animates transform / opacity.
+   Motion is brisk (chapters of about 2.5 to 5.5 s, a 16 s loop) and only animates transform / opacity.
    (Moved from styles.css "v0.7 · Homepage journey" and redrawn.) */
 
 .journey { position: absolute; inset: 0; z-index: 0; overflow: hidden; background: var(--paper); }
@@ -18,7 +18,6 @@
 /* window light: warms in sequence along the house */
 .j-lw { opacity: 0; transition: opacity 600ms ease calc(var(--n, 0) * 60ms); }
 .j-lw.on { opacity: 0.82; }
-.journey.night .j-lw.on { opacity: 1; }
 .j-house.is-hover .j-lw { transition-delay: 0ms; transition-duration: 300ms; }
 
 /* story elements fade in and out */
@@ -36,45 +35,48 @@
 /* completion: the buyers walk along the pavement, up the path and in through the door, one after the other;
    the house lights come on once they are inside */
 .j-walk { transform-box: fill-box; transform-origin: 50% 100%; }
-.j-buyer.enter .j-walk { animation: j-enter 2.5s linear var(--wd, 0ms) forwards; }
-.j-buyer.enter .j-step { animation: j-step 0.3s ease-in-out 10 alternate; }
-.j-house.is-entering .j-lw { transition-delay: calc(2500ms + var(--n, 0) * 90ms); }
+.j-buyer.enter .j-walk { animation: j-enter 1.9s linear var(--wd, 0ms) forwards; }
+.j-buyer.enter .j-step { animation: j-step 0.27s ease-in-out 8 alternate; }
+.j-house.is-entering .j-lw { transition-delay: calc(1900ms + var(--n, 0) * 60ms); }
 
-/* ---- proposed story (?story=inside): the camera closes in on the home and its front gives way to the inside ---- */
-.j-cam { transition: transform 1300ms cubic-bezier(.6, 0, .2, 1); }
-.j-in { opacity: 0; pointer-events: none; transition: opacity 450ms ease 250ms; }   /* leaving: fades as the camera pulls back */
-.j-in.on { opacity: 1; transition: opacity 600ms ease 750ms; }                     /* arriving: once the camera is nearly there */
+/* ---- inside the home: the camera closes in and the front gives way to the inside, in one continuous move ----
+   Timeline from the start of the chapter: 0 s camera in · 0.5 s the model · 1.2 s a finish sweeps down the rooms
+   (crew at work) · 2.4 s furniture, family and lights · held until the camera pulls back at 5.4 s. */
+.j-cam { transition: transform 900ms cubic-bezier(.6, 0, .2, 1); }
+.j-in { opacity: 0; pointer-events: none; transition: opacity 350ms ease 150ms; }   /* leaving: fades as the camera pulls back */
+.j-in.on { opacity: 1; transition: opacity 380ms ease 450ms; }                     /* arriving: once the camera is nearly there */
 .j-in-label { pointer-events: none; }
 /* the home's own front garden steps aside so the ground floor can be seen */
-.j-front-garden { transition: opacity 450ms ease 300ms; }
-.journey.is-inside .j-front-garden { opacity: 0; transition-delay: 700ms; }
+.j-front-garden { transition: opacity 350ms ease 200ms; }
+.journey.is-inside .j-front-garden { opacity: 0; transition-delay: 450ms; }
 /* the works: each room's finish wipes across behind an orange line, then its fittings appear */
 .j-wipe { transform-box: fill-box; transform-origin: 0 50%; transform: scaleX(0); }
-.j-in.built .j-wipe { transform: none; transition: transform 850ms cubic-bezier(.5, 0, .2, 1) calc(var(--k, 0) * 620ms + 350ms); }
+.j-in.go .j-wipe { transform: none; transition: transform 560ms cubic-bezier(.5, 0, .2, 1) calc(var(--k, 0) * 110ms + 1200ms); }
 .j-fit { opacity: 0; }
-.j-in.built .j-fit { opacity: 1; transition: opacity 450ms ease calc(var(--k, 0) * 620ms + 1000ms); }
+.j-in.go .j-fit { opacity: 1; transition: opacity 300ms ease calc(var(--k, 0) * 110ms + 1550ms); }
 .j-scan { opacity: 0; }
-.j-in.building .j-scan { animation: j-scan 850ms cubic-bezier(.5, 0, .2, 1) calc(var(--k, 0) * 620ms + 350ms) both; }
-.j-crew { opacity: 0; transition: opacity 350ms ease; }
-.j-in.building .j-crew { opacity: 1; transition-delay: 250ms; }
-.j-in.building .j-crew .j-step { animation: j-step 0.36s ease-in-out infinite alternate; }
-/* moving in: furniture drops into place, then the family and the lights */
+.j-in.go .j-scan { animation: j-scan 560ms cubic-bezier(.5, 0, .2, 1) calc(var(--k, 0) * 110ms + 1200ms) both; }
+.j-crew { opacity: 0; }
+.j-in.go .j-crew { animation: j-crew 1500ms ease 1050ms both; }
+.j-in.go .j-crew .j-step { animation: j-step 0.3s ease-in-out 8 alternate 1050ms; }
+/* the home: furniture drops into place, then the family and the lights */
 .j-fur { opacity: 0; transform: translateY(-6px); }
-.j-in.lived .j-fur { opacity: 1; transform: none; transition: opacity 320ms ease calc(var(--i, 0) * 110ms + 250ms), transform 520ms cubic-bezier(.2, .9, .3, 1.25) calc(var(--i, 0) * 110ms + 250ms); }
-/* the works labels clear away once the home is lived in */
-.j-in.lived .j-tag { opacity: 0; transition: opacity 300ms ease; }
+.j-in.go .j-fur { opacity: 1; transform: none; transition: opacity 280ms ease calc(var(--i, 0) * 45ms + 2400ms), transform 420ms cubic-bezier(.2, .9, .3, 1.25) calc(var(--i, 0) * 45ms + 2400ms); }
 .j-fam-in { opacity: 0; }
-.j-in.lived .j-fam-in { opacity: 1; transition: opacity 500ms ease 1500ms; }
+.j-in.go .j-fam-in { opacity: 1; transition: opacity 400ms ease 2850ms; }
 .j-glow { opacity: 0; }
-.j-in.lived .j-glow { opacity: 0.85; transition: opacity 700ms ease 1900ms; }
+.j-in.go .j-glow { opacity: 0.85; transition: opacity 500ms ease 3050ms; }
+/* the removal van pulls up as they move in */
+.journey.is-inside .j-van.on { transition-delay: 2300ms; }
 @keyframes j-scan { 0% { transform: translateX(0); opacity: 0; } 8%, 92% { opacity: 1; } 100% { transform: translateX(var(--w)); opacity: 0; } }
+@keyframes j-crew { 0%, 100% { opacity: 0; } 18%, 78% { opacity: 1; } }
 @media (max-width: 599px) { .j-in-label { display: none; } }
 
 /* motion (all paused together; reduced motion shows the end state) */
-.j-dot.hop { animation: j-hop 3.4s linear forwards; }
+.j-dot.hop { animation: j-hop 2.6s linear forwards; }
 .j-halo { opacity: 0.14; transform-box: fill-box; transform-origin: center; animation: j-ping 1.8s cubic-bezier(.2, .6, .3, 1) infinite; }
 .j-train { transform: translateX(-560px); }
-.j-train.on { animation: j-train 3.4s cubic-bezier(.3, 0, .7, 1) forwards; }
+.j-train.on { animation: j-train 2.8s cubic-bezier(.3, 0, .7, 1) forwards; }
 .j-cloud { animation: j-cloud 36s ease-in-out infinite alternate; }
 .j-cloud2 { animation-duration: 48s; animation-direction: alternate-reverse; }
 .j-tw { animation: j-tw 3s ease-in-out infinite alternate; animation-delay: var(--t, 0s); }
@@ -125,14 +127,10 @@
 .j-card dl > div { display: flex; justify-content: space-between; gap: 16px; }
 .j-card dt { font-size: 11.5px; line-height: 1.4; color: var(--muted); font-weight: 600; }
 .j-card dd { margin: 0; font-size: 11.5px; line-height: 1.4; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
-.journey.night .j-notes { --stem: color-mix(in srgb, var(--ink) 50%, transparent); }
-.journey.night .j-card { background: color-mix(in srgb, var(--surface) 88%, transparent); border-color: color-mix(in srgb, var(--ink) 16%, transparent); box-shadow: 0 12px 26px -16px rgba(0, 0, 0, 0.9); }
-.journey.night .j-pin { background: var(--surface); }
 .j-note.is-hover, .j-note.is-hover * { transition-delay: 0ms !important; transition-duration: 250ms !important; }
 .journey.hovering .j-note.on:not(.is-hover) { opacity: 0.12; transition: opacity 250ms ease; }
 @media (min-width: 960px) {
   .j-card { background: color-mix(in srgb, var(--paper) 78%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.15); backdrop-filter: blur(10px) saturate(1.15); }
-  .journey.night .j-card { background: color-mix(in srgb, var(--surface) 76%, transparent); }
 }
 @media (max-width: 599px) {
   .j-card { padding: 4px 6px 5px; }

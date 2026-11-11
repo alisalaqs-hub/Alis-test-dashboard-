@@ -23,12 +23,7 @@ export default function Layout() {
   const { online, user } = useServer();
   const { available: aiOn } = useAi();
   const [sheet, setSheet] = useState<null | 'ask' | 'more'>(null);
-  const [theme, setTheme] = useState<string | null>(() => { try { return localStorage.getItem('streetkey-theme'); } catch { return null; } });
   useEffect(() => { window.scrollTo(0, 0); setSheet(null); }, [pathname]);
-  useEffect(() => {
-    if (theme) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme;
-    try { if (theme) localStorage.setItem('streetkey-theme', theme); } catch { /* storage unavailable */ }
-  }, [theme]);
   const sheetRef = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const shown = useRef<null | 'ask' | 'more'>(null);
@@ -69,13 +64,11 @@ export default function Layout() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [sheet]);
-  const dark = theme ? theme === 'dark' : window.matchMedia?.('(prefers-color-scheme: dark)').matches;
   const isHome = pathname === '/';
 
   return (
     <>
       <a href="#main" className="skip-link" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to main content</a>
-      <div className="preview-bar" role="note"><div>{online ? <><b>EARLY ACCESS</b><span className="pv-long">Listings marked “Demo data” are illustrations. Estimates are not advice.</span><span className="pv-short">Demo listings marked · not advice</span></> : <><b>PUBLIC PREVIEW</b><span className="pv-long">Listings and figures are demonstration data. Estimates are not advice.</span><span className="pv-short">Demo data · not advice</span></>}<Link to="/terms">Terms</Link></div></div>
       <header className="topbar">
         <div className="topbar-inner">
           <Link to="/" className="logo" aria-label="Streetkey home" onClick={() => { if (pathname === '/') window.dispatchEvent(new Event('streetkey:turn')); }}><StreetkeyWordmark /></Link>
@@ -84,7 +77,6 @@ export default function Layout() {
           </nav>
           <div className="row" style={{ gap: 8, marginLeft: 'auto', flexWrap: 'nowrap' }}>
             <Link to="/saved" className="icon-btn desktop-only" aria-label={`Saved (${saved.length})`}><Icon name="heart" />{saved.length > 0 && <span className="dot-badge">{saved.length}</span>}</Link>
-            <button className="icon-btn desktop-only" aria-label="Toggle colour theme" onClick={() => setTheme(dark ? 'light' : 'dark')}>{dark ? '☀' : '☾'}</button>
             {online && (user
               ? (() => { const ini = user.name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase(); return <Link to="/account" className="icon-btn acct-btn" aria-label={`${ini}: your account`} title={`${user.name}: your account`}>{ini}</Link>; })()
               : <Link to="/account" className="btn sm ghost signin-btn">Sign in</Link>)}
@@ -96,7 +88,7 @@ export default function Layout() {
       <main id="main" tabIndex={-1} className={isHome ? 'home-main' : undefined}><Outlet /></main>
 
       <footer className="site"><div>
-        <span className="row" style={{ gap: 10 }}><StreetkeyBow size={22} /> <span><b>Streetkey</b> — See Beyond the Property. {online ? 'Early access · demo listings are labelled “Demo data”. Estimates are not advice.' : 'Public preview · listings and figures are demonstration data.'}</span></span>
+        <span className="row" style={{ gap: 10 }}><StreetkeyBow size={22} /> <span><b>Streetkey</b> — See Beyond the Property. {online ? 'Listings marked “Example” are illustrations, not homes for sale. Estimates are a guide, not advice.' : 'Listings shown are examples, not homes for sale. Estimates are a guide, not advice.'}</span></span>
         <nav aria-label="Legal"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/accessibility">Accessibility</Link><Link to="/data-sources">Data sources</Link><Link to="/sources">Listing feeds</Link></nav>
       </div></footer>
 
@@ -120,7 +112,7 @@ export default function Layout() {
       {sheet === 'more' && (
         <div ref={sheetRef} className="sheet sheet-tall" role="dialog" aria-modal="true" aria-label="Menu">
           <div className="sheet-grab" />
-          <div className="row between"><h2 className="sheet-h">Everything on Streetkey</h2><div className="row" style={{ flexWrap: 'nowrap' }}><button className="icon-btn" aria-label="Toggle colour theme" onClick={() => setTheme(dark ? 'light' : 'dark')}>{dark ? '☀' : '☾'}</button><button className="icon-btn" aria-label="Close" onClick={() => setSheet(null)}><Icon name="x" /></button></div></div>
+          <div className="row between"><h2 className="sheet-h">Everything on Streetkey</h2><div className="row" style={{ flexWrap: 'nowrap' }}><button className="icon-btn" aria-label="Close" onClick={() => setSheet(null)}><Icon name="x" /></button></div></div>
           {MORE.map((g) => (
             <div key={g.title} style={{ marginTop: 14 }}>
               <div className="eyebrow" style={{ marginBottom: 6 }}>{g.title}</div>

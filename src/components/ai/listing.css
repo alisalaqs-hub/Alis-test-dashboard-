@@ -43,8 +43,6 @@
 /* ───────── contrast (WCAG 2.2 AA, 4.5:1 for small text) ───────── */
 /* On the --surface-2 panels the standard orange link and red badge text fall just short in light mode. */
 :root { --ail-link: #A84800; --ail-danger-ink: #B02E17; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) { --ail-link: var(--accent-ink); --ail-danger-ink: var(--danger); } }
-:root[data-theme='dark'] { --ail-link: var(--accent-ink); --ail-danger-ink: var(--danger); }
 .ail-assist .linkish { color: var(--ail-link); }
 .ail-sev.block { color: var(--ail-danger-ink); }
 /* AI points marked "block" are advice (they don't stop publishing): same warning colours, outlined. */

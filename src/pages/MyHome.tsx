@@ -218,7 +218,7 @@ function MyHomePage({ restarted }: { restarted: boolean }) {
           <p className="muted" style={{ marginTop: 6 }}>Tell us a few things. No sign-up needed to see the result.</p>
           {restored && <p className="callout info small" style={{ marginTop: 8 }}>We’ve kept the details you entered earlier in this visit. <button type="button" className="linkish" onClick={startAgain}>Start again</button></p>}
         </div>
-        <Tag kind="demo">{ev && !ev.allDemo ? 'Indicative · listing evidence' : 'Indicative · demo evidence'}</Tag>
+        <Tag kind="demo">{ev && !ev.allDemo ? 'Indicative · listing evidence' : 'Indicative · example evidence'}</Tag>
       </div>
       <div className="split">
         <Section title="About your home" kicker="Step 1 of 1">

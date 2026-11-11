@@ -19,8 +19,11 @@ export const gbpK = (n: number) => {
 /** Fraction as a percentage (0.052 → "5.2%"); "—" for a division by zero or other non-figure. */
 export const pct = (n: number, dp = 1) => (Number.isFinite(n) ? `${(n * 100).toFixed(dp)}%` : '—');
 
+/** A street name without the “(fictional)” marker example listings carry in the data; use only where an Example tag is shown. */
+export const streetName = (street: string) => street.replace(/\s*\(fictional\)/i, '');
+
 type TagKind = 'demo' | 'est' | 'ai' | 'ok' | 'live' | 'neutral' | 'warn' | 'obs' | 'inf' | 'rec';
-const TAG_TEXT: Partial<Record<TagKind, string>> = { demo: 'Demo data', est: 'Estimate', ai: 'AI-generated', ok: 'Verified', live: 'Needs live integration', obs: 'Observed', inf: 'Inferred', rec: 'Recommendation' };
+const TAG_TEXT: Partial<Record<TagKind, string>> = { demo: 'Example', est: 'Estimate', ai: 'AI-generated', ok: 'Verified', live: 'Coming soon', obs: 'Observed', inf: 'Inferred', rec: 'Recommendation' };
 export function Tag({ kind, children, title }: { kind: TagKind; children?: ReactNode; title?: string }) {
   return <span className={`tag tag-${kind}`} title={title}>{children ?? TAG_TEXT[kind]}</span>;
 }
@@ -298,7 +301,7 @@ export function UKMap({ pins, onPin, height }: { pins: MapPin[]; onPin?: (id: st
   const [w, h] = [(10.5) * COS * K, 9.3 * K];
   return (
     <div className="map-wrap" style={height ? { height } : undefined}>
-      <svg viewBox={`0 0 ${w.toFixed(0)} ${h.toFixed(0)}`} style={height ? { height: '100%' } : undefined} role="img" aria-label="Schematic map of the UK with property pins">
+      <svg viewBox={`0 0 ${w.toFixed(0)} ${h.toFixed(0)}`} style={height ? { height: '100%' } : undefined} role="img" aria-label="Map of the UK showing these homes">
         <defs><pattern id="dots" width="8" height="8" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1" fill="var(--blue)" opacity="0.18" /></pattern></defs>
         <rect width="100%" height="100%" fill="url(#dots)" />
         <polygon points={poly(GB)} fill="var(--surface)" stroke="var(--line)" strokeWidth={1.5} />
@@ -314,7 +317,6 @@ export function UKMap({ pins, onPin, height }: { pins: MapPin[]; onPin?: (id: st
           );
         })}
       </svg>
-      <div className="map-note"><Tag kind="live">Schematic · production: OS Maps API / Mapbox + PostGIS</Tag></div>
     </div>
   );
 }

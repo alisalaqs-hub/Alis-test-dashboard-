@@ -866,7 +866,7 @@ function ListPropertyForm() {
       <div className="card stack">
         <b>{done.title}</b><span className="small muted">{done.street}, {done.town} · {done.postcode}</span>
         <span className="num" style={{ fontSize: 22 }}>{done.listing === 'rent' ? `${gbp(done.price)} pcm` : gbp(done.price)}</span>
-        <div className="row"><Tag kind="demo">Verification pending</Tag><span className="xs muted">Production: ID check + HM Land Registry title match before the “Verified owner” badge.</span></div>
+        <div className="row"><Tag kind="neutral">Verification pending</Tag><span className="xs muted">“Verified owner” badges, based on an identity check and an HM Land Registry title match, are coming soon.</span></div>
       </div>
       <div className="row">
         <Link to={`/property/${done.id}`} className="btn">View my listing</Link>
@@ -1085,7 +1085,7 @@ function ListPropertyForm() {
               <li>Your listing appears in Streetkey search with an intelligence profile.</li>
               <li>You get the owner dashboard: views, saves, enquiries and what buyers ask.</li>
               <li>Enquiries come to you through Streetkey messaging; your contact details stay private.</li>
-              <li>Production: identity check and HM Land Registry title match earn a “Verified owner” badge.</li>
+              <li>“Verified owner” badges, based on an identity check and an HM Land Registry title match, are coming soon.</li>
             </ul>
           </div>
         </aside>

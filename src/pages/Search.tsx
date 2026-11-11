@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigationType, useSearchParams } from 'react-router-dom';
 import { describeQuery, runSearch, type SearchHit, type SearchQuery } from '../engine/search';
-import { gbp, gbpK, HouseArt, Seg, Tag, UKMap } from '../components/ui';
+import { gbp, gbpK, HouseArt, Seg, streetName, Tag, UKMap } from '../components/ui';
 import { useStore } from '../store';
-import { externalSearchLinks } from '../engine/listings';
-import { publicListings, type Property } from '../data/properties';
+import type { Property } from '../data/properties';
 import { ApiError } from '../lib/api';
 import { aiPost, useAi } from '../lib/ai/core';
 import {
@@ -16,7 +15,7 @@ import { Icon } from '../components/Icons';
 import '../components/ai/search.css';
 
 function sourceLabel(p: Property) {
-  if (!p.source) return { text: 'Streetkey demo', tone: 'demo' as const };
+  if (!p.source) return { text: 'Example listing', tone: 'demo' as const };
   if (p.source.kind === 'agent-feed') return { text: p.source.name.replace(' (agent feed)', ''), tone: 'ok' as const };
   return { text: p.source.name, tone: 'neutral' as const };
 }
@@ -211,8 +210,6 @@ export default function Search() {
     return fitHits;
   }, [fitHits, sort, rankReady, rank]);
   const shown = hits.filter((h) => src === 'all' || (src === 'agents' ? h.property.source?.kind === 'agent-feed' || !h.property.source : h.property.source?.kind === 'owner' || h.property.source?.kind === 'landlord'));
-  const place = q.locations[0] ?? q.districts[0] ?? '';
-  const external = externalSearchLinks(place, q.intent === 'rent' ? 'rent' : 'sale');
   const narrative = useMemo(() => narrate(q, hits), [q, hits]);
 
   /** A new search: its own history entry, keeping the box mode and page filters (removed chips belong to the old words). */
@@ -251,7 +248,6 @@ export default function Search() {
     <div className="stack" style={{ gap: 20 }}>
       <div className="page-head desktop-only">
         <div><div className="eyebrow">{ai.available ? 'AI property search' : 'Property search'}</div><h2 style={{ marginTop: 6 }}>Describe what you want</h2></div>
-        <div className="row"><Tag kind="demo">{publicListings().length} listings (demo + feeds + owner posts)</Tag><Tag kind="live">Licensed feeds: agent CRMs · auction partners · owner listings</Tag></div>
       </div>
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
@@ -271,7 +267,7 @@ export default function Search() {
             {limitError && (
               <div className="aisr-limit">
                 <AiErrorNote error={limitError} />
-                <p className="xs muted">Streetkey’s built-in rules read this search instead.</p>
+                <p className="xs muted">Your search was read without AI this time.</p>
               </div>
             )}
             {understanding && <div className="aisr-busy"><AiThinking label="Streetkey AI is reading your search" announce={arrivedBySearch || 'auto'} /></div>}
@@ -314,7 +310,7 @@ export default function Search() {
                 <div className="stack" style={{ gap: 6, marginTop: 8 }}>{narrative.map((n, i) => <p key={i} className="small">{n}</p>)}</div>
                 {q.unsupported.length > 0 && <div className="callout info small" style={{ marginTop: 10 }}><b>Not yet covered:</b> {q.unsupported.join(' ')}</div>}
                 <div className="parsed" style={{ marginTop: 10 }}>{describeQuery(q).map((d) => <span key={d}>{d}</span>)}</div>
-                <p className="xs muted" style={{ marginTop: 8 }}>{usingAi ? 'Streetkey AI turned your words into these filters; the listings, prices, scores and this summary come from Streetkey’s own data and engines.' : 'Streetkey’s built-in rules turned your words into these filters; the listings, prices, scores and this summary come from Streetkey’s own data and engines.'}</p>
+                <p className="xs muted" style={{ marginTop: 8 }}>{usingAi ? 'Streetkey AI turned your words into these filters; the listings, prices, scores and this summary come from Streetkey’s own data and engines.' : 'Streetkey turned your words into these filters; the listings, prices, scores and this summary come from Streetkey’s own data and engines.'}</p>
                 <button className="btn ghost sm" style={{ marginTop: 10 }} aria-expanded={showJson} onClick={() => setShowJson(!showJson)}>{showJson ? 'Hide' : 'Show'} structured query</button>
                 {showJson && <pre tabIndex={0} className="code" style={{ marginTop: 10 }}>{`${usingAi ? '// Built by Streetkey AI from your words (JSON-schema validated, numbers checked against what you typed).' : '// Built by Streetkey’s rule-based parser.'}\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})${extrasShown ? `\n// Also applied: ${JSON.stringify(state.extras)}` : ''}`}</pre>}
               </details>
@@ -342,7 +338,7 @@ export default function Search() {
                   <Link to={`/property/${h.property.id}`} style={{ minWidth: 0, textDecoration: 'none' }}>
                     <div className="num" style={{ fontSize: 22 }}>{h.property.listing === 'rent' ? `${gbp(h.property.price)} pcm` : gbp(h.property.price)}{h.property.listing === 'auction' && <span className="xs muted"> guide</span>}</div>
                     <div style={{ fontWeight: 600 }}>{h.property.title}</div>
-                    <div className="small muted">{h.property.street}, {h.property.town} · {h.property.beds ? `${h.property.beds} bed · ` : ''}{h.property.floorArea}m² · EPC {h.property.epc.current}</div>
+                    <div className="small muted">{streetName(h.property.street)}, {h.property.town} · {h.property.beds ? `${h.property.beds} bed · ` : ''}{h.property.floorArea}m² · EPC {h.property.epc.current}</div>
                   </Link>
                   {h.property.listing !== 'rent' && <div className={`grade grade-${h.dealGrade}`} title="Streetkey deal grade">{h.dealGrade}</div>}
                 </div>
@@ -363,27 +359,11 @@ export default function Search() {
         </div>
         <div className="sticky stack">
           <section className="card">
-            <div className="eyebrow" style={{ marginBottom: 6 }}>Search everywhere</div>
-            {external.length ? <>
-              <p className="small">See {place} on other sites too:</p>
-              <div className="row" style={{ marginTop: 8 }}>{external.map((l) => <a key={l.site} className="btn ghost sm" href={l.url} target="_blank" rel="noopener noreferrer">{l.site} ↗</a>)}</div>
-            </> : <p className="small">Add a place to your search to open it on other property sites too.</p>}
-            <div className="hr" />
-            <p className="small"><b>Found one you like elsewhere?</b> Paste it into Streetkey for a price check, renovation cost and investment view.</p>
+            <p className="small" style={{ margin: 0 }}><b>Found one you like elsewhere?</b> Paste it into Streetkey for a price check, renovation cost and investment view.</p>
             <Link to="/import" className="btn sm" style={{ marginTop: 8 }}>Check any listing →</Link>
           </section>
           <UKMap pins={shown.map((h) => ({ id: h.property.id, lat: h.property.lat, lng: h.property.lng, label: h.property.town.split(',')[0], active: active === h.property.id }))} onPin={setActive} />
           {compare.length > 0 && <Link to="/compare" className="btn">Compare {compare.length} selected →</Link>}
-          <div className="card flat small">
-            <div className="eyebrow" style={{ marginBottom: 6 }}>Data provenance</div>
-            <ul className="ticks muted">
-              <li>Listings: fictional demo set. Production: agent CRM feeds, auction partners and owner-submitted listings — never scraped portals.</li>
-              <li>Commute: stored per listing. Production: TfL Unified API, NaPTAN, BODS + routing.</li>
-              <li>Schools: Ofsted / Estyn / Education Scotland open data (planned).</li>
-              <li>Sold prices: HM Land Registry Price Paid (OGL) — planned.</li>
-              <li>Search understanding: Streetkey AI turns your words into filters when it’s available; it never chooses listings, prices or scores.</li>
-            </ul>
-          </div>
         </div>
       </div>
     </div>

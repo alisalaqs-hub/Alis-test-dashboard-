@@ -40,9 +40,9 @@ The flywheel: consumers explore costs and designs → owners and agents see *agg
 | Colour | Obsidian `#0B0D12`, Paper `#F6F5F1`, **Signal orange** `#FF5A1F` (brand/action), **Insight violet** `#6B4EFF` (reserved for AI output), **Verified teal** `#0F7B6C` (verified/positive) | Colour carries meaning: violet always means "AI said this", teal means verified. |
 | Type | **Sora** (display), **Inter** (UI), **JetBrains Mono** (every number) | Tech-company feel; monospaced figures signal *calculated, not marketed*. |
 | Voice | Plain British English, specific, candid ("none of these meet your target — here's what would need to be true") | Trust is the product. |
-| Provenance labels | `Demo data` · `Estimate` · `AI` · `Observed` · `Inferred` · `Recommendation` · `Verified` · `Needs live integration` | Every figure declares where it came from. |
+| Provenance labels | `Example` · `Estimate` · `AI` · `Observed` · `Inferred` · `Recommendation` · `Verified` · `Coming soon` | Every figure declares where it came from. |
 
-Implementation: `src/components/Brand.tsx`, tokens in `src/styles.css` (light + dark themes).
+Implementation: `src/components/Brand.tsx`, tokens in `src/styles.css` (one daylight theme).
 
 ## 3. Information architecture
 

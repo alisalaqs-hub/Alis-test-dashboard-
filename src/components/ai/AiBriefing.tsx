@@ -244,7 +244,7 @@ export function BriefingView({ b, snapshot, linkFor, aiLabel = true, cached, sam
 }
 
 /** Small rule-based list for a dashboard's fallback (shown when AI isn't available). */
-export function BriefingFallback({ title = 'From Streetkey’s built-in rules', items }: { title?: string; items: ReactNode[] }) {
+export function BriefingFallback({ title = 'Summary', items }: { title?: string; items: ReactNode[] }) {
   if (!items.length) return null;
   return (
     <div className="callout info small aib-fb">

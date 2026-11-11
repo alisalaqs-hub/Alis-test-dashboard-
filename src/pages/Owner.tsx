@@ -184,13 +184,13 @@ function DemoOwner({ onBack }: { onBack?: () => void }) {
 
   return (
     <div className="stack" style={{ gap: 18 }}>
-      {onBack && <div className="callout info row between"><span>You’re looking at the demo dashboard with simulated figures.</span><button type="button" className="btn sm ghost" onClick={onBack}>Back to your listings</button></div>}
+      {onBack && <div className="callout info row between"><span>You’re looking at an example dashboard with example figures.</span><button type="button" className="btn sm ghost" onClick={onBack}>Back to your listings</button></div>}
       <div className="page-head">
         <div><div className="eyebrow">Property owner dashboard</div><h2 style={{ marginTop: 6 }}>How is my property performing?</h2>
           <p className="muted" style={{ marginTop: 6 }}>Aggregated buyer engagement over the last {PERIOD_DAYS} days (visitor segments under {K_ANON} people are hidden), compared with similar listings. Facts are labelled <Tag kind="obs" />, interpretations <Tag kind="inf" />, suggestions <Tag kind="rec" />.</p></div>
         <div className="stack" style={{ gap: 6, alignItems: 'flex-end' }}>
           <select className="input" value={id} onChange={(ev) => setId(ev.target.value)} aria-label="Choose property">{MINE.map((m) => <option key={m} value={m}>{getProperty(m)!.street.replace(' (fictional)', '')}, {getProperty(m)!.town.split(',')[0]}</option>)}</select>
-          <div className="row"><Tag kind="demo">Simulated engagement</Tag><Tag kind="neutral">k-anonymity ≥ {K_ANON}</Tag></div>
+          <div className="row"><Tag kind="demo">Example data</Tag></div>
         </div>
       </div>
 
@@ -203,7 +203,7 @@ function DemoOwner({ onBack }: { onBack?: () => void }) {
 
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
-          <Section title="What the evidence says" kicker="Property behaviour analysis · built-in rules" right={<Tag kind="neutral">Evidence-based</Tag>}><InsightList items={ins} /></Section>
+          <Section title="What the evidence says" kicker="Property behaviour analysis" right={<Tag kind="neutral">Evidence-based</Tag>}><InsightList items={ins} /></Section>
 
           <Section title="Engagement over time" kicker="Daily, last 28 days"><TrendChart days={e.days} /></Section>
 

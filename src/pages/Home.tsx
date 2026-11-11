@@ -33,7 +33,6 @@ export default function Home() {
       <section className="home-hero" aria-labelledby="hero-h">
         <div className="home-hero-inner">
           <div className="hero-copy">
-            <div className="row" style={{ gap: 8 }}><span className="label-mono">Find</span><Tag kind="demo">Demo data</Tag></div>
             <h1 id="hero-h">Find a home<i className="stop">.</i><br /><span>Unlock the whole street<b className="stop">.</b></span></h1>
             <SmartSearch />
           </div>
@@ -54,7 +53,7 @@ export default function Home() {
             </Link>
             <button className={`icon-btn${isSaved ? ' saved' : ''}`} aria-label={isSaved ? 'Unsave search' : 'Save search & get alerts'} onClick={() => toggleSavedSearch(resume.q, resume.mode)}><Icon name="heart" /></button>
           </div>
-          {isSaved && <div className="xs muted" style={{ marginTop: 8 }}>Saved — you’ll be alerted to new matches (alerts need sign-in in production).</div>}
+          {isSaved && <div className="xs muted" style={{ marginTop: 8 }}>Saved. Sign in to get new matches by email.</div>}
         </section>
 
         <section>
@@ -73,7 +72,7 @@ export default function Home() {
 
         <section>
           <span className="label-mono">For you</span>
-          <div className="row between"><h2 className="home-h">Picked for you</h2><Link to={destination('buy', 'homes for sale')} className="small" style={{ fontWeight: 600 }}>See all →</Link></div>
+          <div className="row between"><h2 className="home-h">Picked for you <Tag kind="demo">Example listings</Tag></h2><Link to={destination('buy', 'homes for sale')} className="small" style={{ fontWeight: 600 }}>See all →</Link></div>
           <p className="small muted" style={{ marginTop: -6, marginBottom: 12 }}>Ranked by Streetkey deal score — every card shows the price check and renovation cost.</p>
           <div className="carousel">
             {forYou.map(({ p, ds }, i) => (

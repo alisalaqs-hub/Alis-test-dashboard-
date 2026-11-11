@@ -100,14 +100,14 @@ export default function Automation() {
             <div className="xs muted">⏱ {a.schedule}</div>
             <div className="row" style={{ gap: 4 }}>{a.permissions.map((p) => <span key={p} className="mono xs" style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 5 }}>{p}</span>)}</div>
             <div className="row" style={{ gap: 6 }}>
-              <button className="btn sm" aria-label={`Run now: ${a.name} (built-in rules)`} onClick={() => runOne(a.id)}>Run now</button>
+              <button className="btn sm" aria-label={`Run now: ${a.name}`} onClick={() => runOne(a.id)}>Run now</button>
               {ai.available && (
                 <AiButton size="sm" busy={!!aiBusy[a.id]} aria-label={`Run with AI: ${a.name}`} onClick={() => void runAi(a.id)}>Run with AI</AiButton>
               )}
             </div>
             {aiBusy[a.id] && <AiThinking label={`${a.name} is working with Streetkey AI`} />}
             <AiErrorNote error={aiErrors[a.id] ?? null} onRetry={() => void runAi(a.id)} />
-            {aiErrors[a.id] && <p className="xs muted" style={{ margin: 0 }}>“Run now” still works with the built-in rules.</p>}
+            {aiErrors[a.id] && <p className="xs muted" style={{ margin: 0 }}>“Run now” still works without AI.</p>}
             {runs[a.id] && <BuiltInRunView run={runs[a.id].run} queue={runs[a.id].queue} />}
             {aiRuns[a.id] && <AiRunView r={aiRuns[a.id].r} queue={aiRuns[a.id].queue} />}
           </div>
@@ -134,7 +134,7 @@ export default function Automation() {
           </Section>
         </div>
         <div className="stack" style={{ gap: 16 }}>
-          <Section title="Audit log" kicker="Immutable in production">
+          <Section title="Audit log" kicker="Every action is recorded">
             {audit.length === 0 ? <p className="small muted">No events yet.</p> : (
               // Focusable, so keyboard users can scroll it in every browser.
               <div tabIndex={0} role="region" aria-label="Audit log" style={{ maxHeight: 420, overflow: 'auto' }}>

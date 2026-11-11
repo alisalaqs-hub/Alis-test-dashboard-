@@ -79,32 +79,6 @@ export const DAY: Pal = {
   pv: '#26324F',
 };
 
-export const NIGHT: Pal = {
-  night: true,
-  sky: ['#101731', '#151F3E', '#29335F'],
-  sun: '#6B5672', sunOp: 0.34,
-  far: '#1E2850', farLine: '#2B3766',
-  mid: '#1A2346', midDark: '#151D3C', midLine: '#2A3563', midWin: '#FFC24B', midTree: '#17213F',
-  via: '#1B2447', viaLine: '#2B3664',
-  train: '#2A3560', trainBand: '#1C2547', trainWin: '#FFD27A',
-  walls: ['#222C50', '#242C4D', '#283157', '#212A4B', '#262F52'],
-  stack: '#222B4E', pot: '#2E2A45',
-  stucco: '#323E6E', roof: ['#1A2241', '#121831'], ridge: '#2A3460', lead: '#1E2646',
-  glass: ['#0B1128', '#18213F'], glassHi: '#9FB2FF', glassHiOp: 0.06,
-  frame: '#121936', line: '#A9B5EA', lineOp: 0.17, shade: '#03061A', shadeOp: 0.3,
-  recess: '#090E22', doors: ['#121A36', '#341C27', '#18282F', '#0E1325', '#1E2B45', '#2F261E'], step: '#28315C', brass: '#8D7442',
-  gwall: '#1C2547', coping: '#2B3561', hedge: '#13202F', hedgeHi: '#1B2B3D', rail: '#060A1A',
-  pave: '#1A2242', paveLine: '#232D55', kerb: '#27325E', kerbTop: '#33407A', road: ['#151C38', '#131A35'], roadLine: '#2E3967',
-  leaf: '#162039', leafHi: '#1F2C49', leafLo: '#0F172F', trunk: '#1F2847',
-  lamp: '#070B1B', lampGlass: '#FFDB8F',
-  figure: '#070B1A', van: '#2B355C', vanLine: '#9AA8E0', tyre: '#05081A',
-  scaff: '#7D8AC0', plank: '#3B3F5C', net: '#A9B5EA', netOp: 0.07,
-  lit: ['#FFE9AE', '#FFC24B', '#EE9637'],
-  warm: '#FFB35A', warmOp: 0,
-  boardFace: '#EAE6DD', boardInk: '#0E1424',
-  pv: '#0A0F22',
-};
-
 /* ---------------------------------------------------------------- geometry */
 
 type R = [number, number, number, number];

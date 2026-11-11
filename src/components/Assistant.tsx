@@ -32,7 +32,7 @@ export function AnswerView({ a }: { a: AiAnswer }) {
   return (
     <div className="answer">
       <div className="row between" style={{ marginBottom: 6 }}>
-        <Tag kind="neutral" title="From Streetkey’s built-in calculations, not AI">Built-in answer</Tag>
+        <Tag kind="neutral" title="From Streetkey’s own calculations, not AI">Instant answer</Tag>
         <span className="xs muted">confidence: <b>{a.confidence}</b></span>
       </div>
       <p>{a.text}</p>
@@ -125,7 +125,7 @@ export function AssistantPanel<C>({ title, kicker, skills, ctx, onAnswer, placeh
     <section className={aiOn ? 'card ai-card' : 'card'}>
       <div className="card-head">
         <div><div className="eyebrow" style={{ marginBottom: 4 }}>{aiOn ? kicker : withoutAi(kicker)}</div><h3>{title}</h3></div>
-        {aiOn ? <AiLabel>Grounded AI</AiLabel> : <Tag kind="neutral" title="Answers come from Streetkey’s built-in calculations, not AI">Built-in answers</Tag>}
+        {aiOn ? <AiLabel>Grounded AI</AiLabel> : <Tag kind="neutral" title="Answers come from Streetkey’s own calculations, not AI">Instant answers</Tag>}
       </div>
       <form className="ask-panel-form" onSubmit={(e) => { e.preventDefault(); ask(q); }}>
         <input ref={inputRef} className="input" value={q} maxLength={2000} placeholder={aiOn ? 'Ask anything about this home…' : placeholder ?? 'Ask a question…'} onChange={(e) => setQ(e.target.value)} aria-label={label} enterKeyHint="send" />
@@ -159,7 +159,7 @@ export function AssistantPanel<C>({ title, kicker, skills, ctx, onAnswer, placeh
         ? <AiDisclaimer>AI-generated, not advice. Answers use Streetkey’s calculations for this home; demo listings are illustrations. Check important details with a professional.</AiDisclaimer>
         : <div className="ask-builtin-note">
           {wantsAi && <AiUnavailable reason={reason} feature="Streetkey AI" noFallback />}
-          <p className="xs muted" style={{ marginTop: 10 }}>Answers come from Streetkey’s built-in calculations for this page. They are estimates, not advice: check important details with a professional.</p>
+          <p className="xs muted" style={{ marginTop: 10 }}>Answers come from Streetkey’s own calculations for this page. They are estimates, not advice: check important details with a professional.</p>
         </div>}
     </section>
   );

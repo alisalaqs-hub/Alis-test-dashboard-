@@ -500,7 +500,7 @@ export default function Studio() {
           </Section>
           <Section title="Design engagement intelligence" kicker="Styles explored across Streetkey" right={<Tag kind="obs">Aggregated</Tag>}>
             {portfolioStyles.slice(0, 6).map(([s, n]) => <Meter key={s} label={s} value={n} max={portfolioStyles[0][1]} display={n.toLocaleString('en-GB')} color="var(--accent)" />)}
-            <p className="xs muted" style={{ marginTop: 8 }}>Simulated aggregate across demo listings. Owners and agents see this per listing to shape marketing and refurbishment decisions.</p>
+            <p className="xs muted" style={{ marginTop: 8 }}>Example figures across example listings. Owners and agents see this per listing to shape marketing and refurbishment decisions.</p>
           </Section>
         </div>
       </div>

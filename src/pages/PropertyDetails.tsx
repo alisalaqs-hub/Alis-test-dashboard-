@@ -8,7 +8,7 @@ import { getConsent, recentEvents, setConsent, track } from '../engine/tracking'
 import { propertySkills } from '../ai/skills';
 import { AssistantPanel } from '../components/Assistant';
 import { SimilarHomes } from '../components/ai/SimilarHomes';
-import { gbp, gbpK, HouseArt, Section, Stat, Tag } from '../components/ui';
+import { gbp, gbpK, HouseArt, Section, Stat, streetName, Tag } from '../components/ui';
 import { useStore } from '../store';
 import { api, ApiError } from '../lib/api';
 import { isServerRef } from '../lib/listingAdapter';
@@ -142,7 +142,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           </button>
         ))}
       </div>
-      <p className="xs muted" style={{ marginTop: -10 }}>{p.photos?.length ? `${p.photos.length} photo${p.photos.length > 1 ? 's' : ''} from the ${p.source?.kind === 'landlord' ? 'landlord' : 'owner'}${p.features.includes('Contains virtually staged images') ? ' · some images are virtually staged' : ''}` : 'Illustrations stand in for listing photography in this prototype.'}</p>
+      <p className="xs muted" style={{ marginTop: -10 }}>{p.photos?.length ? `${p.photos.length} photo${p.photos.length > 1 ? 's' : ''} from the ${p.source?.kind === 'landlord' ? 'landlord' : 'owner'}${p.features.includes('Contains virtually staged images') ? ' · some images are virtually staged' : ''}` : 'Illustration only. This is an example listing, not a home for sale.'}</p>
       {lightbox != null && (
         <div className="lightbox" onClick={() => setLightbox(null)} role="dialog" aria-label="Photo viewer">
           <div onClick={(e) => e.stopPropagation()}>
@@ -159,9 +159,9 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
           <div className="stack" style={{ gap: 8 }}>
-            <div className="row">{p.source ? <Tag kind={p.source.kind === 'agent-feed' ? 'ok' : 'neutral'}>{p.source.name}</Tag> : <Tag kind="demo">Fictional listing</Tag>}{p.source && !p.source.verified && p.source.kind !== 'external-link' && <Tag kind="demo">Verification pending</Tag>}{p.visibility === 'private' && <Tag kind="neutral">Private to you</Tag>}{p.listing === 'auction' && <Tag kind="warn">Auction</Tag>}{p.type === 'commercial' && <Tag kind="neutral">Commercial</Tag>}<Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag></div>
+            <div className="row">{p.source ? <Tag kind={p.source.kind === 'agent-feed' ? 'ok' : 'neutral'}>{p.source.name}</Tag> : <Tag kind="demo">Example listing</Tag>}{p.source && !p.source.verified && p.source.kind !== 'external-link' && <Tag kind="demo">Verification pending</Tag>}{p.visibility === 'private' && <Tag kind="neutral">Private to you</Tag>}{p.listing === 'auction' && <Tag kind="warn">Auction</Tag>}{p.type === 'commercial' && <Tag kind="neutral">Commercial</Tag>}<Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag></div>
             <h2>{p.title}</h2>
-            <div className="muted">{p.street}, {p.town} · {p.postcode}</div>
+            <div className="muted">{streetName(p.street)}, {p.town} · {p.postcode}</div>
             {p.source?.url && <a href={p.source.url} target="_blank" rel="noopener noreferrer" className="small">View the original listing ↗</a>}
             {p.alsoListedBy?.length ? <div className="xs muted">Also listed by {p.alsoListedBy.join(', ')}</div> : null}
             <div className="row" style={{ alignItems: 'flex-end', gap: 22 }}>
@@ -198,7 +198,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
 
           <div className="grid g2">
             <Section title="Floor plan" right={<button className="btn ghost sm" onClick={() => track('floorplan_open', p.id)}>Open full size</button>}><FloorPlan beds={p.beds} type={p.type} area={p.floorArea} /></Section>
-            <Section title="Material information" kicker="NTSELAT parts A–C">
+            <Section title="Key facts" kicker="Material information">
               <dl className="kv">
                 <dt>Tenure</dt><dd>{p.tenure}{p.leaseYears ? ` (${p.leaseYears} yrs)` : ''}</dd>
                 <dt>Council tax</dt><dd>{p.councilTax}</dd>
@@ -213,9 +213,9 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
 
           <OfficialListingPanel official={official} price={p.price} rental={rental} where={p.postcode || p.district} />
 
-          <Section title="Documents" right={<Tag kind="live">Document vault</Tag>}>
-            <ul className="clean">{(p.documents ?? ['EPC', 'Floor plan']).map((d) => <li key={d} className="row between"><span className="small">📄 {d}</span>{/requested/.test(d) ? <Tag kind="demo">Requested</Tag> : <button className="btn ghost sm" onClick={() => track('document_open', p.id, { doc: d })}>View</button>}</li>)}</ul>
-            <p className="xs muted" style={{ marginTop: 8 }}>The AI can read uploaded documents (leases, surveys, legal packs) and flag missing items. Document files are not included in this prototype.</p>
+          <Section title="Documents">
+            <ul className="clean">{(p.documents ?? ['EPC', 'Floor plan']).map((d) => <li key={d} className="row between"><span className="small">📄 {d}</span>{/requested/.test(d) ? <Tag kind="neutral">Requested</Tag> : <button className="btn ghost sm" onClick={() => track('document_open', p.id, { doc: d })}>View</button>}</li>)}</ul>
+            <p className="xs muted" style={{ marginTop: 8 }}>Documents are provided by the seller or their agent. Example listings have no files to open.</p>
           </Section>
 
           <AssistantPanel title="Ask about this property" kicker="Property AI" skills={propertySkills} ctx={p} onAnswer={(skill) => track('ai_question', p.id, { topic: skill })} />
