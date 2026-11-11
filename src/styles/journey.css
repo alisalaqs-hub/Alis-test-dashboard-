@@ -40,6 +40,36 @@
 .j-buyer.enter .j-step { animation: j-step 0.3s ease-in-out 10 alternate; }
 .j-house.is-entering .j-lw { transition-delay: calc(2500ms + var(--n, 0) * 90ms); }
 
+/* ---- proposed story (?story=inside): the camera closes in on the home and its front gives way to the inside ---- */
+.j-cam { transition: transform 1300ms cubic-bezier(.6, 0, .2, 1); }
+.j-in { opacity: 0; pointer-events: none; transition: opacity 450ms ease 250ms; }   /* leaving: fades as the camera pulls back */
+.j-in.on { opacity: 1; transition: opacity 600ms ease 750ms; }                     /* arriving: once the camera is nearly there */
+.j-in-label { pointer-events: none; }
+/* the home's own front garden steps aside so the ground floor can be seen */
+.j-front-garden { transition: opacity 450ms ease 300ms; }
+.journey.is-inside .j-front-garden { opacity: 0; transition-delay: 700ms; }
+/* the works: each room's finish wipes across behind an orange line, then its fittings appear */
+.j-wipe { transform-box: fill-box; transform-origin: 0 50%; transform: scaleX(0); }
+.j-in.built .j-wipe { transform: none; transition: transform 850ms cubic-bezier(.5, 0, .2, 1) calc(var(--k, 0) * 620ms + 350ms); }
+.j-fit { opacity: 0; }
+.j-in.built .j-fit { opacity: 1; transition: opacity 450ms ease calc(var(--k, 0) * 620ms + 1000ms); }
+.j-scan { opacity: 0; }
+.j-in.building .j-scan { animation: j-scan 850ms cubic-bezier(.5, 0, .2, 1) calc(var(--k, 0) * 620ms + 350ms) both; }
+.j-crew { opacity: 0; transition: opacity 350ms ease; }
+.j-in.building .j-crew { opacity: 1; transition-delay: 250ms; }
+.j-in.building .j-crew .j-step { animation: j-step 0.36s ease-in-out infinite alternate; }
+/* moving in: furniture drops into place, then the family and the lights */
+.j-fur { opacity: 0; transform: translateY(-6px); }
+.j-in.lived .j-fur { opacity: 1; transform: none; transition: opacity 320ms ease calc(var(--i, 0) * 110ms + 250ms), transform 520ms cubic-bezier(.2, .9, .3, 1.25) calc(var(--i, 0) * 110ms + 250ms); }
+/* the works labels clear away once the home is lived in */
+.j-in.lived .j-tag { opacity: 0; transition: opacity 300ms ease; }
+.j-fam-in { opacity: 0; }
+.j-in.lived .j-fam-in { opacity: 1; transition: opacity 500ms ease 1500ms; }
+.j-glow { opacity: 0; }
+.j-in.lived .j-glow { opacity: 0.85; transition: opacity 700ms ease 1900ms; }
+@keyframes j-scan { 0% { transform: translateX(0); opacity: 0; } 8%, 92% { opacity: 1; } 100% { transform: translateX(var(--w)); opacity: 0; } }
+@media (max-width: 599px) { .j-in-label { display: none; } }
+
 /* motion (all paused together; reduced motion shows the end state) */
 .j-dot.hop { animation: j-hop 3.4s linear forwards; }
 .j-halo { opacity: 0.14; transform-box: fill-box; transform-origin: center; animation: j-ping 1.8s cubic-bezier(.2, .6, .3, 1) infinite; }
@@ -138,7 +168,8 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .journey .j-anim, .journey .j-dot { animation: none !important; }
-  .j-far, .j-mid, .j-grow, .j-van, .j-card, .j-stem, .j-tick, .j-bar { transform: none !important; }
+  .j-far, .j-mid, .j-grow, .j-van, .j-card, .j-stem, .j-tick, .j-bar, .j-fur { transform: none !important; }
+  .j-cam, .j-wipe { transition: none !important; }
   .j-leaf { transition: none; }
   /* no walking: on completion the buyers are simply indoors and the lights are on */
   .j-buyer.enter .j-walk { opacity: 0; }

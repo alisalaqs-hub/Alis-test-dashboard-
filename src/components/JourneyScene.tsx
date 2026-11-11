@@ -1,14 +1,15 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getProperty } from '../data/properties';
 import { estimateRefurb } from '../engine/refurb';
 import { epcPathway, loftScenario, refurbInputFor } from '../engine/insights';
 import { transactionTax } from '../engine/tax';
 import { gbp, gbpK } from './ui';
 import {
-  Backdrop, BAY, BAYS, Board, bayCentre, bayX, Defs, DAY, DOT_Y, fanPath, Figure, GROUND, Grow, Ground, Lamps, LampLight,
+  Backdrop, BAY, BAYS, Board, bayCentre, bayX, Defs, DAY, DOT_Y, fanPath, Figure, GROUND, Grow, Ground, KERB, Lamps, LampLight,
   mirrored, NIGHT, POTS_TOP, RIDGE, TreeShadows, Trees, Van, winRect, WINS, doorX,
 } from './journey/art';
+import { Inside, type InsideFacts } from './journey/inside';
 import { JourneyNotes, type Box, type NoteSpec, type View } from './journey/Notes';
 import '../styles/journey.css';
 
@@ -19,6 +20,10 @@ import '../styles/journey.css';
  * comes from the engines and the demo listings. On completion the buyers walk along
  * the pavement, up the path and in through their front door; then the lights come on.
  *
+ * A proposed longer story is previewed with ?story=inside: after the sale the camera closes in on
+ * the home and its front gives way to the inside: the plans as a model, the renovation room by
+ * room, then the family moved in, before the view returns to the street.
+ *
  * Interactive: hover a house for its price or sold price, click a house to open it,
  * gentle parallax. Callouts are placed so they never sit under the search panel.
  * Accessibility: the drawing and its callouts are aria-hidden (a visually hidden
@@ -26,8 +31,13 @@ import '../styles/journey.css';
  * (WCAG 2.2.2); reduced motion starts paused with no movement; the story pauses
  * when it's off-screen. Night theme = the street at dusk.
  */
-/** How long each chapter of the story stays on screen. */
+/** How long each chapter of the story stays on screen (the chapters inside the home take a little longer). */
 const STAGE_MS = 3600;
+type Chapter = 'look' | 'buy' | 'keys' | 'model' | 'works' | 'home' | 'live' | 'grow';
+const STORY: Chapter[] = ['look', 'buy', 'keys', 'live', 'grow'];
+const STORY_INSIDE: Chapter[] = ['look', 'buy', 'keys', 'model', 'works', 'home', 'live'];
+const CHAPTER_MS: Partial<Record<Chapter, number>> = { model: 3800, works: 5000, home: 4400 };
+const INSIDE_CHAPTERS: Chapter[] = ['model', 'works', 'home'];
 const HOUSES = Array.from({ length: 8 }, (_, i) => ({ i, x: bayX(i), cx: bayX(i) + BAY / 2, m: mirrored(i) }));
 const HERO = 5;                 // the buyer's home
 const BUY_FOR_SALE = [3, 4, 5, 7]; // for sale on the buyer's street (hero is the 3rd)
@@ -36,6 +46,7 @@ const SCHOOL: [number, number] = [1447, 404]; // the board school, under its bel
 const LINE: [number, number] = [930, 459];    // the railway viaduct
 const BUYERS = [1052, 1066];    // where the couple stand while they look
 const HERO_DOOR = bayX(HERO) + doorX(mirrored(HERO)); // centre line of the buyer's front door
+const CAM: [number, number] = [bayX(HERO) + BAY / 2, KERB]; // the camera closes in on the home about this point
 const VB_FULL = [0, 0, 1600, 900] as const;
 const VB_COMPACT = [700, 300, 920, 603] as const;
 // Per-bay character: brick or painted fronts, door colours, hedge or railings.
@@ -98,7 +109,16 @@ function useStory() {
     const forSale = [getProperty('cro-002')!, getProperty('ley-014')!, hero, getProperty('cro-013')!];
     const ftbTax = transactionTax(hero.price, hero.nation, 'first-time').total;
     const loft = loftScenario(hero);
-    const heroWorks = estimateRefurb(refurbInputFor(hero)).total;
+    const works = estimateRefurb(refurbInputFor(hero));
+    const heroWorks = works.total;
+    const trade = (...names: string[]) => works.byTrade.filter((t) => names.includes(t.trade)).reduce((n, t) => n + t.total, 0);
+    // Labels inside the home (the ?story=inside preview), all from the cost engine.
+    const inside: InsideFacts = {
+      area: `${hero.floorArea} m²`, beds: `${hero.beds} bed`,
+      loft: loft ? `LOFT +${loft.area} m²` : 'LOFT ROOM',
+      bathroom: `BATHROOM ${gbpK(trade('Bathroom'))}`, rewire: `REWIRE ${gbpK(trade('Electrical'))}`,
+      decorate: `PLASTER & DECORATE ${gbpK(trade('Plastering', 'Decoration'))}`,
+    };
     const epc = epcPathway(hero);
     const epcTarget = epc.steps[epc.steps.length - 1]?.band ?? hero.epc.potential;
     const school = [...hero.schools].sort((a, b) => (b.rating === 'Outstanding' ? 1 : 0) - (a.rating === 'Outstanding' ? 1 : 0))[0];
@@ -112,7 +132,7 @@ function useStory() {
       if (c) return { title: `Sold · ${c.date}`, value: gbpK(c.price), label: `Sold ${gbpK(c.price)} · ${c.date}`, to: '/prices?q=E17' };
       return { title: let0 ? 'Let' : 'Not for sale', value: let0 ? `${gbp(let0.price)} pcm` : '', label: let0 ? `Let ${gbp(let0.price)} pcm` : 'Not for sale', to: '/prices?q=E17' };
     });
-    return { hero, forSale, ftbTax, loft, heroWorks, epcTarget, school, buyerHouse };
+    return { hero, forSale, ftbTax, loft, heroWorks, epcTarget, school, buyerHouse, inside };
   }, []);
 }
 
@@ -122,6 +142,9 @@ export function JourneyScene() {
   const P = night ? NIGHT : DAY;
   const compact = useMedia('(max-width: 599px)');
   const nav = useNavigate();
+  const [params] = useSearchParams();
+  const story = params.get('story') === 'inside' ? STORY_INSIDE : STORY;
+  const insideStory = story === STORY_INSIDE;
   const descId = useId();
   const reduce = useMemo(() => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches, []);
   const [stage, setStage] = useState(0);
@@ -132,19 +155,27 @@ export function JourneyScene() {
   const root = useRef<HTMLDivElement>(null);
   const m = useLayoutBoxes(root, [compact, stage]);
 
-  const summary = `A Victorian street where a home buyer's story plays on a loop. Look: every home on the street comes priced. `
-    + `Buy: offer accepted at ${gbp(s.hero.price)}, stamp duty as a first-time buyer ${gbp(s.ftbTax)}. `
-    + `Move in: keys collected; the buyers walk up the path and in through their front door, and the lights come on. `
-    + `Live: ${s.school ? `${s.school.rating} school ${s.school.distanceKm} km away, ` : ''}${s.hero.commute.minutes} min to ${s.hero.commute.to}. `
-    + `Grow: renovate (about ${gbpK(s.heroWorks)}) and convert the loft (about ${gbpK(s.loft?.cost ?? 0)}); estimated value after works ${gbpK(s.hero.estGdv + (s.loft?.valueUplift ?? 0))}, EPC ${s.hero.epc.current} to ${s.epcTarget}.`;
+  const after = gbpK(s.hero.estGdv + (s.loft?.valueUplift ?? 0));
+  const opening = `A Victorian street where a home buyer's story plays on a loop. Look: every home on the street comes priced. `
+    + `Buy: offer accepted at ${gbp(s.hero.price)}, stamp duty as a first-time buyer ${gbp(s.ftbTax)}. `;
+  const living = `Live: ${s.school ? `${s.school.rating} school ${s.school.distanceKm} km away, ` : ''}${s.hero.commute.minutes} min to ${s.hero.commute.to}.`;
+  const summary = insideStory
+    ? `${opening}Completion: keys collected; the buyers walk up the path and in through their front door. `
+      + `Inside: the view moves into the home and shows its plans as a model: ${s.inside.beds}, ${s.inside.area}, loft not yet converted. `
+      + `Renovation: the rooms are finished one by one (about ${gbpK(s.heroWorks)})${s.loft ? ` and the loft is converted, adding ${s.loft.area} m²` : ''}; EPC ${s.hero.epc.current} to ${s.epcTarget}. `
+      + `Moved in: the home is furnished and the family is inside; estimated value after works ${after}. Then the view returns to the street. ${living}`
+    : `${opening}Move in: keys collected; the buyers walk up the path and in through their front door, and the lights come on. ${living} `
+      + `Grow: renovate (about ${gbpK(s.heroWorks)}) and convert the loft (about ${gbpK(s.loft?.cost ?? 0)}); estimated value after works ${after}, EPC ${s.hero.epc.current} to ${s.epcTarget}.`;
   const running = playing && visible;
+  const st = stage % story.length;
+  const ch = story[st];
 
   // Move the story on by itself while it's playing and on screen.
   useEffect(() => {
     if (!running) return;
-    const t = window.setTimeout(() => setStage((x) => (x + 1) % 5), STAGE_MS);
+    const t = window.setTimeout(() => setStage((x) => (x + 1) % story.length), CHAPTER_MS[ch] ?? STAGE_MS);
     return () => window.clearTimeout(t);
-  }, [running, stage, nonce]);
+  }, [running, stage, nonce, story, ch]);
 
   // Pause when off-screen.
   useEffect(() => {
@@ -177,30 +208,47 @@ export function JourneyScene() {
     return { w: m.w, h: m.h, sc, ox: (m.w - vbw * sc) / 2, oy: m.h - vbh * sc, vbx, vby, clear: (DOT_Y - POTS_TOP) * sc + 10 };
   }, [m.w, m.h, vbx, vby, vbw, vbh]);
 
-  const st = stage;
   const on = (c: boolean) => (c ? ' on' : '');
+  /** True from chapter `c` onwards (false when this story has no such chapter). */
+  const past = (c: Chapter) => { const n = story.indexOf(c); return n >= 0 && st >= n; };
+  /** Inside the home: the camera is close in, and the street's hover labels are off. */
+  const inside = INSIDE_CHAPTERS.includes(ch);
+  const hov = inside ? null : hover;
+  // How far the camera can close in: the home's roof has to stay inside the scene.
+  const topU = view.sc ? vby - view.oy / view.sc : vby;
+  const zoom = Math.max(1.25, Math.min(2.5, (CAM[1] - topU - 26 / (view.sc || 1)) / (CAM[1] - 494)));
+  const camPt = ([x, y]: [number, number]): [number, number] => [CAM[0] + (x - CAM[0]) * zoom, CAM[1] + (y - CAM[1]) * zoom];
+  const camera = inside ? `translate(${(CAM[0] * (1 - zoom)).toFixed(1)}px, ${(CAM[1] * (1 - zoom)).toFixed(1)}px) scale(${zoom.toFixed(3)})` : 'translate(0px, 0px) scale(1)';
 
-  const storyLit = (i: number) => hover === i || (i === HERO && st >= 2);
-  const doorOpen = (i: number) => i === HERO && st >= 2;
+  const storyLit = (i: number) => hov === i || (i === HERO && past('keys'));
+  const doorOpen = (i: number) => i === HERO && past('keys');
   const ridge = (i: number): [number, number] => [HOUSES[i].cx, DOT_Y];
 
   const notes: NoteSpec[] = [];
-  BUY_FOR_SALE.forEach((i, n) => notes.push({ id: `fs${i}`, on: st === 0, at: [ridge(i)], title: `For sale · ${s.forSale[n].beds} bed`, short: 'For sale', value: gbpK(s.forSale[n].price), accent: i === HERO, d: n }));
-  notes.push({ id: 'offer', on: st === 1, at: [ridge(HERO)], title: 'Offer accepted', value: gbp(s.hero.price), rows: compact ? undefined : [['Stamp duty · first-time buyer', gbp(s.ftbTax)]], accent: true, dot: true });
-  notes.push({ id: 'keys', on: st === 2, at: [ridge(HERO)], title: 'Completion', value: 'Keys collected', accent: true, dot: true });
-  if (s.school) notes.push({ id: 'school', on: st === 3, at: [SCHOOL], title: `${s.school.rating} school`, value: `${s.school.distanceKm} km`, d: 1 });
-  notes.push({ id: 'travel', on: st === 3, at: [LINE], title: `To ${s.hero.commute.to}`, value: `${s.hero.commute.minutes} min`, accent: true });
-  notes.push({ id: 'grow', on: st === 4, at: [ridge(HERO)], title: 'Value after works', value: gbpK(s.hero.estGdv + (s.loft?.valueUplift ?? 0)), rows: compact ? undefined : [...(s.loft ? [['Loft conversion', `+${s.loft.area} m²`] as [string, string]] : []), ['Energy rating', `EPC ${s.hero.epc.current} → ${s.epcTarget}`]], accent: true, dot: true });
-  const hoverNote: NoteSpec | null = hover == null ? null
-    : { id: 'hover', on: true, at: [ridge(hover)], title: s.buyerHouse[hover].title, value: s.buyerHouse[hover].value, dot: hover === HERO && st > 0 };
+  BUY_FOR_SALE.forEach((i, n) => notes.push({ id: `fs${i}`, on: ch === 'look', at: [ridge(i)], title: `For sale · ${s.forSale[n].beds} bed`, short: 'For sale', value: gbpK(s.forSale[n].price), accent: i === HERO, d: n }));
+  notes.push({ id: 'offer', on: ch === 'buy', at: [ridge(HERO)], title: 'Offer accepted', value: gbp(s.hero.price), rows: compact ? undefined : [['Stamp duty · first-time buyer', gbp(s.ftbTax)]], accent: true, dot: true });
+  notes.push({ id: 'keys', on: ch === 'keys', at: [ridge(HERO)], title: 'Completion', value: 'Keys collected', accent: true, dot: true });
+  if (s.school) notes.push({ id: 'school', on: ch === 'live', at: [SCHOOL], title: `${s.school.rating} school`, value: `${s.school.distanceKm} km`, d: 1 });
+  notes.push({ id: 'travel', on: ch === 'live', at: [LINE], title: `To ${s.hero.commute.to}`, value: `${s.hero.commute.minutes} min`, accent: true });
+  notes.push({ id: 'grow', on: ch === 'grow', at: [ridge(HERO)], title: 'Value after works', value: after, rows: compact ? undefined : [...(s.loft ? [['Loft conversion', `+${s.loft.area} m²`] as [string, string]] : []), ['Energy rating', `EPC ${s.hero.epc.current} → ${s.epcTarget}`]], accent: true, dot: true });
+  if (insideStory) {
+    // Inside the home the labels sit beside it, level with the first floor.
+    const beside = [camPt([bayX(HERO) + BAY, 630])];
+    notes.push({ id: 'model', on: ch === 'model', at: beside, title: 'The model', value: `${s.inside.beds} · ${s.inside.area}`, rows: compact ? undefined : [['Loft', 'not yet converted']], accent: true });
+    notes.push({ id: 'works', on: ch === 'works', at: beside, title: 'Renovation', value: `≈ ${gbpK(s.heroWorks)}`, rows: compact ? undefined : [...(s.loft ? [['Loft conversion', `+${s.loft.area} m²`] as [string, string]] : []), ['Energy rating', `EPC ${s.hero.epc.current} → ${s.epcTarget}`]], accent: true });
+    notes.push({ id: 'home', on: ch === 'home', at: beside, title: 'Moved in', value: 'Welcome home', rows: compact ? undefined : [['Value after works', after]], accent: true });
+  }
+  const hoverNote: NoteSpec | null = hov == null ? null
+    : { id: 'hover', on: true, at: [ridge(hov)], title: s.buyerHouse[hov].title, value: s.buyerHouse[hov].value, dot: hov === HERO && st > 0 };
 
   return (
     <>
-      <div ref={root} className={`journey${running ? '' : ' is-paused'}${night ? ' night' : ''}${hover != null ? ' hovering' : ''}`} data-stage={st}>
+      <div ref={root} className={`journey${running ? '' : ' is-paused'}${night ? ' night' : ''}${hov != null ? ' hovering' : ''}${inside ? ' is-inside' : ''}`} data-stage={st} data-chapter={ch}>
         <svg key={nonce} viewBox={`${vbx} ${vby} ${vbw} ${vbh}`} preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
           <style>{DOT_CSS}</style>
           <Defs P={P} />
-          <Backdrop P={P} train={st === 3} />
+          <g className="j-cam" style={{ transform: camera }}>
+          <Backdrop P={P} train={ch === 'live'} />
 
           {/* The terrace */}
           <g className="j-near">
@@ -221,12 +269,12 @@ export function JourneyScene() {
               );
               if (!story) return <g key={k} style={style} className="j-np">{body}</g>;
               const i = k, isHero = i === HERO;
-              const forSale = BUY_FOR_SALE.includes(i) && (st === 0 || (st === 1 && !isHero));
-              const sold = isHero && st >= 1 && st <= 2;
+              const forSale = BUY_FOR_SALE.includes(i) && (ch === 'look' || (ch === 'buy' && !isHero));
+              const sold = isHero && (ch === 'buy' || ch === 'keys');
               const board: 'sale' | 'sold' | null = forSale ? 'sale' : sold ? 'sold' : null;
               const dx = doorX(mm);
               return (
-                <g key={k} style={style} className={`j-house${hover === i ? ' is-hover' : ''}${isHero && st === 2 ? ' is-entering' : ''}`}
+                <g key={k} style={style} className={`j-house${hov === i ? ' is-hover' : ''}${isHero && ch === 'keys' ? ' is-entering' : ''}`}
                   onPointerEnter={() => setHover(i)} onPointerLeave={() => setHover(null)} onClick={() => nav(s.buyerHouse[i].to)}>
                   {body}
                   <g transform={`translate(${x} 0)`}>
@@ -237,8 +285,13 @@ export function JourneyScene() {
                         <polygon points={`${dx - 13},752 ${dx + 13},752 ${dx + 22},770 ${dx - 22},770`} fill="url(#j-spill)" />
                       </g>
                     )}
-                    {isHero && <g className={`j-grow${on(st === 4)}`}><Grow m={mm} P={P} /></g>}
+                    {isHero && <g className={`j-grow${on(ch === 'grow' || (insideStory && ch === 'live'))}`}><Grow m={mm} P={P} /></g>}
                     <g className={`j-board${on(!!board)}`}><Board cx={bayCentre(mm)} kind={board ?? (isHero && st >= 1 ? 'sold' : 'sale')} P={P} /></g>
+                    {isHero && insideStory && (
+                      <g className={`j-in${on(inside)}${past('works') ? ' built' : ''}${ch === 'works' ? ' building' : ''}${past('home') ? ' lived' : ''}`}>
+                        <Inside m={mm} P={P} facts={s.inside} />
+                      </g>
+                    )}
                     <rect className="j-hit" x={0} y={RIDGE - 40} width={BAY} height={GROUND - RIDGE + 40} />
                   </g>
                 </g>
@@ -248,29 +301,30 @@ export function JourneyScene() {
             <rect className="j-np" x={-160} y={440} width={1920} height={GROUND - 440} fill="url(#j-warm)" />
             <rect className="j-np" x={-160} y={690} width={1920} height={GROUND - 690} fill="url(#j-ao)" />
             <TreeShadows P={P} />
-            <g className="j-np">{BAYS.map((k, n) => <use key={k} href={HEDGE[n] ? '#j-garden-h' : '#j-garden-r'} x={bayX(k)} transform={mirrored(k) ? `translate(${2 * bayX(k) + BAY} 0) scale(-1 1)` : undefined} />)}</g>
+            <g className="j-np">{BAYS.map((k, n) => <use key={k} className={k === HERO ? 'j-front-garden' : undefined} href={HEDGE[n] ? '#j-garden-h' : '#j-garden-r'} x={bayX(k)} transform={mirrored(k) ? `translate(${2 * bayX(k) + BAY} 0) scale(-1 1)` : undefined} />)}</g>
             <Ground P={P} />
             <Lamps P={P} />
 
             {/* Scale figures and the van: quiet silhouettes, as on an architect's drawing */}
             {/* The buyers look, buy, then (on completion) walk to their door and go in; the family is out on the street afterwards. */}
-            <g className={`j-np j-buyer${on(st <= 2)}${st >= 2 ? ' enter' : ''}`}>
+            <g className={`j-np j-buyer${on(st <= story.indexOf('keys'))}${past('keys') ? ' enter' : ''}`}>
               {BUYERS.map((x, n) => (
                 <g key={x} className="j-anim j-walk" style={{ ['--dx' as string]: `${HERO_DOOR - x}px`, ['--wd' as string]: `${n * 420}ms` } as CSSProperties}>
                   <g className="j-anim j-step"><Figure x={x} kind={n ? 'man' : 'woman'} P={P} /></g>
                 </g>
               ))}
             </g>
-            <g className={`j-np j-family${on(st >= 3)}`}><Figure x={1082} kind="woman" P={P} /><Figure x={1146} kind="man" P={P} flip /></g>
-            <g className={`j-np j-kid${on(st >= 3)}`}><Figure x={1093} kind="child" P={P} /></g>
+            <g className={`j-np j-family${on(past('live'))}`}><Figure x={1082} kind="woman" P={P} /><Figure x={1146} kind="man" P={P} flip /></g>
+            <g className={`j-np j-kid${on(past('live'))}`}><Figure x={1093} kind="child" P={P} /></g>
             <Trees P={P} />
             <LampLight P={P} />
-            <g className={`j-np j-van${on(st === 2)}`}><Van x={1166} P={P} /></g>
+            <g className={`j-np j-van${on(insideStory ? ch === 'home' : ch === 'keys')}`}><Van x={1166} P={P} /></g>
 
-            <g className={`j-np j-dot${st === 0 ? ' hop' : ''} on`}>
+            <g className={`j-np j-dot${ch === 'look' ? ' hop' : ''}${on(!inside)}`}>
               <circle r="16" className="j-anim j-halo" fill="#F07415" />
               <circle r="6.6" fill="#F07415" stroke={night ? '#121A33' : '#FFFFFF'} strokeWidth="2.4" />
             </g>
+          </g>
           </g>
         </svg>
         <JourneyNotes specs={notes} hover={hoverNote} view={view} obs={m.obs} compact={compact} />
