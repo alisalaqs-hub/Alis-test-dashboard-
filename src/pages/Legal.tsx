@@ -40,6 +40,7 @@ export function Privacy() {
 
       <h2>Official data we look up</h2>
       <p>When you search sold prices, view a listing or list a home, our server asks public services for information about the place: HM Land Registry (sold prices), the Environment Agency (flood risk), the government’s energy certificate register, and postcodes.io (postcode locations). We send them only the postcode or place, never your name or account details. Energy certificates are address-level records, so we only look one up for a home that is being listed. See <Link to="/data-sources">Data sources</Link>.</p>
+      <p>The street map on the search page is loaded by your browser from OpenFreeMap, a map service. Like any website you visit, it sees your device’s internet address and the part of the map you are looking at; we do not send it anything about you or your search.</p>
 
       <h2>Who we share data with</h2>
       <ul>
@@ -122,6 +123,10 @@ export function DataSources() {
 
       <h2>Postcodes and places</h2>
       <p className="small">{ATTRIBUTION.postcodes}</p>
+
+      <h2>Maps</h2>
+      <p>The street map on the search page uses OpenStreetMap data, served by OpenFreeMap.</p>
+      <p className="small">© OpenStreetMap contributors (Open Database Licence). Map tiles and style © OpenMapTiles, served by OpenFreeMap.</p>
 
       <h2>Not connected yet</h2>
       <p>School ratings, journey times, planning applications, conservation areas, subsidence and radon are not connected to official sources yet. Streetkey doesn’t show them for real listings; on demo listings they are illustrations.</p>

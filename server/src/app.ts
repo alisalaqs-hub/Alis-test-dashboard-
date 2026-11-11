@@ -37,7 +37,7 @@ import { meRoutes } from './routes/me';
 
 const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https:",
-  "font-src 'self' data:", "connect-src 'self' https://api.postcodes.io", "frame-ancestors 'self'", "base-uri 'self'",
+  "font-src 'self' data:", "connect-src 'self' https://api.postcodes.io https://tiles.openfreemap.org", "frame-ancestors 'self'", "base-uri 'self'",
   "form-action 'self'", "object-src 'none'",
 ].join('; ');
 

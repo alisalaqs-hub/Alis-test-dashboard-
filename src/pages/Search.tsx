@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useMatch, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import { slugPlace, unslugPlace, usePageMeta } from '../lib/meta';
 import { describeQuery, runSearch, type SearchHit, type SearchQuery } from '../engine/search';
 import { gbp, gbpK, HouseArt, Seg, streetName, Tag, UKMap } from '../components/ui';
 import { useStore } from '../store';
+import { pointInPolygon, type LngLat } from '../engine/geo';
 import type { Property } from '../data/properties';
 import { ApiError } from '../lib/api';
 import { aiPost, useAi } from '../lib/ai/core';
@@ -48,6 +49,9 @@ function blend(hits: SearchHit[], scores: Map<string, number>): SearchHit[] {
   const value = new Map(ranked.map((h) => [h.property.id, 0.5 * norm(h.score, fit) + 0.5 * norm(scores.get(h.property.id)!, sem)]));
   return [...ranked.sort((a, b) => value.get(b.property.id)! - value.get(a.property.id)!), ...hits.filter((h) => !scores.has(h.property.id))];
 }
+
+/** The street map is a large library: it loads only when the search page opens. */
+const MapSearch = lazy(() => import('../components/MapSearch'));
 
 const orList = (items: string[]) => {
   try { return new Intl.ListFormat('en-GB', { style: 'long', type: 'disjunction' }).format(items); } catch { return items.join(', '); }
@@ -127,6 +131,10 @@ export default function Search() {
   const [sort, setSort] = useState<Sort>('fit');
   const { saved, compare, toggleSaved, toggleCompare, savedSearches, toggleSavedSearch, addRecent, myListings, feedListings, serverListings } = useStore();
   const [src, setSrc] = useState<'all' | 'agents' | 'private'>('all');
+  /** The area drawn on the map (its corners), the map having failed to start, and list or map on small screens. */
+  const [area, setArea] = useState<LngLat[] | null>(null);
+  const [mapFailed, setMapFailed] = useState(false);
+  const [view, setView] = useState<'list' | 'map'>('list');
   const searchSaved = savedSearches.some((s) => s.q === submitted);
   const ai = useAi();
   // Arriving with a search the person just made (from the header, Home or the Ask sheet) counts as
@@ -219,7 +227,9 @@ export default function Search() {
   usePageMeta(placeName
     ? { title: `Homes ${toRent ? 'to rent' : 'for sale'} in ${placeName}`, description: `${realHits || 'Search'} homes ${toRent ? 'to rent' : 'for sale'} in ${placeName} on Streetkey, each with sold prices nearby, flood risk, its energy rating and the cost of works.`, index: realHits > 0 && !params.get('q'), canonical: `/${toRent ? 'to-rent' : 'for-sale'}/${slugPlace(placeName)}` }
     : { title: 'Search homes for sale and to rent', index: false });
-  const shown = hits.filter((h) => src === 'all' || (src === 'agents' ? h.property.source?.kind === 'agent-feed' || !h.property.source : h.property.source?.kind === 'owner' || h.property.source?.kind === 'landlord'));
+  const matched = hits.filter((h) => src === 'all' || (src === 'agents' ? h.property.source?.kind === 'agent-feed' || !h.property.source : h.property.source?.kind === 'owner' || h.property.source?.kind === 'landlord'));
+  // An area drawn on the map narrows the results to the homes inside it.
+  const shown = area ? matched.filter((h) => pointInPolygon([h.property.lng, h.property.lat], area)) : matched;
   const narrative = useMemo(() => narrate(q, hits), [q, hits]);
 
   /** A new search: its own history entry, keeping the box mode and page filters (removed chips belong to the old words). */
@@ -259,8 +269,12 @@ export default function Search() {
       <div className="page-head desktop-only">
         <div><div className="eyebrow">{ai.available ? 'AI property search' : 'Property search'}</div><h2 style={{ marginTop: 6 }}>Describe what you want</h2></div>
       </div>
-      <div className="split-r">
-        <div className="stack" style={{ gap: 16 }}>
+      <div className="view-switch chips" role="group" aria-label="Show results as">
+        <button type="button" className="chip" aria-pressed={view === 'list'} onClick={() => setView('list')}>List</button>
+        <button type="button" className="chip" aria-pressed={view === 'map'} onClick={() => setView('map')}>Map</button>
+      </div>
+      <div className={`split-r search-cols show-${view}`}>
+        <div className="stack results-col" style={{ gap: 16 }}>
           <div className="card ai-card search-head">
             <form className="smart-box" style={{ boxShadow: 'none' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
               <span className="smart-icon smart-icon-ai" aria-hidden="true"><Icon name="spark" stroke={2.2} /></span>
@@ -270,7 +284,7 @@ export default function Search() {
             {nearLimit && <p id="search-count" className="xs muted aisr-count" aria-live="polite">{MAX_QUERY_CHARS - text.length} of {MAX_QUERY_CHARS} characters left</p>}
             {shortened && <p className="xs muted aisr-note" role="note">Only the first {MAX_QUERY_CHARS} characters of this search were used.</p>}
             <div className="row between" style={{ marginTop: 10, flexWrap: 'nowrap', gap: 8 }}>
-              <b className="small aisr-count-n" ref={countRef} tabIndex={-1} aria-live="polite">{shown.length} result{shown.length === 1 ? '' : 's'}</b>
+              <b className="small aisr-count-n" ref={countRef} tabIndex={-1} aria-live="polite">{shown.length} result{shown.length === 1 ? '' : 's'}{area ? ' in your area' : ''}</b>
               <button className={`save-btn${searchSaved ? ' on' : ''}`} onClick={toggleSave}>{searchSaved ? '♥ Saved' : '♡ Save search'}</button>
             </div>
 
@@ -342,7 +356,7 @@ export default function Search() {
 
           <div className="stack aisr-results" style={{ gap: 16 }} aria-busy={understanding || rankBusy || undefined}>
           {shown.map((h, i) => (
-            <div key={h.property.id} className={`listing${active === h.property.id ? ' hl' : ''}`} onMouseEnter={() => setActive(h.property.id)}>
+            <div key={h.property.id} id={`hit-${h.property.id}`} className={`listing${active === h.property.id ? ' hl' : ''}`} onMouseEnter={() => setActive(h.property.id)}>
               <Link to={`/property/${h.property.id}`} className="ph" tabIndex={-1} aria-hidden="true"><HouseArt hue={h.property.photoHue} type={h.property.type} seed={i} /></Link>
               <div className="stack" style={{ gap: 6, minWidth: 0 }}>
                 <div className="row between" style={{ alignItems: 'flex-start', flexWrap: 'nowrap' }}>
@@ -368,12 +382,17 @@ export default function Search() {
           ))}
           </div>
         </div>
-        <div className="sticky stack">
+        <div className="sticky stack map-col">
           <section className="card">
             <p className="small" style={{ margin: 0 }}><b>Found one you like elsewhere?</b> Paste it into Streetkey for a price check, renovation cost and investment view.</p>
             <Link to="/import" className="btn sm" style={{ marginTop: 8 }}>Check any listing →</Link>
           </section>
-          <UKMap pins={shown.map((h) => ({ id: h.property.id, lat: h.property.lat, lng: h.property.lng, label: h.property.town.split(',')[0], active: active === h.property.id }))} onPin={setActive} />
+          {mapFailed
+            ? <div className="map-block">{<UKMap pins={shown.map((h) => ({ id: h.property.id, lat: h.property.lat, lng: h.property.lng, label: h.property.town.split(',')[0], active: active === h.property.id }))} onPin={setActive} />}</div>
+            : <Suspense fallback={<div className="map-block"><div className="map-real map-loading" role="status">Loading the map…</div></div>}>
+                <MapSearch homes={shown.map((h) => ({ id: h.property.id, lat: h.property.lat, lng: h.property.lng, label: h.property.title, price: h.property.listing === 'rent' ? `${gbp(h.property.price)} pcm` : gbpK(h.property.price) }))}
+                  active={active} onPick={(id) => { setActive(id); setView('list'); requestAnimationFrame(() => document.getElementById(`hit-${id}`)?.scrollIntoView({ block: 'nearest' })); }} area={area} onArea={setArea} onFail={() => setMapFailed(true)} />
+              </Suspense>}
           {compare.length > 0 && <Link to="/compare" className="btn">Compare {compare.length} selected →</Link>}
         </div>
       </div>

@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
     base: portable ? './' : '/',
     plugins: [react(), ...(mode === 'single' ? [viteSingleFile()] : [])],
     build: { outDir: mode === 'single' ? 'dist-single' : 'dist' },
+    worker: { format: 'es' as const }, // the street map's worker is a module
     test: { environment: 'node', include: ['src/**/*.test.ts'] },
   };
 });

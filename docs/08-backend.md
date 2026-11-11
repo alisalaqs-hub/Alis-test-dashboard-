@@ -159,6 +159,20 @@ when the page opens.
   relative files and `#/` addresses and are never offered to search engines.
 - After launch, add the site in Google Search Console and submit the sitemap address.
 
+## Map search
+
+The search page shows a real street map (`src/components/MapSearch.tsx`, MapLibre) with a price pin for each
+result; choosing a pin highlights its card. **Draw your area**: click round the area wanted and the results
+narrow to the homes inside it. On phones and tablets a List / Map switch shows one at a time. The map library is
+large, so it loads only when the search page opens.
+
+Map tiles come from OpenFreeMap (OpenStreetMap data; free, no key or account). The visitor's browser fetches
+them directly, which is why `https://tiles.openfreemap.org` is in `connect-src` in the content security policy
+(`netlify.toml` and `server/src/app.ts`). To use another provider set `VITE_MAP_STYLE_URL` at build time and
+change `connect-src` to match. If the map cannot start (no WebGL, or the tile service does not answer within 9
+seconds) the page falls back to the simple outline map. Not built yet: search by travel time (needs a routing
+service) and a distance-from-a-place filter.
+
 ## Listings, photos, feeds and alerts
 
 - **Photo uploads** go up in small batches (up to 12 files and about 4 MB per request, because Netlify functions accept about 6 MB per request). The page shows progress and a retry never creates a second listing. Each request can carry a `meta` JSON field (`[{token, alt}]`) so alt text from the AI photo check is saved with the photo; if a limit stops a batch part-way, the photos already stored are kept and the response says what happened.

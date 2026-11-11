@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Streetkey \u2014 See Beyond the Property. AI property intelligence platform (prototype)",
+  "description": "Streetkey — See Beyond the Property. AI property intelligence platform (prototype)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -51,6 +51,7 @@
     "@vitejs/plugin-react": "^6.2.1",
     "axe-core": "^4.14.0",
     "esbuild": "^0.28.2",
+    "maplibre-gl": "^6.17.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.6",

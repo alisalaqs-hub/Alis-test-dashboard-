@@ -1,0 +1,22 @@
+/* ===== Map search: a real street map with price pins and a draw-your-area tool ===== */
+.map-real { position: relative; height: 440px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); background: #E9E6DF; }
+.map-real .map-canvas { position: absolute; inset: 0; }
+.map-loading { display: grid; place-items: center; color: var(--muted); font-size: 0.9rem; }
+.map-real.is-drawing .maplibregl-canvas { cursor: crosshair; }
+.map-pin {
+  font: inherit; font-size: 12.5px; font-weight: 700; line-height: 1; padding: 6px 9px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  background: var(--ink); color: #fff; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(14, 20, 36, 0.35); font-variant-numeric: tabular-nums;
+}
+.map-pin:hover, .map-pin.on { background: var(--accent); color: var(--on-accent, #0E1424); z-index: 2; }
+.map-pin:focus-visible { outline: 3px solid var(--focus, #0E1424); outline-offset: 2px; }
+.map-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.map-tools .small { margin: 0; }
+.maplibregl-ctrl-attrib { font-size: 11px; }
+/* phones and tablets: one of list or map at a time */
+.view-switch { display: none; }
+@media (max-width: 1080px) {
+  .view-switch { display: flex; }
+  .search-cols.show-map .results-col { display: none; }
+  .search-cols.show-list .map-col .map-block { display: none; }
+  .map-real { height: min(62vh, 520px); }
+}
