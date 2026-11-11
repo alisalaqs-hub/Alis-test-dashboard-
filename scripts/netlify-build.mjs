@@ -5,6 +5,7 @@ const run = (cmd) => execSync(cmd, { stdio: 'inherit' });
 run('node scripts/gen-migrations.mjs');
 run('npm run build');
 run('node scripts/spa-redirects.mjs'); // page addresses → the site (see the script)
+run('node scripts/robots.mjs');        // robots.txt as a plain file
 const db = process.env.DATABASE_URL || process.env.NETLIFY_DB_URL || process.env.NETLIFY_DATABASE_URL;
 if (db) run('npx tsx server/src/bin/migrate.ts');
 else console.warn('\n[streetkey] No database connected yet (NETLIFY_DB_URL / DATABASE_URL). The site builds, but accounts and listings need a database: see docs/08-backend.md.\n');

@@ -153,8 +153,10 @@ when the page opens.
 - **Node hosts** answer any page address with the site (`server/src/app.ts`).
 - **`/sitemap.xml`** (`server/src/routes/seo.ts`): the fixed pages, every live listing, a for-sale or to-rent
   page for each town with live listings, and sold-price pages for the larger towns and cities of England and
-  Wales. **`/robots.txt`** keeps `/api/`, account, admin, saved and compare out and points at the sitemap. Set
-  `PUBLIC_URL` to the site's real address so both use it.
+  Wales. **`/robots.txt`** keeps `/api/`, account, admin, saved and compare out and points at the sitemap. On
+  Netlify it is a plain file written at build time (`scripts/robots.mjs`), so search engines get it even when
+  the back end is down; a Node host serves the same text. Set `PUBLIC_URL` to the site's real address (on
+  Netlify the site's own `URL` is used if it isn't set).
 - **Portable builds** (`npm run build:single`, and the optional GitHub Pages demo with `VITE_PORTABLE=1`) keep
   relative files and `#/` addresses and are never offered to search engines.
 - After launch, add the site in Google Search Console and submit the sitemap address.

@@ -5,7 +5,10 @@
  * to-rent page for each town that has live listings, and sold-price pages for the larger towns and
  * cities of England and Wales plus every town with a listing. Example listings are never in it.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import { robotsTxt } from '../../../scripts/robots.mjs';
 import { slugPlace } from '../../../src/engine/places';
 import { config } from '../config';
 import { q } from '../db';
@@ -22,17 +25,11 @@ const MAX_URLS = 45_000; // a sitemap file may hold 50,000
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export async function seoRoutes(app: FastifyInstance) {
-  app.get('/robots.txt', async (_req, reply) => reply.header('Cache-Control', 'public, max-age=3600').type('text/plain; charset=utf-8').send([
-    'User-agent: *',
-    'Disallow: /api/',
-    'Disallow: /account',
-    'Disallow: /admin',
-    'Disallow: /saved',
-    'Disallow: /compare',
-    '',
-    `Sitemap: ${config.publicUrl}/sitemap.xml`,
-    '',
-  ].join('\n')));
+  // On Netlify robots.txt is a plain file in the built site (scripts/robots.mjs), so it never depends on the
+  // back end. A Node host serves it from here unless the built site already has the file.
+  if (!fs.existsSync(path.join(config.siteDir, 'robots.txt'))) {
+    app.get('/robots.txt', async (_req, reply) => reply.header('Cache-Control', 'public, max-age=3600').type('text/plain; charset=utf-8').send(robotsTxt(config.publicUrl)));
+  }
 
   app.get('/sitemap.xml', async (_req, reply) => {
     const listings = await q<{ ref: string; channel: 'sale' | 'rent'; town: string; updated_at: Date }>(
