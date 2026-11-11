@@ -59,7 +59,7 @@ export interface UserDTO {
 
 export interface HealthDTO {
   ok: boolean; version: string;
-  features: { email: 'resend' | 'log'; storage: 'local' | 's3' | 'netlify-blobs'; aiImages: boolean; ai: boolean; moderation: boolean; runtime: 'node' | 'netlify' };
+  features: { email: 'resend' | 'log'; storage: 'local' | 's3' | 'netlify-blobs'; aiImages: boolean; /** Photo understanding (absent on older servers: treated as on when AI is on). */ aiPhotos?: boolean; ai: boolean; moderation: boolean; runtime: 'node' | 'netlify' };
 }
 
 export interface EnquirySummaryDTO {

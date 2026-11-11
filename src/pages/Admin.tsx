@@ -103,7 +103,7 @@ function AdminInner() {
 const QUEUE_HEAD = 'admin-queue-head';
 /** Why AI listing checks aren't running (from the server, which knows about pauses and budgets). */
 const AI_OFF_NOTE: Record<string, string> = {
-  paused: 'AI checks are paused just now (the OpenAI account is out of credit) and restart by themselves.',
+  paused: 'AI checks are paused just now (the AI provider’s credit or allowance has run out) and restart by themselves.',
   budget: 'AI checks are paused for today: the daily AI budget is used up.',
   disabled: 'AI checks are switched off on this site.', no_key: 'AI checks aren’t set up on this site yet.',
 };
@@ -429,8 +429,8 @@ function TrustPanel({ listingRef, review, busy, error, done, failed, aiOn, onRec
 
 /* ───────────────────────── AI operations ───────────────────────── */
 const OFF_STATUS: Record<string, { label: string; sub: string }> = {
-  disabled: { label: 'Off', sub: 'Switched off (AI_DISABLED)' }, no_key: { label: 'Off', sub: 'No OpenAI key set' },
-  paused: { label: 'Paused', sub: 'OpenAI account out of credit' }, budget: { label: 'Paused', sub: 'Daily token budget used up' },
+  disabled: { label: 'Off', sub: 'Switched off (AI_DISABLED)' }, no_key: { label: 'Off', sub: 'No AI key set' },
+  paused: { label: 'Paused', sub: 'Provider credit or allowance used up' }, budget: { label: 'Paused', sub: 'Daily token budget used up' },
 };
 
 function AiOps() {
@@ -482,7 +482,7 @@ function AiOps() {
           <caption className="sr-only">AI settings</caption>
           <thead><tr><th scope="col">Setting</th><th scope="col">Value</th><th scope="col">What it means</th></tr></thead>
           <tbody>
-            <tr><td>AI features</td><td>{data.enabled ? <Tag kind="ok">On</Tag> : <Tag kind="warn">{off?.label ?? 'Off'}</Tag>}</td><td className="small">{data.enabled ? 'OpenAI is connected.' : paused ? 'Paused for now; it switches back on by itself.' : 'Set OPENAI_API_KEY (and leave AI_DISABLED unset) to switch AI on.'}</td></tr>
+            <tr><td>AI features</td><td>{data.enabled ? <Tag kind="ok">On</Tag> : <Tag kind="warn">{off?.label ?? 'Off'}</Tag>}</td><td className="small">{data.enabled ? `${data.provider ?? 'OpenAI'} is connected.` : paused ? 'Paused for now; it switches back on by itself.' : 'Set OPENAI_API_KEY, or AI_BASE_URL, AI_API_KEY and AI_MODEL for another provider (and leave AI_DISABLED unset), to switch AI on.'}</td></tr>
             <tr><td>Background jobs</td><td className="num">{data.jobsMode}</td><td className="small">{JOBS_MODE_INFO[data.jobsMode] ?? 'Custom mode'}</td></tr>
             <tr><td>Daily token budget</td><td className="num">{data.dailyTokenBudget ? fmt(data.dailyTokenBudget) : 'No cap'}</td><td className="small">AI pauses for the day when this many tokens have been used (AI_DAILY_TOKEN_BUDGET). Safety checks keep a reserve.</td></tr>
             {data.dailyTokensPerUser != null && <tr><td>Daily tokens per account</td><td className="num">{data.dailyTokensPerUser ? fmt(data.dailyTokensPerUser) : 'No cap'}</td><td className="small">The most one signed-in person can use in a day. Listing checks and enquiry screening aren’t counted.</td></tr>}
@@ -502,11 +502,11 @@ function AiOps() {
         </table></div>
       </Section>}
 
-      <Section title="Models in use" kicker="Chosen automatically from the OpenAI account unless set in the environment">
+      <Section title="Models in use" kicker="On OpenAI these are chosen automatically unless set in the environment; another provider uses the models named there">
         {data.models ? <div className="table-wrap" tabIndex={0} role="region" aria-label="Models in use"><table className="t">
           <caption className="sr-only">Models in use by role</caption>
           <thead><tr><th scope="col">Role</th><th scope="col">Model</th><th scope="col">Used for</th></tr></thead>
-          <tbody>{Object.entries(data.models).map(([role, model]) => <tr key={role}><td>{role[0].toUpperCase() + role.slice(1)}</td><td className="num">{model}</td><td className="small">{ROLE_INFO[role] ?? '—'}</td></tr>)}</tbody>
+          <tbody>{Object.entries(data.models).map(([role, model]) => <tr key={role}><td>{role[0].toUpperCase() + role.slice(1)}</td><td className="num">{model || 'Not available'}</td><td className="small">{ROLE_INFO[role] ?? '—'}</td></tr>)}</tbody>
         </table></div> : <p className="muted small">Models are chosen once AI is switched on.</p>}
       </Section>
 

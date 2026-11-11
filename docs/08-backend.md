@@ -36,7 +36,7 @@ Browser ── static site (dist/, from Netlify's CDN)
 2. **Add a database.** Site → *Extensions* (or *Database*) → **Netlify Database** → create. It sets `NETLIFY_DB_URL` for you. (Alternative: create a free Neon project and add its connection string as `DATABASE_URL`.) Pick a European region (London `eu-west-2` or Frankfurt `eu-central-1`) for your UK visitors.
    - **Keep the functions next to the database.** Site configuration → *Build & deploy* → *Functions* → *Functions region*: choose the same region as the database, if your plan offers it. Every page that talks to the server makes several database round trips, so a US function talking to a European database adds about 80 ms each time.
 3. **Add environment variables** (Site configuration → Environment variables). Full list with explanations in `.env.example`:
-   - `OPENAI_API_KEY`: from platform.openai.com → API keys. Add credit and set a monthly limit there.
+   - `OPENAI_API_KEY`: from platform.openai.com → API keys. Add credit and set a monthly limit there. To use another provider or a free plan instead, set `AI_BASE_URL`, `AI_API_KEY` and `AI_MODEL` (see "Running the AI on another provider" below).
    - `ADMIN_EMAIL`: your email address (see step 5).
    - `RESEND_API_KEY` and `EMAIL_FROM` (e.g. `Streetkey <hello@yourdomain.co.uk>`): from resend.com after verifying your domain. Optional at first.
    - `EPC_API_TOKEN`: optional, free. It lets Streetkey check energy ratings against the EPC register (see *Official data* below).
@@ -69,6 +69,28 @@ All OpenAI traffic goes through `server/src/ai/core.ts`. Figures shown to people
 ### Models
 
 Leave the `OPENAI_*_MODEL` settings blank and Streetkey picks the best models your OpenAI account can use (checked every few hours): the newest plain `gpt-N` for writing and reasoning, the newest `gpt-N-mini` for fast tasks and photos, the newest `gpt-image-N` for room redesigns, `text-embedding-3-small` for search and `omni-moderation-latest` for moderation. If OpenAI rejects a parameter for a model, the server retries without it and remembers. *Admin → AI* shows what's in use.
+
+### Running the AI on another provider, including a free plan
+
+Streetkey's AI talks to OpenAI by default, but it can use any provider that speaks the same API. Several offer a free plan with a daily allowance. Set these in Netlify instead of `OPENAI_API_KEY`:
+
+| Setting | What to put |
+|---|---|
+| `AI_BASE_URL` | The provider's OpenAI-compatible address (it ends in `/v1`; the provider's documentation gives it) |
+| `AI_API_KEY` | The key from that provider |
+| `AI_MODEL` | The name of the chat model to use, exactly as the provider writes it. Required. |
+| `AI_FAST_MODEL` | Optional: a smaller, quicker model for short tasks. Left blank, `AI_MODEL` does both. |
+| `AI_PROVIDER_NAME` | Optional: the provider's name, shown in *Admin → AI* |
+
+What changes on another provider:
+
+- **Chat features work**: Ask Streetkey, plain-English search, the description writer, briefings, price explanations, enquiry screening and the written part of listing checks.
+- **Only what is named is used.** Photo understanding needs `AI_VISION_MODEL`, room redesign images need `AI_IMAGE_MODEL`, meaning-based search ranking needs `AI_EMBEDDING_MODEL` and automatic moderation needs `AI_MODERATION_MODEL`. Without them those calls are never made: room redesign is not offered, photo checks say they could not be done, search keeps its ordinary ranking, and listings rely on Streetkey's own rules and the admin's review. Free plans rarely include images or moderation.
+- **Models without strict JSON output** are asked for a plain JSON object with the format in their instructions; the answer is still checked before it is used, and a provider that does not know the `strict` flag on tools has it left out.
+- **When the allowance is used up** (the provider answers "limit reached" for the day, or asks to retry more than 30 seconds later), Streetkey pauses AI until the time the provider gives (15 minutes if it gives none, an hour at most), then tries again. Meanwhile every page uses its built-in rules, and *Admin → AI* says why. No email is sent for this.
+- Set `AI_DAILY_TOKEN_BUDGET` a little under the provider's daily token allowance so Streetkey's own safety reserve (the last 15%, kept for scam checks) still applies.
+
+Before choosing a free plan, read the provider's terms for two things: whether it may be used for a public website serving people in the UK, and whether what people type may be kept or used to train models. Whichever provider is used must be named in the privacy notice (`src/pages/Legal.tsx`) and, if photos are sent to it, in the photo consent wording, which currently names OpenAI.
 
 ### Keeping costs under control
 

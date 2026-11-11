@@ -116,6 +116,7 @@ function askServerWhyOff(again = false) {
 
 /**
  * Is AI usable right now, and why not if it isn't.
+ * `photos` / `images`: AI can read photos / make room images here (false when AI is off, or on a provider without them).
  * `limited`: AI is on, but this person has used today's allowance (`limit` says until when, and whether
  * signing in would help). `note`: the server's own words when AI is off or paused, if it gave any.
  */
@@ -130,7 +131,11 @@ export function useAi() {
     : s.paused ? 'paused' : null;
   // A visitor's limit is lifted by signing in.
   const limit = s.limit && !(s.limit.visitor && user) ? s.limit : null;
-  return { available: reason === null, reason, signedIn: !!user, user, limited: reason === null && !!limit, limit: reason === null ? limit : null, note: reason === 'disabled' || reason === 'paused' ? server?.note ?? null : null };
+  // AI can be on while the provider behind it has no way to read photos or make room images (a chat-only plan).
+  const available = reason === null;
+  const photos = available && health?.features.aiPhotos !== false;
+  const images = available && health?.features.aiImages !== false;
+  return { available, photos, images, reason, signedIn: !!user, user, limited: reason === null && !!limit, limit: reason === null ? limit : null, note: reason === 'disabled' || reason === 'paused' ? server?.note ?? null : null };
 }
 
 const noted = <T>(p: Promise<T>) => p.catch((e: unknown) => { noteAiError(e); throw e; });

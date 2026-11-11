@@ -2,7 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config';
 import { one, q } from '../db';
-import { aiAvailable, aiOffReason, aiPause, modelsInUse, refreshAiState } from '../ai/core';
+import { aiAvailable, aiCan, aiOffReason, aiPause, aiProvider, modelsInUse, refreshAiState } from '../ai/core';
 import { AI_OFF_MESSAGE } from '../ai/guard';
 import { getJob, dispatch, isInlineSafe, jobDTO, processJob } from '../ai/jobs';
 import { forbidden, notFound, requireAdmin } from '../services/http';
@@ -14,7 +14,7 @@ export async function aiCoreRoutes(app: FastifyInstance) {
     const off = aiOffReason();
     const used = req.user ? await one<{ n: number }>(`SELECT count(*)::int n FROM ai_images WHERE user_id = $1 AND status <> 'failed' AND created_at > now() - interval '24 hours'`, [req.user.id]) : null;
     return {
-      enabled: on, imagesEnabled: on, signedIn: !!req.user,
+      enabled: on, imagesEnabled: on && aiCan('image'), signedIn: !!req.user,
       dailyLimit: config.ai.dailyImagesPerUser, usedToday: used?.n ?? 0,
       reason: off,
       note: off ? AI_OFF_MESSAGE[off] : null,
@@ -31,11 +31,13 @@ export async function aiCoreRoutes(app: FastifyInstance) {
     const off = aiOffReason();
     // Only admins see the billing detail: the public message just says AI is temporarily unavailable.
     const pause = aiPause();
-    const notice = pause?.reason === 'quota' ? `The OpenAI account has run out of credit, so AI is paused until ${new Date(pause.until).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' })} and will retry automatically. Add credit at platform.openai.com → Billing.`
+    const untilTime = pause ? new Date(pause.until).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' }) : '';
+    const notice = pause?.reason === 'quota' ? `The OpenAI account has run out of credit, so AI is paused until ${untilTime} and will retry automatically. Add credit at platform.openai.com → Billing.`
+      : pause?.reason === 'limit' ? `${aiProvider()} says its allowance is used up for now (on a free plan this is usually the daily limit), so AI is paused until ${untilTime} and will retry automatically. The site uses its built-in rules meanwhile.`
       : off === 'budget' ? 'Today’s AI token budget (AI_DAILY_TOKEN_BUDGET) is used up, so ordinary AI features are paused; safety checks keep a reserve.' : off ? AI_OFF_MESSAGE[off] : null;
     const topUsers = await q(`SELECT CASE WHEN actor LIKE 'u:%' THEN 'account' ELSE 'visitor' END AS kind, count(*)::int calls, coalesce(sum(input_tokens + output_tokens), 0)::bigint tokens
       FROM ai_usage WHERE at > now() - interval '24 hours' AND actor IS NOT NULL GROUP BY actor ORDER BY tokens DESC LIMIT 5`).catch(() => []);
-    return { enabled: aiAvailable(), reason: off, notice, pause, models: config.ai.openaiKey && !config.ai.disabled ? await modelsInUse() : null, last24h: usage, byPurpose: byPurpose?.rows ?? [], topUsers,
+    return { enabled: aiAvailable(), reason: off, notice, pause, provider: aiProvider(), models: config.ai.openaiKey && !config.ai.disabled ? await modelsInUse() : null, last24h: usage, byPurpose: byPurpose?.rows ?? [], topUsers,
       dailyTokenBudget: config.ai.dailyTokenBudget, dailyTokensPerUser: config.ai.dailyTokensPerUser, dailyTokensPerIp: config.ai.dailyTokensPerIp, jobsMode: config.jobs.mode };
   });
 

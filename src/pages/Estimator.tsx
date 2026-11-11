@@ -209,7 +209,7 @@ function ConfirmEmailNote() {
 interface Picked { id: string; file: File; url: string }
 
 function PhotoEstimate({ input, currentTotal, blocked, onApply, onUndo }: { input: RefurbInput; currentTotal: number; blocked: string | null; onApply: (next: RefurbInput) => void; onUndo: (() => void) | null }) {
-  const { available, reason, signedIn, user } = useAi();
+  const { available, photos, reason, signedIn, user } = useAi();
   const { setUser } = useServer();
   const [picked, setPicked] = useState<Picked[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
@@ -287,7 +287,7 @@ function PhotoEstimate({ input, currentTotal, blocked, onApply, onUndo }: { inpu
   return (
     <Section title="Estimate from photos" kicker="Step 4 · optional" right={<AiLabel />}>
       <p className="small muted" style={{ marginTop: 0 }}>Add up to {MAX_PHOTOS} photos of the rooms and the outside. Streetkey AI describes what it can see and suggests a scope of works; Streetkey’s cost engine prices it, using the property details above.</p>
-      {!available || !signedIn ? <AiUnavailable reason={reason} signedOut={available && !signedIn} feature="Estimating from photos" noFallback fallback="Use Step 3 or a survey in Step 5 instead." /> : <>
+      {!photos || !signedIn ? <AiUnavailable reason={available && !photos ? 'disabled' : reason} signedOut={photos && !signedIn} feature="Estimating from photos" noFallback fallback="Use Step 3 or a survey in Step 5 instead." /> : <>
         {unconfirmed && <ConfirmEmailNote />}
         <DropZone onFiles={(l) => void add(l)} disabled={job.busy || picked.length >= MAX_PHOTOS} accept="image/jpeg,image/png,image/webp">
           {picked.length >= MAX_PHOTOS ? `You’ve added ${MAX_PHOTOS} photos (the maximum).` : `Choose photos, or drop them here (JPEG, PNG or WebP). They’re resized in your browser; up to ${mb(MAX_TOTAL_BYTES)} in total.`}

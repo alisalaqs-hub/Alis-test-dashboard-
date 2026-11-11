@@ -75,21 +75,28 @@ export const config = {
     resendApiKey: env.RESEND_API_KEY ?? '',
   },
   ai: {
-    openaiKey: env.OPENAI_API_KEY ?? '',
-    openaiBase: (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, ''),
+    /**
+     * The AI provider. OpenAI by default; any provider that speaks the same API works too (many have a free plan):
+     * set AI_BASE_URL, AI_API_KEY and AI_MODEL. The older OPENAI_* names still work.
+     */
+    openaiKey: env.AI_API_KEY || env.OPENAI_API_KEY || '',
+    openaiBase: (env.AI_BASE_URL || env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, ''),
+    /** The provider's name as shown to admins (defaults to OpenAI, or the host of AI_BASE_URL). */
+    providerName: env.AI_PROVIDER_NAME || '',
     /** Master switch: AI_DISABLED=true turns every AI feature off (the site falls back to its built-in rules). */
     disabled: bool(env.AI_DISABLED, false),
     /**
-     * Models per role. Leave blank to auto-select the best model your OpenAI account can use
-     * (the server reads the account's model list and picks from a preference order).
+     * Models per role. On OpenAI, leave blank to auto-select the best model the account can use.
+     * On any other provider, AI_MODEL is required (AI_FAST_MODEL is optional); photo understanding, room images,
+     * embeddings and moderation are used only when a model is named for them.
      */
     models: {
-      main: env.OPENAI_MODEL ?? '',            // assistant, reasoning-heavy writing
-      fast: env.OPENAI_FAST_MODEL ?? '',       // parsing, classification, short drafts
-      vision: env.OPENAI_VISION_MODEL ?? '',   // photo understanding
-      image: env.OPENAI_IMAGE_MODEL ?? '',     // room redesign (image editing)
-      embedding: env.OPENAI_EMBEDDING_MODEL ?? '',
-      moderation: env.OPENAI_MODERATION_MODEL ?? 'omni-moderation-latest',
+      main: env.AI_MODEL || env.OPENAI_MODEL || '',                      // assistant, reasoning-heavy writing
+      fast: env.AI_FAST_MODEL || env.OPENAI_FAST_MODEL || '',            // parsing, classification, short drafts
+      vision: env.AI_VISION_MODEL || env.OPENAI_VISION_MODEL || '',      // photo understanding
+      image: env.AI_IMAGE_MODEL || env.OPENAI_IMAGE_MODEL || '',         // room redesign (image editing)
+      embedding: env.AI_EMBEDDING_MODEL || env.OPENAI_EMBEDDING_MODEL || '',
+      moderation: env.AI_MODERATION_MODEL || env.OPENAI_MODERATION_MODEL || '',
     },
     imageQuality: env.OPENAI_IMAGE_QUALITY ?? 'medium',
     inputFidelity: env.OPENAI_IMAGE_INPUT_FIDELITY ?? 'high',

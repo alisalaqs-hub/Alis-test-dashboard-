@@ -114,6 +114,8 @@ export default function Studio() {
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const aiState = useAi();
   const aiOn = aiState.available;
+  // The provider behind the AI may not read photos or make room images (a chat-only plan): offer only what it can do.
+  const canAnalyse = aiState.photos, canRedesign = aiState.images, photoAi = canAnalyse || canRedesign;
   const user = aiState.user;
   const aiReason = aiState.reason;
   const unverified = !!user && user.emailVerified === false;
@@ -340,7 +342,7 @@ export default function Studio() {
             <span className="xs muted" id={`${uid}-pc-h`} role="status">{ownPostcode && !ownRegion ? 'We don’t recognise that postcode yet, so prices use the UK average.' : ownRegion ? `Prices for ${cost.regionLabel}.` : 'The start of your postcode is enough (e.g. M14).'}</span>
           </div>}
         </div>
-        <div className="row"><Tag kind="warn">Concept visualisation — not a construction design</Tag>{aiOn ? <Tag kind="ai">AI photo redesign: on</Tag> : aiReason !== 'checking' && <Tag kind="neutral">{aiReason === 'paused' ? 'AI photo redesign: temporarily unavailable' : aiReason === 'disabled' ? 'AI photo redesign: not switched on yet' : 'AI photo redesign: on the live site'}</Tag>}</div>
+        <div className="row"><Tag kind="warn">Concept visualisation — not a construction design</Tag>{aiOn ? (canRedesign ? <Tag kind="ai">AI photo redesign: on</Tag> : <Tag kind="neutral">AI photo redesign: not switched on yet</Tag>) : aiReason !== 'checking' && <Tag kind="neutral">{aiReason === 'paused' ? 'AI photo redesign: temporarily unavailable' : aiReason === 'disabled' ? 'AI photo redesign: not switched on yet' : 'AI photo redesign: on the live site'}</Tag>}</div>
       </div>
 
       <div className="card ai-card">
@@ -386,20 +388,22 @@ export default function Studio() {
           <p className="xs muted" id={`${uid}-ba-help`} style={{ margin: '-6px 0 0' }}>Drag the slider or use the arrow keys to compare before and after.</p>
           {photo && <div className="card ai-gen stack">
             <div className="row between"><b>Use AI on this photo</b>{aiLeft != null && <span className="xs muted">{aiLeft} AI design{aiLeft === 1 ? '' : 's'} left today</span>}</div>
-            {aiOn && user ? <>
-              <p className="small muted">Streetkey AI can analyse the room to suggest a style, and redesign it as <b>{style.name}</b>{sentBrief ? <> following your brief</> : ''} while keeping the walls, windows and layout. A redesign usually takes under a minute.</p>
+            {photoAi && user ? <>
+              <p className="small muted">{canAnalyse && canRedesign ? <>Streetkey AI can analyse the room to suggest a style, and redesign it as <b>{style.name}</b>{sentBrief ? <> following your brief</> : ''} while keeping the walls, windows and layout. A redesign usually takes under a minute.</>
+                : canRedesign ? <>Streetkey AI can redesign this room as <b>{style.name}</b>{sentBrief ? <> following your brief</> : ''} while keeping the walls, windows and layout. A redesign usually takes under a minute.</>
+                : <>Streetkey AI can analyse the room to suggest a style. Photo-real redesign isn’t switched on for this site yet, so the preview above is a simple colour wash.</>}</p>
               {unverified && photoErr?.error.code !== 'verify_email' && <AiErrorNote error={verifyNote} />}
               <label className="check"><input type="checkbox" checked={aiConsent} onChange={(e) => setAiConsent(e.target.checked)} />I’m happy for this photo to be sent to our AI provider (OpenAI) to analyse or redesign it. It isn’t used to train their models.</label>
               <div className="sk-actions">
-                <AiButton kind="ghost" busy={analysisBusy} busyLabel="Analysing…" disabled={!aiConsent} onClick={() => void analyse()}>{analysis ? 'Analyse again' : 'Analyse this room'}</AiButton>
-                <AiButton ref={generateRef} busy={aiBusy} busyLabel="Designing your room…" disabled={!aiConsent} aria-describedby={atLimit && !photoErr ? `${uid}-brief-sent ${uid}-limit` : `${uid}-brief-sent`} onClick={() => void generate()}>{ai ? `Try again as ${style.name}` : `Generate ${style.name} design`}</AiButton>
+                {canAnalyse && <AiButton kind="ghost" busy={analysisBusy} busyLabel="Analysing…" disabled={!aiConsent} onClick={() => void analyse()}>{analysis ? 'Analyse again' : 'Analyse this room'}</AiButton>}
+                {canRedesign && <AiButton ref={generateRef} busy={aiBusy} busyLabel="Designing your room…" disabled={!aiConsent} aria-describedby={atLimit && !photoErr ? `${uid}-brief-sent ${uid}-limit` : `${uid}-brief-sent`} onClick={() => void generate()}>{ai ? `Try again as ${style.name}` : `Generate ${style.name} design`}</AiButton>}
                 {aiBusy && <button type="button" className="btn ghost sm" onClick={stopWaiting}>Stop waiting</button>}
               </div>
-              <p className="xs muted" id={`${uid}-brief-sent`} style={{ margin: 0 }}>{sentBrief ? <>Your brief goes with the redesign: <q>{sentBrief}</q></>
+              {canRedesign && <p className="xs muted" id={`${uid}-brief-sent`} style={{ margin: 0 }}>{sentBrief ? <>Your brief goes with the redesign: <q>{sentBrief}</q></>
                 : briefClash ? <>Your brief is about a {ROOM_NAME[briefRoom!]}, so it won’t be sent with this {ROOM_NAME[room]} redesign. Choose the {ROOM_NAME[briefRoom!]} or change the brief to use it.</>
-                : <>No brief: the redesign follows the {style.name} style. Write one above to add your own requests.</>}</p>
+                : <>No brief: the redesign follows the {style.name} style. Write one above to add your own requests.</>}</p>}
               {!aiConsent && <p className="xs muted" style={{ margin: 0 }}>Tick the box above to use AI on this photo.</p>}
-              {atLimit && !photoErr && <p className="xs muted" id={`${uid}-limit`} style={{ margin: 0 }}>{siteFull ? 'Streetkey’s AI designer has reached its limit for today across the whole site.' : 'You’ve used today’s AI designs.'} You can still analyse the room, and the colour preview and costs still work.</p>}
+              {canRedesign && atLimit && !photoErr && <p className="xs muted" id={`${uid}-limit`} style={{ margin: 0 }}>{siteFull ? 'Streetkey’s AI designer has reached its limit for today across the whole site.' : 'You’ve used today’s AI designs.'} You can still analyse the room, and the colour preview and costs still work.</p>}
               {analysisBusy && <div className="ai-thinking" role="status" aria-live="polite"><span className="ai-dots" aria-hidden="true"><i /><i /><i /></span>Looking at your room…</div>}
               {aiBusy && <div className="sk-studio-progress">
                 <div className="ai-thinking" role="status" aria-live="polite"><span className="ai-dots" aria-hidden="true"><i /><i /><i /></span>{aiProgress || ROOM_IMAGE_PROGRESS}</div>
@@ -417,7 +421,8 @@ export default function Studio() {
                 {analysis.analysis.suggestedStyleIds.length > 0 && <div><h4 className="sk-list-h" id={`${uid}-suggested`}>Suggested styles</h4><div className="sk-style-suggest" role="group" aria-labelledby={`${uid}-suggested`}>{analysis.analysis.suggestedStyleIds.map((id) => { const st = STYLES.find((x) => x.id === id); return st ? <button type="button" key={id} className="chip xs" aria-pressed={styleId === id} onClick={() => pickStyle(st)}>{st.name}</button> : null; })}</div></div>}
                 {analysis.analysis.notes && <p className="small" style={{ margin: 0 }}>{analysis.analysis.notes}</p>}
               </AiCard> : <p className="callout small" role="status">This doesn’t look like a photo of a room. Try a photo taken from a corner, showing the walls and window.</p>)}
-            </> : aiOn ? <p className="small"><Link to={signInPath(`/studio?${studioQuery()}`)} onClick={() => keepStudioPhoto(photoFile)}>Sign in or create a free account</Link> to analyse this room or generate a photo-real redesign. Your photo and choices stay here while you do. The preview above is a simple colour wash, not AI.</p>
+            </> : aiOn && !photoAi ? <p className="small muted">AI photo redesign isn’t switched on for this site yet. The preview above is a simple colour wash, not AI.</p>
+              : aiOn ? <p className="small"><Link to={signInPath(`/studio?${studioQuery()}`)} onClick={() => keepStudioPhoto(photoFile)}>Sign in or create a free account</Link> to analyse this room or generate a photo-real redesign. Your photo and choices stay here while you do. The preview above is a simple colour wash, not AI.</p>
               : aiReason === 'paused' ? <p className="small muted">AI photo redesign is temporarily unavailable. The preview above is a simple colour wash, not AI.</p>
               : aiReason === 'disabled' ? <p className="small muted">AI photo redesign isn’t switched on for this site yet. The preview above is a simple colour wash, not AI.</p>
               : aiReason === 'offline' ? <p className="small muted">This preview has no server, so the “after” is a simple colour wash, not AI. On the live Streetkey site, the AI redesigns your actual photo in the style you choose. Your photo stays in your browser here.</p>

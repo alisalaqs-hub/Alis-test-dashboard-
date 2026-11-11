@@ -226,7 +226,7 @@ function PhotoCheck({ photos, checks, setChecks, advice, setAdvice, onOrder, sta
   onOrder: (order: string[]) => void; staged: boolean; consent: boolean; onSignIn?: () => void;
 }) {
   const ai = useAi();
-  const aiOk = ai.available && ai.signedIn;
+  const aiOk = ai.photos && ai.signedIn;
   const [progress, setProgress] = useState('');
   const unchecked = photos.filter((p) => !checks.has(p));
   // The current results are passed in, so a run works from what it was started with.
@@ -257,7 +257,7 @@ function PhotoCheck({ photos, checks, setChecks, advice, setAdvice, onOrder, sta
     return last;
   }, { label: 'Photo check', announce: true, done: (last) => (last ? 'Photo check ready.' : null) });
   if (!photos.length) return null;
-  if (!aiOk && !checks.size) return <AiUnavailable reason={ai.reason} signedOut={ai.available && !ai.signedIn} onSignIn={onSignIn} feature="The AI photo check" noFallback />;
+  if (!aiOk && !checks.size) return <AiUnavailable reason={ai.available && !ai.photos ? 'disabled' : ai.reason} signedOut={ai.photos && !ai.signedIn} onSignIn={onSignIn} feature="The AI photo check" noFallback />;
   const inOrder = advice ? advice.order.filter((k) => photos.includes(k)) : [];
   const alreadyOrdered = advice ? inOrder.every((k, i) => photos[i] === k) : true;
   const setAlt = (key: string, alt: string) => setChecks((prev) => { const a = prev.get(key); if (!a) return prev; const n = new Map(prev); n.set(key, { ...a, alt }); return n; });
@@ -271,7 +271,7 @@ function PhotoCheck({ photos, checks, setChecks, advice, setAdvice, onOrder, sta
         </div>
         {action.busy && <AiThinking label={progress || 'Checking your photos'} />}
         <AiErrorNote error={action.error} onRetry={consent ? () => void action.run(photos, checks, consent) : undefined} />
-      </> : <AiUnavailable reason={ai.reason} signedOut={ai.available && !ai.signedIn} onSignIn={onSignIn} feature="The AI photo check" noFallback />}
+      </> : <AiUnavailable reason={ai.available && !ai.photos ? 'disabled' : ai.reason} signedOut={ai.photos && !ai.signedIn} onSignIn={onSignIn} feature="The AI photo check" noFallback />}
       {checks.size > 0 && (
         <AiCard title="Photo check" headingLevel={4} focusKey={action.data} footer={<AiDisclaimer>Room labels and alt text are suggestions. Alt text is saved with your photos when you submit.</AiDisclaimer>}>
           {advice && inOrder.length > 1 && (
@@ -312,7 +312,7 @@ function PhotoCheck({ photos, checks, setChecks, advice, setAdvice, onOrder, sta
 /* ───────────────────────── AI: photo check for photos already on the listing (editing) ───────────────────────── */
 function ExistingPhotoCheck({ editRef, existing, setExisting, consent }: { editRef: string; existing: PhotoDTO[]; setExisting: (p: PhotoDTO[]) => void; consent: boolean }) {
   const ai = useAi();
-  const aiOk = ai.available && ai.signedIn;
+  const aiOk = ai.photos && ai.signedIn;
   const [data, setData] = useState<ListingPhotosResult | null>(null);
   const [note, setNote] = useState('');
   const [alts, setAlts] = useState<Record<string, string>>({});

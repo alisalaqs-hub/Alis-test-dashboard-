@@ -59,14 +59,16 @@ export interface TrustQueue {
 }
 export interface AiOverview {
   enabled: boolean; models: Record<string, string> | null;
+  /** The company that runs the AI models (OpenAI, or another provider set with AI_BASE_URL). */
+  provider?: string;
   last24h: { calls: number; tokens: number; images: number; failures: number } | null;
   byPurpose: { purpose: string; calls: number; tokens: number }[];
   dailyTokenBudget: number; jobsMode: string;
-  /** Why AI is off (switched off, no key, paused because the OpenAI account is out of credit, or today's budget used up). */
+  /** Why AI is off (switched off, no key, paused because the provider's credit or allowance ran out, or today's budget used up). */
   reason?: ServerAiOff;
   /** An admin-only explanation of the pause or budget state, with what to do about it. */
   notice?: string | null;
-  /** Set while AI is paused (the OpenAI account ran out of credit): when it will try again. */
+  /** Set while AI is paused ('quota': the OpenAI account ran out of credit; 'limit': the provider's allowance is used up for now): when it will try again. */
   pause?: { until: string; reason: string | null } | null;
   /** The heaviest users in the last 24 hours, anonymised (an account or a visitor network). */
   topUsers?: { kind: 'account' | 'visitor'; calls: number; tokens: number | string }[];

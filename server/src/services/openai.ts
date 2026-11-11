@@ -1,10 +1,11 @@
 /**
  * Room-redesign prompt + compatibility exports. All OpenAI calls go through server/src/ai/core.ts.
  */
-import { aiAvailable, AiError, editImage } from '../ai/core';
+import { aiAvailable, aiCan, AiError, editImage } from '../ai/core';
 
 export { AiError };
-export const aiImagesEnabled = () => aiAvailable();
+/** Room images need an image model: every OpenAI account has one; another provider must have one named (AI_IMAGE_MODEL). */
+export const aiImagesEnabled = () => aiAvailable() && aiCan('image');
 
 export interface RoomBrief { room: string; style: string; styleNote?: string; brief?: string | null; palette?: string[] }
 

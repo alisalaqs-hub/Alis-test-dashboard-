@@ -1,12 +1,18 @@
 /**
- * Streetkey AI core: the only place that talks to OpenAI.
+ * Streetkey AI core: the only place that talks to the AI provider.
  *
- * - Picks models automatically from what the account can use (or env overrides).
+ * - The provider is OpenAI by default. Any provider that speaks the same API (many have a free plan) works too:
+ *   AI_BASE_URL, AI_API_KEY and AI_MODEL. Such a provider is assumed to offer chat only; photo understanding,
+ *   room images, embeddings and moderation are used only when a model is named for them (see aiCan).
+ * - On OpenAI, picks models automatically from what the account can use (or env overrides).
  * - Structured outputs (JSON Schema, strict) so features get typed objects, not prose to parse.
  * - Tool calling loop for the assistant (tools run Streetkey's own engines, so figures are grounded).
  * - Vision (photos), moderation, embeddings and image editing.
  * - Adapts to model differences (reasoning vs classic parameters) by retrying without
- *   parameters a model rejects, and remembers that per model.
+ *   parameters a model rejects, and remembers that per model. A model without strict JSON-schema
+ *   output is asked for a JSON object with the schema in its instructions instead.
+ * - When the provider says its allowance is used up for now (a free plan's daily limit), AI pauses
+ *   until it resets and the site uses its built-in rules meanwhile.
  * - Accounts every call (tokens, latency) and enforces a site-wide daily token budget.
  * - Never logs or stores prompts, outputs or API keys.
  */
@@ -29,14 +35,30 @@ export class AiError extends Error {
  * Pause and budget state are cached per instance and refreshed by refreshAiState() / every budget check.
  */
 let pausedUntil = 0;
-let pauseReason: 'quota' | null = null;
+let pauseReason: 'quota' | 'limit' | null = null;
 let stateAt = 0;
-const configured = () => !config.ai.disabled && !!config.ai.openaiKey;
+const baseHost = () => { try { return new URL(config.ai.openaiBase).hostname; } catch { return ''; } };
+/** True when the provider is OpenAI itself; false for any other provider that speaks the same API (AI_BASE_URL). */
+const onOpenAI = () => /(^|\.)openai\.com$/i.test(baseHost());
+/** The provider's name for admins: AI_PROVIDER_NAME, else OpenAI, else the host of AI_BASE_URL. */
+export const aiProvider = () => config.ai.providerName || (onOpenAI() ? 'OpenAI' : baseHost() || 'another provider');
+/**
+ * What the provider can do. OpenAI does everything. Any other provider is assumed to offer chat only, with the
+ * model named in AI_MODEL: photo understanding, room images, embeddings and moderation are used only when a
+ * model is named for them, so the site never calls something the provider (or its free plan) doesn't have.
+ */
+export function aiCan(role: Role): boolean {
+  if (onOpenAI()) return true;
+  const m = config.ai.models;
+  return role === 'main' || role === 'fast' ? !!(m.main || m.fast) : !!m[role];
+}
+const unsupported = (role: Role) => new AiError(`the AI provider has no ${role} model`, 'This AI feature isn’t available on this site.', 503, 'ai_unsupported');
+const configured = () => !config.ai.disabled && !!config.ai.openaiKey && aiCan('fast');
 export const aiAvailable = () => configured() && pausedUntil <= Date.now() && !budgetExhausted();
 export type AiOffReason = 'disabled' | 'no_key' | 'paused' | 'budget' | null;
 export function aiOffReason(): AiOffReason {
   if (config.ai.disabled) return 'disabled';
-  if (!config.ai.openaiKey) return 'no_key';
+  if (!config.ai.openaiKey || !aiCan('fast')) return 'no_key';
   if (pausedUntil > Date.now()) return 'paused';
   if (budgetExhausted()) return 'budget';
   return null;
@@ -46,24 +68,31 @@ export async function refreshAiState(force = false) {
   if (!configured() || (!force && Date.now() - stateAt < 30_000)) return;
   stateAt = Date.now();
   const row = await one<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'ai_paused_until'`).catch(() => null);
-  const until = row ? Date.parse(JSON.parse(row.value).until ?? '') : 0;
+  const stored = row ? (JSON.parse(row.value) as { until?: string; reason?: string }) : null;
+  const until = stored ? Date.parse(stored.until ?? '') : 0;
   pausedUntil = Number.isFinite(until) ? until : 0;
-  pauseReason = pausedUntil > Date.now() ? 'quota' : null;
+  pauseReason = pausedUntil > Date.now() ? (stored?.reason === 'limit' ? 'limit' : 'quota') : null;
   await loadBudget(true);
 }
 export const aiPause = () => (pausedUntil > Date.now() ? { until: new Date(pausedUntil).toISOString(), reason: pauseReason } : null);
 
-/** The OpenAI account has no credit left: pause AI everywhere for 10 minutes and tell the admin (once per pause). */
-async function pauseForQuota() {
+/**
+ * Pause AI everywhere, so the site uses its built-in rules instead of failing request after request.
+ * 'quota': the OpenAI account has no credit left (10 minutes at a time; the admin is told once per pause).
+ * 'limit': the provider's allowance is used up for now, such as a free plan's daily limit (until it says to retry).
+ */
+async function pauseAi(ms: number, reason: 'quota' | 'limit') {
   const wasPaused = pausedUntil > Date.now();
-  pausedUntil = Date.now() + 10 * 60_000;
-  pauseReason = 'quota';
-  console.error('[ai] OpenAI reports no remaining credit (insufficient_quota). AI features are paused for 10 minutes; top up the OpenAI account.');
+  pausedUntil = Date.now() + ms;
+  pauseReason = reason;
+  console.error(reason === 'quota'
+    ? '[ai] OpenAI reports no remaining credit (insufficient_quota). AI features are paused for 10 minutes; top up the OpenAI account.'
+    : `[ai] ${aiProvider()} says its allowance is used up for now. AI features are paused for ${Math.max(1, Math.round(ms / 60_000))} minutes; the site uses its built-in rules meanwhile.`);
   const prev = await one<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'ai_paused_until'`).catch(() => null);
   const prevUntil = prev ? Date.parse(JSON.parse(prev.value).until ?? '') : 0;
   await q(`INSERT INTO app_settings (key, value, updated_at) VALUES ('ai_paused_until', $1, now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-    [JSON.stringify({ until: new Date(pausedUntil).toISOString(), reason: 'quota' })]).catch(() => {});
-  if (!wasPaused && !(prevUntil > Date.now()) && config.adminEmail) {
+    [JSON.stringify({ until: new Date(pausedUntil).toISOString(), reason })]).catch(() => {});
+  if (reason === 'quota' && !wasPaused && !(prevUntil > Date.now()) && config.adminEmail) {
     const { sendMail } = await import('../services/email');
     await sendMail({
       to: config.adminEmail, template: 'ai_quota', subject: 'Streetkey AI is paused: the OpenAI account is out of credit',
@@ -129,20 +158,29 @@ async function loadModels(maxAgeMs: number, timeoutMs: number): Promise<string[]
 /** Hourly refresh (scheduled function): fetches the list outside any request once it's 5 h old, so requests rarely wait. */
 export async function refreshModels() {
   if (!configured()) return null;
-  modelCache = null;
-  await loadModels(5 * 3600_000, 10_000);
+  if (onOpenAI()) { modelCache = null; await loadModels(5 * 3600_000, 10_000); }
   return modelsInUse();
 }
 
-/** The model used for a role: env override, else best available on the account, else a safe default. */
+/**
+ * The model used for a role. On OpenAI: env override, else the best available on the account, else a safe default.
+ * On another provider only the models named in the settings exist (one chat model can serve both chat roles);
+ * a role with no model throws 'ai_unsupported' before anything is sent.
+ */
 export async function modelFor(role: Role): Promise<string> {
-  const override = config.ai.models[role];
-  if (override) return override;
+  const m = config.ai.models;
+  if (!onOpenAI()) {
+    const named = role === 'main' ? m.main || m.fast : role === 'fast' ? m.fast || m.main : m[role];
+    if (!named) throw unsupported(role);
+    return named;
+  }
+  if (m[role]) return m[role];
   return pick(await accountModels(), role) ?? DEFAULTS[role];
 }
+/** The model per role; '' for something this provider isn't set up to do. */
 export async function modelsInUse() {
   const roles: Role[] = ['main', 'fast', 'vision', 'image', 'embedding', 'moderation'];
-  return Object.fromEntries(await Promise.all(roles.map(async (r) => [r, await modelFor(r)] as const))) as Record<Role, string>;
+  return Object.fromEntries(await Promise.all(roles.map(async (r) => [r, await modelFor(r).catch(() => '')] as const))) as Record<Role, string>;
 }
 const isReasoning = (model: string) => /^(gpt-5|o\d)/.test(model);
 /** Parameters a model has rejected (learned at run time), so they aren't sent again. */
@@ -215,7 +253,7 @@ export const redact = (s: string) => s.replace(/(api key provided:?\s*)\S+/gi, '
 
 function mapError(status: number, msg: string, code?: string): AiError {
   const m = redact(msg);
-  if (status === 401 || status === 403) return new AiError(m, 'Streetkey AI isn’t available right now (the server’s OpenAI key was rejected). An admin needs to check OPENAI_API_KEY.', 503, 'ai_key');
+  if (status === 401 || status === 403) return new AiError(m, onOpenAI() ? 'Streetkey AI isn’t available right now (the server’s OpenAI key was rejected). An admin needs to check OPENAI_API_KEY.' : 'Streetkey AI isn’t available right now (the AI provider rejected the server’s key). An admin needs to check AI_API_KEY.', 503, 'ai_key');
   if (code === 'insufficient_quota' || (status === 429 && /quota|billing/i.test(m))) return new AiError(m, 'Streetkey AI is temporarily unavailable. The rest of the site works as normal.', 503, 'ai_quota');
   if (status === 429) return new AiError(m, 'Streetkey AI is busy. Please try again in a moment.', 503, 'ai_busy');
   if (code === 'moderation_blocked' || /safety system|content policy|moderation/i.test(m)) return new AiError(m, 'The AI declined this request. Try different wording or a different photo.', 422, 'ai_refused');
@@ -223,10 +261,20 @@ function mapError(status: number, msg: string, code?: string): AiError {
   return new AiError(m, 'The AI couldn’t process that request.', 502, 'ai_bad_request');
 }
 
+/** Seconds the provider asks us to wait (Retry-After as a number of seconds or a date); 0 when it doesn't say. */
+function retryAfterSec(r: Response): number {
+  const h = r.headers.get('retry-after');
+  if (!h) return 0;
+  const n = Number(h);
+  if (Number.isFinite(n)) return Math.max(0, n);
+  const at = Date.parse(h);
+  return Number.isFinite(at) ? Math.max(0, (at - Date.now()) / 1000) : 0;
+}
+
 interface PostOpts { timeoutMs?: number; retries?: number; form?: boolean }
 async function post<T>(path: string, body: Record<string, unknown> | FormData, opts: PostOpts = {}): Promise<T> {
   if (config.ai.disabled) throw new AiError('ai disabled', 'Streetkey AI is switched off on this site.', 503, 'ai_disabled');
-  if (!config.ai.openaiKey) throw new AiError('no key', 'Streetkey AI isn’t set up on this server yet (OPENAI_API_KEY is missing).', 503, 'ai_disabled');
+  if (!config.ai.openaiKey) throw new AiError('no key', 'Streetkey AI isn’t set up on this server yet (OPENAI_API_KEY or AI_API_KEY is missing).', 503, 'ai_disabled');
   if (pausedUntil > Date.now()) throw new AiError('ai paused (quota)', 'Streetkey AI is temporarily unavailable. The rest of the site works as normal.', 503, 'ai_quota');
   const deadline = Date.now() + (opts.timeoutMs ?? config.ai.quickTimeoutMs);
   let attempt = 0;
@@ -248,10 +296,21 @@ async function post<T>(path: string, body: Record<string, unknown> | FormData, o
     }
     const j = (await r.json().catch(() => ({}))) as { error?: { message?: string; code?: string; param?: string } } & T;
     if (r.ok) return j;
-    const retriable = r.status >= 500 || (r.status === 429 && !/quota|billing/i.test(j.error?.message ?? ''));
+    const msg = j.error?.message ?? '';
+    const quotaWords = j.error?.code === 'insufficient_quota' || /quota|billing/i.test(msg);
+    // OpenAI: the account is out of credit. Elsewhere "quota" is how a plan's allowance is described.
+    const noCredit = onOpenAI() && (j.error?.code === 'insufficient_quota' || (r.status === 429 && quotaWords));
+    // A limit that won't clear in the next few seconds (a free plan's daily allowance, "retry in 10 minutes"):
+    // pause AI until it resets rather than make every request wait and fail.
+    const wait = retryAfterSec(r);
+    const longLimit = r.status === 429 && !noCredit && (wait > 30 || /per day|daily|\b[RT]PD\b/i.test(msg) || quotaWords);
+    const retriable = !longLimit && (r.status >= 500 || (r.status === 429 && !noCredit));
     if (retriable && attempt < (opts.retries ?? 1) && deadline - Date.now() > 3000) { attempt++; await new Promise((res) => setTimeout(res, 600 * attempt)); continue; }
-    const err = mapError(r.status, j.error?.message ?? `HTTP ${r.status}`, j.error?.code);
-    if (err.code === 'ai_quota') await pauseForQuota();
+    const err = longLimit
+      ? new AiError(redact(msg || 'allowance used up'), 'Streetkey AI is temporarily unavailable. The rest of the site works as normal.', 503, 'ai_quota')
+      : mapError(r.status, msg || `HTTP ${r.status}`, j.error?.code);
+    if (longLimit) await pauseAi(Math.min(Math.max(wait || 900, 60), 3600) * 1000, 'limit');
+    else if (err.code === 'ai_quota') await pauseAi(10 * 60_000, 'quota');
     (err as AiError & { param?: string; httpStatus?: number }).param = j.error?.param ?? undefined;
     (err as AiError & { httpStatus?: number }).httpStatus = r.status;
     throw err;
@@ -287,13 +346,48 @@ export interface ChatOpts extends CallMeta {
   temperature?: number;     // only sent to models that accept it
 }
 
+/**
+ * For a model without strict JSON-schema output: ask for a JSON object instead and put the schema in the
+ * instructions. The answer is still checked against the schema before any feature uses it.
+ */
+function relaxJson(body: Record<string, unknown>): boolean {
+  const rf = body.response_format as { type?: string; json_schema?: { schema?: unknown } } | undefined;
+  if (rf?.type !== 'json_schema') return false;
+  const rule = `Reply with one JSON object and nothing else: no code fence, no commentary. It must match this JSON Schema exactly, with every listed property present:\n${JSON.stringify(rf.json_schema?.schema)}`;
+  const msgs = [...(body.messages as Message[])];
+  const first = msgs[0];
+  if (first && (first.role === 'system' || first.role === 'developer')) msgs[0] = { ...first, content: `${first.content}\n\n${rule}` };
+  else msgs.unshift({ role: 'system', content: rule });
+  body.messages = msgs;
+  body.response_format = { type: 'json_object' };
+  return true;
+}
+type ToolDef = { type: string; function: Record<string, unknown> };
+const hasStrictTools = (body: Record<string, unknown>) => Array.isArray(body.tools) && (body.tools as ToolDef[]).some((t) => 'strict' in t.function);
+/** For a provider that doesn't know the `strict` flag on tools. */
+function dropStrictTools(body: Record<string, unknown>) {
+  body.tools = (body.tools as ToolDef[]).map((t) => { const { strict: _strict, ...fn } = t.function; return { ...t, function: fn }; });
+}
+/** Models without strict JSON output sometimes wrap the object in a code fence or a sentence: take the object. */
+export function looseJson(text: string): unknown {
+  try { return JSON.parse(text); } catch { /* look for the object inside */ }
+  const a = text.indexOf('{'), b = text.lastIndexOf('}');
+  if (a < 0 || b <= a) throw new SyntaxError('no JSON object');
+  return JSON.parse(text.slice(a, b + 1));
+}
+
 async function chatRaw(messages: Message[], extra: Record<string, unknown>, o: ChatOpts): Promise<{ res: ChatResponse; model: string; usageId: string | null }> {
   await checkBudget(o);
   const model = o.model ?? await modelFor(o.role ?? 'fast');
   const body: Record<string, unknown> = { model, messages, max_completion_tokens: o.maxTokens ?? 1500, ...extra };
   if (isReasoning(model)) body.reasoning_effort = o.effort ?? 'low';
   else if (o.temperature != null) body.temperature = o.temperature;
-  for (const p of rejected.get(model) ?? []) delete body[p];
+  // What this model is already known not to accept.
+  const quirks = rejected.get(model);
+  if (quirks?.has('json_schema')) relaxJson(body);
+  if (quirks?.has('strict') && hasStrictTools(body)) dropStrictTools(body);
+  for (const p of quirks ?? []) delete body[p];
+  const learn = (k: string) => { const set = rejected.get(model) ?? new Set<string>(); set.add(k); rejected.set(model, set); };
   const t0 = Date.now();
   for (let tries = 0; ; tries++) {
     try {
@@ -301,8 +395,14 @@ async function chatRaw(messages: Message[], extra: Record<string, unknown>, o: C
       const usageId = await record(o, model, { input: res.usage?.prompt_tokens, output: res.usage?.completion_tokens }, Date.now() - t0, true);
       return { res, model, usageId };
     } catch (e) {
-      const p = rejectedParam(e, Object.keys(body).filter((k) => !['model', 'messages'].includes(k)));
-      if (p && tries < 3) { delete body[p]; const set = rejected.get(model) ?? new Set(); set.add(p); rejected.set(model, set); continue; }
+      if (tries < 4 && e instanceof AiError && (e as AiError & { httpStatus?: number }).httpStatus === 400) {
+        const param = (e as AiError & { param?: string }).param ?? '';
+        const rf = body.response_format as { type?: string } | undefined;
+        if (rf?.type === 'json_schema' && (/^response_format/.test(param) || /json[_ ]schema|response[_ ]format|structured output/i.test(e.message))) { learn('json_schema'); relaxJson(body); continue; }
+        if (hasStrictTools(body) && /\bstrict\b/i.test(`${param} ${e.message}`)) { learn('strict'); dropStrictTools(body); continue; }
+        const p = rejectedParam(e, Object.keys(body).filter((k) => !['model', 'messages'].includes(k)));
+        if (p) { delete body[p]; learn(p); continue; }
+      }
       await record(o, model, {}, Date.now() - t0, false, e instanceof AiError ? e.code : 'error');
       throw e;
     }
@@ -325,7 +425,7 @@ export async function chatJSON<T>(messages: Message[], schema: unknown, name: st
   if (m?.refusal) throw await fail(new AiError('refusal', 'The AI declined to answer that.', 422, 'ai_refused'));
   if (res.choices[0]?.finish_reason === 'length') throw await fail(new AiError('truncated', 'The AI’s answer was cut short. Please try again.', 502, 'ai_truncated'));
   let v: unknown;
-  try { v = JSON.parse(m?.content ?? ''); } catch { throw await fail(new AiError('bad json', 'The AI returned something unexpected. Please try again.', 502, 'ai_bad_output')); }
+  try { v = looseJson(m?.content ?? ''); } catch { throw await fail(new AiError('bad json', 'The AI returned something unexpected. Please try again.', 502, 'ai_bad_output')); }
   if (!conforms(schema, v)) throw await fail(new AiError('schema mismatch', 'The AI returned something unexpected. Please try again.', 502, 'ai_bad_output'));
   return v as T;
 }
@@ -356,7 +456,14 @@ export async function runWithTools(messages: Message[], tools: Tool[], o: ChatOp
     const msg = res.choices[0]?.message;
     if (!msg) throw new AiError('empty', 'The AI didn’t answer. Please try again.', 502, 'ai_bad_output');
     if (msg.refusal) throw new AiError('refusal', 'The AI declined to answer that.', 422, 'ai_refused');
-    if (!msg.tool_calls?.length) return { content: (msg.content ?? '').trim(), traces };
+    if (!msg.tool_calls?.length) {
+      const text = (msg.content ?? '').trim();
+      if (!o.responseSchema) return { content: text, traces };
+      // A model without strict JSON output may wrap the object: hand callers just the object.
+      let content = text;
+      try { JSON.parse(text); } catch { try { content = JSON.stringify(looseJson(text)); } catch { /* leave it: the caller reports bad output */ } }
+      return { content, traces };
+    }
     convo.push({ role: 'assistant', content: msg.content ?? null, tool_calls: msg.tool_calls });
     await Promise.all(msg.tool_calls.map(async (call) => {
       const tool = tools.find((t) => t.name === call.function.name);
@@ -382,9 +489,9 @@ export const dataUrl = (bytes: Buffer, contentType: string) => `data:${contentTy
 /* ───────────────────────── moderation ───────────────────────── */
 export interface ModerationResult { flagged: boolean; categories: string[]; scores: Record<string, number> }
 export async function moderate(input: { text?: string; images?: string[] }, meta: CallMeta): Promise<ModerationResult> {
-  const model = await modelFor('moderation');
   const parts = [...(input.text ? [{ type: 'text', text: input.text.slice(0, 20_000) }] : []), ...(input.images ?? []).slice(0, 1).map((u) => ({ type: 'image_url', image_url: { url: u } }))];
   if (!parts.length) return { flagged: false, categories: [], scores: {} };
+  const model = await modelFor('moderation'); // throws 'ai_unsupported' on a provider with no moderation model: callers treat that as "not checked"
   const t0 = Date.now();
   try {
     const r = await post<{ results: { flagged: boolean; categories: Record<string, boolean>; category_scores: Record<string, number> }[] }>('/moderations', { model, input: parts });
