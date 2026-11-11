@@ -5,7 +5,7 @@
  * fast and the site stays in demo mode.
  */
 import type { EpcCertificate, EpcSummary, FloodResult } from '../engine/evidence';
-import type { AiImageDTO, CheckDTO, DataStatusDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, OfficialListingDTO, SavedSearchDTO, SoldPricesDTO, UserDTO } from './apiTypes';
+import type { AiImageDTO, CheckDTO, DataStatusDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, OfficialListingDTO, OrgReportDTO, SavedSearchDTO, SoldPricesDTO, UserDTO } from './apiTypes';
 
 export const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
@@ -152,6 +152,8 @@ export const api = {
     keys: (id: string) => get<{ items: { id: string; label: string; prefix: string; lastUsedAt: string | null; revokedAt: string | null; createdAt: string }[] }>(`/api/orgs/${id}/feed-keys`),
     createKey: (id: string, label: string) => post<{ key: string; note: string }>(`/api/orgs/${id}/feed-keys`, { label }),
     revokeKey: (id: string, keyId: string) => del<{ ok: true }>(`/api/orgs/${id}/feed-keys/${keyId}`),
+    /** What each of the agency's listings brought in over the last `days` days. */
+    report: (id: string, days = 30) => get<OrgReportDTO>(`/api/orgs/${id}/report?days=${days}`),
     runs: (id: string) => get<{ items: { id: string; format: string; accepted: number; withdrawn: number; rejected: { ref: string; reason: string }[]; createdAt: string }[] }>(`/api/orgs/${id}/feed-runs`),
   },
   event: (listing: string, name: string, session: string) => {

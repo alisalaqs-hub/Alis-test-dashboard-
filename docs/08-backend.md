@@ -180,6 +180,14 @@ service) and a distance-from-a-place filter.
 - **Agent feeds (BLM):** each upload is the full stock for its feed key: listings that key last sent and that are missing from the file are withdrawn. On Netlify a feed file can be up to 4.5 MB (25 MB on a Node host); bigger files get 413 `feed_too_large`, so larger agencies send each branch's stock with its own key. When splitting an existing feed across branch keys, send the new branch keys' files first, then the original key's file, so the original key doesn't withdraw the other branches' listings in the meantime. Listings imported before migration 013 belong to the key that sent the agency's last file; listings sent by a revoked key are taken over by the agency's only working key (with several working keys they stay until a branch sends them again). Photo links that aren't public HTTPS are dropped at import.
 - **Saved searches and alerts** store the search exactly as the person saw it (filters included, migration 010), and alerts run that stored search; older saved searches are re-read in the mode they were saved in.
 
+### Results for agencies
+
+`GET /api/orgs/:id/report?days=30` (agency owners and admins): for each of the agency's live, under-offer, sold
+or let listings, the views and visitors (only from people who allowed analytics), saves, enquiries and viewing
+requests over the period (7 to 90 days), days on the market, and totals. Enquiries held back as spam are left
+out. `?format=csv` downloads the same as a spreadsheet; cells that begin with `=`, `+`, `-` or `@` are made
+safe so a listing title can never run as a formula. Shown under *Account → Agency & feeds → Results*.
+
 ## Security and privacy
 
 - Passwords hashed with scrypt; sessions are random tokens in `HttpOnly`, `Secure`, `SameSite=Lax` cookies (only hashes stored); password reset signs out every device.

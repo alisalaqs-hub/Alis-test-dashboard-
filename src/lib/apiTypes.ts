@@ -122,3 +122,16 @@ export interface OfficialListingDTO {
   epcStatus: 'ok' | 'not-configured' | 'no-match' | 'unavailable';
   attribution: string[];
 }
+
+/** An agency's results: one row per listing, with totals. */
+export interface OrgReportRowDTO {
+  ref: string; title: string | null; town: string; postcode: string; channel: 'sale' | 'rent'; status: string; price: number;
+  publishedAt: string | null; daysOnMarket: number | null;
+  views: number; visitors: number; saves: number; enquiries: number; viewings: number;
+}
+export interface OrgReportDTO {
+  days: number;
+  totals: { listings: number; views: number; visitors: number; saves: number; enquiries: number; viewings: number };
+  items: OrgReportRowDTO[];
+  note: string;
+}

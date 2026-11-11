@@ -3,13 +3,13 @@ import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } 
 import { AiButton, AiCard, AiDisclaimer, AiErrorNote, AiLabel, AiThinking, AiUnavailable } from '../components/ai/Ai';
 import '../components/ai/inbox.css';
 import { Icon } from '../components/Icons';
-import { gbp, Section, Tag } from '../components/ui';
+import { gbp, Section, Stat, Tag } from '../components/ui';
 import { STYLES } from '../engine/design';
 import { api, ApiError, mediaUrl, type MyListing } from '../lib/api';
 import { safeNextPath, signInPath, useAi, useAiAction, useSignInPath } from '../lib/ai/core';
 import { listingDraftAccountType } from '../lib/ai/listing';
 import { defaultIntent, inboxAi, isLive, REPLY_INTENTS, REPLY_TONES, ruleInsights, unfilled, type ListingInsights, type ReplyIntent, type ReplyTone, type SuggestedReply, type Triage, type TriageResponse } from '../lib/ai/inbox';
-import type { AiImageDTO, EnquirySummaryDTO, MessageDTO, SavedSearchDTO } from '../lib/apiTypes';
+import type { AiImageDTO, EnquirySummaryDTO, MessageDTO, OrgReportDTO, SavedSearchDTO } from '../lib/apiTypes';
 import { useServer } from '../lib/server';
 
 /* ---------- shared bits ---------- */
@@ -865,8 +865,9 @@ function AgencyInner() {
   const [key, setKey] = useState('');
   const [keys, setKeys] = useState<Awaited<ReturnType<typeof api.orgs.keys>>['items']>([]);
   const [runs, setRuns] = useState<Awaited<ReturnType<typeof api.orgs.runs>>['items']>([]);
+  const [report, setReport] = useState<OrgReportDTO | 'error' | null>(null);
   const form = useForm();
-  const load = () => api.me.orgs().then((r) => { setOrgs(r.items); const o = r.items[0]; if (o) { void api.orgs.keys(o.id).then((k) => setKeys(k.items)); void api.orgs.runs(o.id).then((x) => setRuns(x.items)); } }).catch(() => setOrgs([]));
+  const load = () => api.me.orgs().then((r) => { setOrgs(r.items); const o = r.items[0]; if (o) { void api.orgs.keys(o.id).then((k) => setKeys(k.items)); void api.orgs.runs(o.id).then((x) => setRuns(x.items)); void api.orgs.report(o.id).then(setReport, () => setReport('error')); } }).catch(() => setOrgs([]));
   useEffect(() => { void load(); }, []);
   const org = orgs?.[0];
   const endpoint = `${location.origin}/api/feeds/blm`;
@@ -893,6 +894,33 @@ function AgencyInner() {
           <Section title="Recent feed uploads">
             {runs.length === 0 ? <p className="small muted">No uploads yet.</p> : <ul className="clean small">{runs.map((r) => <li key={r.id}>{new Date(r.createdAt).toLocaleString('en-GB')}: {r.accepted} accepted, {r.withdrawn} withdrawn, {r.rejected.length} rejected{r.rejected.length > 0 && <ul className="clean xs muted">{r.rejected.slice(0, 5).map((x) => <li key={x.ref}>{x.ref}: {x.reason}</li>)}</ul>}</li>)}</ul>}
           </Section>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <Section title="Results" kicker={report && report !== 'error' ? `Last ${report.days} days` : 'Last 30 days'}
+              right={report && report !== 'error' && report.items.length > 0 ? <a className="btn ghost sm" href={`/api/orgs/${org.id}/report?format=csv`} download>Download spreadsheet</a> : undefined}>
+              {report === null ? <Checking /> : report === 'error' ? <p className="small" role="alert">Couldn’t load your results. Please try again.</p>
+                : report.items.length === 0 ? <p className="small muted">Your results appear here once you have live listings: views, saves, enquiries and viewing requests for each one.</p>
+                : <>
+                  <div className="grid g4" style={{ marginBottom: 12 }}>
+                    <div className="card flat"><Stat label="Live and recent listings" value={report.totals.listings} /></div>
+                    <div className="card flat"><Stat label="Views" value={report.totals.views.toLocaleString('en-GB')} sub={`${report.totals.visitors.toLocaleString('en-GB')} visitors`} /></div>
+                    <div className="card flat"><Stat label="Enquiries" value={report.totals.enquiries} sub={`${report.totals.viewings} viewing request${report.totals.viewings === 1 ? '' : 's'}`} /></div>
+                    <div className="card flat"><Stat label="Saves" value={report.totals.saves} /></div>
+                  </div>
+                  <div className="table-wrap" tabIndex={0} role="region" aria-label="Results by listing"><table className="t">
+                    <caption className="sr-only">Results for each listing, most enquiries first</caption>
+                    <thead><tr><th scope="col">Listing</th><th scope="col" className="r">Price</th><th scope="col" className="r">Days listed</th><th scope="col" className="r">Views</th><th scope="col" className="r">Saves</th><th scope="col" className="r">Enquiries</th><th scope="col" className="r">Viewings</th></tr></thead>
+                    <tbody>{report.items.map((r) => (
+                      <tr key={r.ref}>
+                        <td className="small"><Link to={`/property/${r.ref}`}><b>{r.title ?? r.ref}</b></Link><div className="xs muted">{r.town} · {r.postcode} · {r.channel === 'rent' ? 'To rent' : 'For sale'}{r.status !== 'live' ? ` · ${r.status.replace('_', ' ')}` : ''}</div></td>
+                        <td className="r num">£{Math.round(r.price).toLocaleString('en-GB')}{r.channel === 'rent' ? ' pcm' : ''}</td>
+                        <td className="r num">{r.daysOnMarket ?? '—'}</td><td className="r num">{r.views}</td><td className="r num">{r.saves}</td><td className="r num">{r.enquiries}</td><td className="r num">{r.viewings}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table></div>
+                  <p className="xs muted" style={{ marginTop: 8 }}>{report.note}</p>
+                </>}
+            </Section>
+          </div>
         </div>
       )}
     </AccountShell>
