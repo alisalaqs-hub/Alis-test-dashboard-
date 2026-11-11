@@ -56,8 +56,11 @@ export const api = {
   health: async (): Promise<HealthDTO | null> => {
     try {
       const r = await fetch(`${API_BASE}/api/health`, { credentials: 'include', signal: AbortSignal.timeout(4000) });
-      if (!r.headers.get('content-type')?.includes('json')) return null;
-      return (await r.json()) as HealthDTO;
+      // Only a healthy answer counts. A back end that is starting up or can't reach its database answers
+      // 503 with an error message: the site then behaves as it does with no back end at all.
+      if (!r.ok || !r.headers.get('content-type')?.includes('json')) return null;
+      const h = (await r.json()) as Partial<HealthDTO> | null;
+      return h && typeof h === 'object' && h.features && typeof h.features === 'object' ? (h as HealthDTO) : null;
     } catch { return null; }
   },
   auth: {

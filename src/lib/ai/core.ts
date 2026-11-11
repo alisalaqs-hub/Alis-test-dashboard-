@@ -123,7 +123,7 @@ function askServerWhyOff(again = false) {
 export function useAi() {
   const { status, online, health, user } = useServer();
   const s = useSyncExternalStore(subscribeShared, sharedSnapshot, () => SERVER_SNAPSHOT);
-  const healthOff = online && !health?.features.ai;
+  const healthOff = online && !health?.features?.ai;
   useEffect(() => { if (healthOff && !s.server) askServerWhyOff(); }, [healthOff, s.server]);
   const server = healthOff ? s.server : null;
   const reason: AiOffReason = status === 'checking' ? 'checking' : !online ? 'offline'
@@ -133,8 +133,8 @@ export function useAi() {
   const limit = s.limit && !(s.limit.visitor && user) ? s.limit : null;
   // AI can be on while the provider behind it has no way to read photos or make room images (a chat-only plan).
   const available = reason === null;
-  const photos = available && health?.features.aiPhotos !== false;
-  const images = available && health?.features.aiImages !== false;
+  const photos = available && health?.features?.aiPhotos !== false;
+  const images = available && health?.features?.aiImages !== false;
   return { available, photos, images, reason, signedIn: !!user, user, limited: reason === null && !!limit, limit: reason === null ? limit : null, note: reason === 'disabled' || reason === 'paused' ? server?.note ?? null : null };
 }
 

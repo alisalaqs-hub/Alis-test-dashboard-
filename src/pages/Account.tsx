@@ -247,7 +247,7 @@ function Overview() {
         <Link to="/account/inbox" className="card acct-tile"><Icon name="spark" /><b>Inbox</b><span className="small muted">{inbox === 'error' ? 'Open to see your messages' : inbox ? `${inbox.total} conversation${inbox.total === 1 ? '' : 's'}${inbox.unread ? ` · ${inbox.unread} new` : ''}` : '…'}</span></Link>
         <Link to="/saved" className="card acct-tile"><Icon name="heart" /><b>Saved homes</b><span className="small muted">Synced to your account</span></Link>
         <Link to="/account/searches" className="card acct-tile"><Icon name="search" /><b>Search alerts</b><span className="small muted">Emails when new homes match</span></Link>
-        <Link to="/account/designs" className="card acct-tile"><Icon name="palette" /><b>AI room designs</b><span className="small muted">{health?.features.aiImages ? 'Your generated concepts' : 'Not switched on yet'}</span></Link>
+        <Link to="/account/designs" className="card acct-tile"><Icon name="palette" /><b>AI room designs</b><span className="small muted">{health?.features?.aiImages ? 'Your generated concepts' : 'Not switched on yet'}</span></Link>
         <Link to="/account/privacy" className="card acct-tile"><Icon name="key" /><b>Privacy & security</b><span className="small muted">Password, your data, delete account</span></Link>
       </div>
       <div className="row"><Link to="/list" className="btn accent">List a property</Link><button className="btn ghost" onClick={() => void signOut().then(() => nav('/'))}>Sign out</button></div>
