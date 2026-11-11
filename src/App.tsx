@@ -8,6 +8,7 @@ import { isServerRef } from './lib/listingAdapter';
 import { useServer } from './lib/server';
 import { useStore } from './store';
 const Home = lazy(() => import('./pages/Home'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 const Search = lazy(() => import('./pages/Search'));
 const PropertyDetails = lazy(() => import('./pages/PropertyDetails'));
 const PropertyPage = lazy(() => import('./pages/Property'));
@@ -212,7 +213,7 @@ export default function App() {
         <Route path="account/reset" element={<Reset />} />
         <Route path="account/verify" element={<Verify />} />
         <Route path="admin" element={<Admin />} />
-        <Route path="*" element={<Home />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
     </Suspense>

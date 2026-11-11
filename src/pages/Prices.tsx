@@ -10,6 +10,8 @@ import type { SoldPricesDTO } from '../lib/apiTypes';
 import { useServer } from '../lib/server';
 
 const EXAMPLES = ['E17 4PP', 'M20', 'Leeds', 'Bristol', 'Croydon', 'Cardiff'];
+/** Larger towns and cities, linked from the page so people (and search engines) can go straight to them. */
+const CITIES = ['London', 'Birmingham', 'Manchester', 'Leeds', 'Liverpool', 'Sheffield', 'Bristol', 'Newcastle upon Tyne', 'Nottingham', 'Leicester', 'Cardiff', 'Coventry', 'Southampton', 'Brighton', 'Reading', 'Oxford', 'Cambridge', 'York', 'Norwich', 'Swansea'];
 type State = { kind: 'idle' } | { kind: 'loading'; q: string } | { kind: 'done'; q: string; data: SoldPricesDTO } | { kind: 'error'; q: string; message: string; notFound: boolean };
 
 /**
@@ -43,7 +45,7 @@ export default function Prices() {
         <input value={q} onChange={(e) => setQ(e.target.value)} maxLength={80} placeholder="Postcode, district or town, e.g. E17 4PP, E17 or Leeds" aria-label="Postcode, postcode district or town" autoComplete="postal-code" enterKeyHint="search" />
         <button className="smart-go" type="submit">Show prices</button>
       </form>
-      <div className="chips" role="group" aria-label="Examples">{EXAMPLES.map((c) => <button key={c} type="button" className="chip" onClick={() => search(c)}>{c}</button>)}</div>
+      <nav className="chips" aria-label="Examples">{EXAMPLES.map((c) => <Link key={c} className="chip" to={`/sold-prices/${slugPlace(c)}`}>{c}</Link>)}</nav>
       {status === 'offline' ? <DemoSales term={term} /> : status === 'checking' ? <p className="od-status" role="status">Connecting…</p> : <LiveSales term={term} />}
     </div>
   );
@@ -90,7 +92,14 @@ function LiveSales({ term }: { term: string }) {
   const types = useMemo(() => (data ? [...new Set(data.sales.map((s) => s.type))] : []), [data]);
   const sales = useMemo(() => (data ? data.sales.filter((s) => type === 'all' || s.type === type) : []), [data, type]);
 
-  if (state.kind === 'idle') return <p className="small muted">Enter a postcode, a postcode district or a town to see what homes there sold for.</p>;
+  if (state.kind === 'idle') return (
+    <>
+      <p className="small muted">Enter a postcode, a postcode district or a town to see what homes there sold for.</p>
+      <Section title="Sold prices by town and city" kicker="England and Wales">
+        <nav className="chips" aria-label="Sold prices by town and city">{CITIES.map((c) => <Link key={c} className="chip" to={`/sold-prices/${slugPlace(c)}`}>{c}</Link>)}</nav>
+      </Section>
+    </>
+  );
   if (state.kind === 'loading') return <p className="od-status" role="status">Getting sold prices near “{state.q}” from HM Land Registry. The first look at an area can take a few seconds…</p>;
   if (state.kind === 'error') {
     return (
