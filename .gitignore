@@ -13,3 +13,6 @@ server/.test-uploads
 # Local dev uploads (per-team dev servers) and TypeScript build info
 server/.dev-uploads*/
 *.tsbuildinfo
+
+# Local worktrees used while building (never part of the site)
+.claude/
