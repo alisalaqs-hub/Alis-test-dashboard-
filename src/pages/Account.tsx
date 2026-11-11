@@ -34,10 +34,9 @@ function Field({ label, error, hint, children }: { label: string; error?: string
 export function NeedsServer({ what }: { what: string }) {
   return (
     <div className="card stack" style={{ maxWidth: 640 }}>
-      <Tag kind="demo">Preview</Tag>
-      <h2>{what} works on the live Streetkey site</h2>
-      <p className="muted">You’re looking at a static preview, which has no server behind it. On the live site (served by the Streetkey server) you can create an account, list a property with photos, message sellers and use the AI room designer.</p>
-      <Link className="btn ghost" to="/">Back to the preview</Link>
+      <h2>{what} isn’t available right now</h2>
+      <p className="muted">Accounts are switched off for the moment, so you can’t sign in, list a property or message sellers just now. Searching, sold prices and the calculators still work. Please try again a little later.</p>
+      <Link className="btn ghost" to="/">Back to the home page</Link>
     </div>
   );
 }
