@@ -42,7 +42,7 @@ export async function sendMail(m: Mail) {
   return status;
 }
 
-const link = (hashPath: string) => `${config.publicUrl}/#${hashPath}`;
+const link = (path: string) => `${config.publicUrl}${path}`;
 
 export const mails = {
   verify: (to: string, name: string, token: string) => sendMail({ to, template: 'verify', subject: 'Confirm your email address',

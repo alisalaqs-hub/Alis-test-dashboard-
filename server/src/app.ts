@@ -22,6 +22,7 @@ import { aiImportRoutes } from './routes/ai-import';
 import { aiPropertyRoutes } from './routes/ai-property';
 import { aiBriefingRoutes } from './routes/ai-briefing';
 import { DataError } from './data/http';
+import { seoRoutes } from './routes/seo';
 import { dataRoutes } from './routes/data';
 import { actorScope, AiError } from './ai/core';
 import { clearHooks } from './ai/hooks';
@@ -149,6 +150,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(aiBriefingRoutes);
   await app.register(eventRoutes);
   await app.register(dataRoutes);
+  await app.register(seoRoutes);
 
   // Serving files from disk is only needed on a Node host (uploads on local disk, and the website itself).
   // On Netlify the CDN serves the site and a function serves media, so the static-file package is never

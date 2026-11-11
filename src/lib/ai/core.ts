@@ -231,7 +231,7 @@ export const askedJustNow = () => inAiClick > 0 || (aiClick != null && Date.now(
  * that starts by itself when a page opens, which shouldn't interrupt a screen reader.
  */
 let activation: { at: number; path: string } | null = null;
-/** The page the person is on: the route path, wherever the router keeps it (the site uses a hash router). */
+/** The page the person is on: the route path, wherever the router keeps it (the address, or the part after # in portable builds). */
 const pagePath = () => (typeof location === 'undefined' ? '' : location.pathname + location.hash.replace(/[?].*$/, ''));
 const PRESSABLE = 'button, [role="button"], [role="radio"], [role="tab"], [role="switch"], [role="checkbox"], [role="menuitem"], [role="option"], input[type="checkbox"], input[type="radio"], input[type="submit"], input[type="button"], input[type="file"], summary';
 function noteActivation(e: Event) {

@@ -140,6 +140,25 @@ Real listings and the *Sold prices* page use official open data. Demo listings k
 
 **Not covered:** Scotland and Northern Ireland have no open sold-price data in this form; flood maps for Wales, Scotland and Northern Ireland come from their own agencies. Pages say so instead of showing nothing.
 
+## Page addresses and search engines
+
+Every page has its own address with no `#` (`/property/sk-abc1234`, `/sold-prices/st-albans`, `/for-sale/leeds`,
+`/to-rent/e17`), its own title and description, and a rule for whether search engines may list it
+(`src/lib/meta.ts`). Links people saved or were emailed in the old `/#/…` form are turned into the new address
+when the page opens.
+
+- **Netlify**: the build writes `dist/_redirects` from the routes in `src/App.tsx` (`scripts/spa-redirects.mjs`),
+  one rule per page and never a catch-all, so `/api/*`, `/media/*`, `/sitemap.xml` and `/robots.txt` always reach
+  their functions. A test fails if a route has no rule.
+- **Node hosts** answer any page address with the site (`server/src/app.ts`).
+- **`/sitemap.xml`** (`server/src/routes/seo.ts`): the fixed pages, every live listing, a for-sale or to-rent
+  page for each town with live listings, and sold-price pages for the larger towns and cities of England and
+  Wales. **`/robots.txt`** keeps `/api/`, account, admin, saved and compare out and points at the sitemap. Set
+  `PUBLIC_URL` to the site's real address so both use it.
+- **Portable builds** (`npm run build:single`, and the optional GitHub Pages demo with `VITE_PORTABLE=1`) keep
+  relative files and `#/` addresses and are never offered to search engines.
+- After launch, add the site in Google Search Console and submit the sitemap address.
+
 ## Listings, photos, feeds and alerts
 
 - **Photo uploads** go up in small batches (up to 12 files and about 4 MB per request, because Netlify functions accept about 6 MB per request). The page shows progress and a retry never creates a second listing. Each request can carry a `meta` JSON field (`[{token, alt}]`) so alt text from the AI photo check is saved with the photo; if a limit stops a batch part-way, the photos already stored are kept and the response says what happened.

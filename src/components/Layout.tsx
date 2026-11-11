@@ -4,6 +4,7 @@ import { StreetkeyBow, StreetkeyWordmark } from './Brand';
 import { Icon } from './Icons';
 import { AskLauncher, AskSheet } from './ai/AskChat';
 import { useStore } from '../store';
+import { applyMeta, metaFor } from '../lib/meta';
 import { useAi } from '../lib/ai/core';
 import { useServer } from '../lib/server';
 
@@ -24,6 +25,8 @@ export default function Layout() {
   const { available: aiOn } = useAi();
   const [sheet, setSheet] = useState<null | 'ask' | 'more'>(null);
   useEffect(() => { window.scrollTo(0, 0); setSheet(null); }, [pathname]);
+  // Each page's title, description and search-engine rule. Pages that depend on what they load set their own.
+  useEffect(() => { const m = metaFor(pathname); if (!m.dynamic) applyMeta(m, pathname); }, [pathname]);
   const sheetRef = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const shown = useRef<null | 'ask' | 'more'>(null);

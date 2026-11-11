@@ -7,8 +7,14 @@ import the repository from GitHub (**not** drag-and-drop, which uploads only the
 in a London or Frankfurt region, set `OPENAI_API_KEY` (with credit and a monthly limit in your OpenAI account) and
 `ADMIN_EMAIL`, deploy, then confirm your admin account. Netlify redeploys automatically on every push to the branch.
 
-The site keeps these safeguards until the checklist below is done: `noindex` (search engines won't list the
-example listings), an “Example” label on every example listing and example figure, a footer line saying that
+Search engines may now list the site's real pages: the home page, sold prices (when they show real HM Land
+Registry sales), the tools, the legal pages, real listings and place pages that have real listings. Example
+listings, the example dashboards and personal pages (account, saved, compare, admin) are never offered to
+search engines; the rule for each page is in `src/lib/meta.ts`. `/sitemap.xml` and `/robots.txt` are built
+from the live listings.
+
+The site keeps these safeguards until the checklist below is done: example listings kept out of search
+engines, an “Example” label on every example listing and example figure, a footer line saying that
 example listings are not homes for sale and estimates are not advice, self-hosted fonts (no third-party
 requests), and draft Privacy / Terms / Accessibility pages. The “Public preview” banner across the top of every
 page was removed in November 2026 at the owner's request, along with builder's notes on public pages; the
@@ -25,7 +31,7 @@ built-in rules) to `https://alisalaqs-hub.github.io/Alis-test-dashboard-/`. It r
 3. Netlify → **Domain management → Add a domain** → enter `www.yourdomain.co.uk` and follow the DNS steps it shows (Netlify DNS, or a `CNAME` for `www` at your registrar). Netlify issues the HTTPS certificate automatically.
 4. Set `PUBLIC_URL` to `https://www.yourdomain.co.uk` in Netlify's environment variables and redeploy (it's used in emails).
 
-## Before removing the example labels and `noindex`
+## Before removing the example labels
 | Item | Owner |
 |---|---|
 | Company formed; ICO registration (≈ £52/yr) | You |

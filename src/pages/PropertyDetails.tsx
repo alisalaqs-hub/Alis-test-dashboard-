@@ -12,6 +12,7 @@ import { gbp, gbpK, HouseArt, Section, Stat, streetName, Tag } from '../componen
 import { useStore } from '../store';
 import { api, ApiError } from '../lib/api';
 import { isServerRef } from '../lib/listingAdapter';
+import { listingMeta, usePageMeta } from '../lib/meta';
 import { EpcValue, FloodValue, OfficialListingPanel, PriceCheckStat, useOfficialListing } from '../components/official/ListingData';
 import { useServer } from '../lib/server';
 
@@ -96,6 +97,7 @@ export default function PropertyDetails() {
     void loadListing(id).then((r) => { if (live) setFetched({ id, p: r }); }, () => { if (live) setFetched({ id, p: null }); });
     return () => { live = false; };
   }, [id, needsFetch, loadListing]);
+  usePageMeta(p ? listingMeta(p, isServerRef(p.id)) : { title: 'Property', index: false });
   if (!p) {
     if (isServerRef(id) && (status === 'checking' || (needsFetch && fetched?.id !== id))) return <p className="muted small" role="status" style={{ padding: 20 }}>Loading listing…</p>;
     return (

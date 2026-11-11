@@ -16,7 +16,7 @@ const routes = [...(process.env.A11Y_EMAIL ? SIGNED_IN : ['account', 'admin']), 
     if (process.env.A11Y_EMAIL) { const r = await ctx.request.post(BASE + '/api/auth/login', { data: { email: process.env.A11Y_EMAIL, password: process.env.A11Y_PASSWORD } }); if (!r.ok()) throw new Error('A11Y login failed'); }
     const p = await ctx.newPage();
     for (const r of routes) {
-      await p.goto(BASE + '/#/' + r); await p.waitForTimeout(r.startsWith('account') || r === 'admin' ? 900 : 450);
+      await p.goto(BASE + '/' + r); await p.waitForTimeout(r.startsWith('account') || r === 'admin' ? 900 : 450);
       await p.addScriptTag({ path: AXE });
       const res = await p.evaluate(async () => // WCAG 1.4.3 exempts logotypes ("text that is part of a logo or brand name has no contrast requirement"),
       // so the orange "key" in the streetkey wordmark is excluded. All other text is checked.

@@ -29,6 +29,8 @@ jobs:
         run: npm test
       - name: Type-check and build
         run: npm run build
+        env:
+          VITE_PORTABLE: '1' # GitHub Pages serves from a sub-folder: relative assets and #/ addresses
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

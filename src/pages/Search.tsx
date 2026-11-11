@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigationType, useSearchParams } from 'react-router-dom';
+import { Link, useMatch, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
+import { slugPlace, unslugPlace, usePageMeta } from '../lib/meta';
 import { describeQuery, runSearch, type SearchHit, type SearchQuery } from '../engine/search';
 import { gbp, gbpK, HouseArt, Seg, streetName, Tag, UKMap } from '../components/ui';
 import { useStore } from '../store';
@@ -88,12 +89,16 @@ export default function Search() {
    * a search from the Ask sheet while this page is open all show exactly the search in the address bar.
    */
   const [params, setParams] = useSearchParams();
-  const qParam = params.get('q');
+  // A place page (/for-sale/leeds, /to-rent/e17) is a ready-made search with its own address; ?q= still wins.
+  const { place } = useParams();
+  const toRent = !!useMatch('/to-rent/:place');
+  const placeName = place ? unslugPlace(place) : '';
+  const qParam = params.get('q') ?? (placeName ? `Homes ${toRent ? 'to rent' : 'for sale'} in ${placeName}` : null);
   const fullText = qParam ?? EXAMPLE_QUERY;
   // Both readings (AI and built-in rules) use the same, length-limited text, so they can't disagree.
   const submitted = fullText.slice(0, MAX_QUERY_CHARS);
   const shortened = fullText.trim().length > MAX_QUERY_CHARS;
-  const modeParam = params.get('mode');
+  const modeParam = params.get('mode') ?? (placeName ? (toRent ? 'rent' : 'buy') : null);
   const mode: SearchMode | null = (SEARCH_MODES as readonly string[]).includes(modeParam ?? '') ? (modeParam as SearchMode) : null;
   const defaultChannel: Channel = mode === 'rent' ? 'rent' : mode === 'commercial' ? 'commercial' : 'any';
   const marketParam = params.get('market');
@@ -209,6 +214,11 @@ export default function Search() {
     if (rankReady && rank) return blend(fitHits, rank.scores);
     return fitHits;
   }, [fitHits, sort, rankReady, rank]);
+  // Place pages are offered to search engines only when they show real homes: example listings never are.
+  const realHits = hits.filter((h) => !!h.property.source).length;
+  usePageMeta(placeName
+    ? { title: `Homes ${toRent ? 'to rent' : 'for sale'} in ${placeName}`, description: `${realHits || 'Search'} homes ${toRent ? 'to rent' : 'for sale'} in ${placeName} on Streetkey, each with sold prices nearby, flood risk, its energy rating and the cost of works.`, index: realHits > 0 && !params.get('q'), canonical: `/${toRent ? 'to-rent' : 'for-sale'}/${slugPlace(placeName)}` }
+    : { title: 'Search homes for sale and to rent', index: false });
   const shown = hits.filter((h) => src === 'all' || (src === 'agents' ? h.property.source?.kind === 'agent-feed' || !h.property.source : h.property.source?.kind === 'owner' || h.property.source?.kind === 'landlord'));
   const narrative = useMemo(() => narrate(q, hits), [q, hits]);
 

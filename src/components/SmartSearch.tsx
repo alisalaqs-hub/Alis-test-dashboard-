@@ -1,3 +1,4 @@
+import { slugPlace } from '../lib/meta';
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { suggest, type Suggestion } from '../engine/suggest';
@@ -26,7 +27,7 @@ const AI_EXAMPLES: Partial<Record<Mode, string[]>> = {
 
 /** Where a query should go for each mode. */
 export function destination(mode: Mode, q: string) {
-  if (mode === 'sold') return `/prices?q=${encodeURIComponent(q)}`;
+  if (mode === 'sold') return q.trim() ? `/sold-prices/${slugPlace(q)}` : '/prices';
   const text = mode === 'rent' && !/rent|let/i.test(q) ? `${q} to rent` : mode === 'commercial' && !/office|commercial/i.test(q) ? `commercial ${q}` : mode === 'invest' && !/invest|yield|return/i.test(q) ? `${q} investment` : q;
   return `/search?q=${encodeURIComponent(text)}&mode=${mode}`;
 }

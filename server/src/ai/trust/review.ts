@@ -246,7 +246,7 @@ async function notifyHeld(row: Row, why: { risk: sig.Risk; reviewId?: string | n
       : `Streetkey’s ${why.by === 'rules' ? 'automatic rules' : 'checks'} rated the new version ${SEVERITY_WORDS[why.risk]}${found}.`;
     await sendMail({
       to: config.adminEmail, template: 'listing_held_admin', subject: `An edited listing is back in the review queue (${row.ref})`,
-      text: `Listing ${row.ref} was changed after it was approved. ${what}\n\nIt has been taken off the site and is waiting for you in the review queue:\n${config.publicUrl}/#/admin`,
+      text: `Listing ${row.ref} was changed after it was approved. ${what}\n\nIt has been taken off the site and is waiting for you in the review queue:\n${config.publicUrl}/admin`,
     }).catch(() => {});
   }
   if (row.owner_email) {

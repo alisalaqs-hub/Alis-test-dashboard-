@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { slugPlace, unslugPlace, usePageMeta, type PageMeta } from '../lib/meta';
 import { Attribution, HpiCard, SoldBreakdown, SoldSummary, SoldTable, SourceTag } from '../components/official/Official';
 import { gbp, gbpK, Section, Spark, Stat, Tag } from '../components/ui';
 import { PROPERTIES } from '../data/properties';
@@ -18,11 +19,15 @@ type State = { kind: 'idle' } | { kind: 'loading'; q: string } | { kind: 'done';
  */
 export default function Prices() {
   const { status } = useServer();
-  const [params, setParams] = useSearchParams();
-  const term = (params.get('q') ?? '').trim();
+  const [params] = useSearchParams();
+  const { place } = useParams();
+  const nav = useNavigate();
+  // The place is part of the address (/sold-prices/leeds); older links used ?q=.
+  const term = (place ? unslugPlace(place) : params.get('q') ?? '').trim();
   const [q, setQ] = useState(term);
   useEffect(() => { setQ(term); }, [term]);
-  const search = (text: string) => { const t = text.trim(); setParams(t ? { q: t } : {}); };
+  const search = (text: string) => { const t = text.trim(); nav(t && slugPlace(t) ? `/sold-prices/${slugPlace(t)}` : '/prices'); };
+  usePageMeta(status === 'checking' ? soldMeta(term, null) : null);
 
   return (
     <div className="stack" style={{ gap: 18 }}>
@@ -42,6 +47,21 @@ export default function Prices() {
       {status === 'offline' ? <DemoSales term={term} /> : status === 'checking' ? <p className="od-status" role="status">Connecting…</p> : <LiveSales term={term} />}
     </div>
   );
+}
+
+/** Title and description for a sold-prices page. Listed by search engines only when it shows real sales. */
+function soldMeta(term: string, d: SoldPricesDTO | null): PageMeta {
+  if (!term) return { title: 'Sold house prices', description: 'What homes really sold for: every sale registered with HM Land Registry in England and Wales, by postcode, district or town.', canonical: '/prices' };
+  const where = d?.place.label ?? term;
+  const median = d?.stats.median;
+  return {
+    title: `Sold house prices in ${where}`,
+    description: d && d.totalSales > 0
+      ? `${d.totalSales} homes sold near ${where} in the last ${d.years} years${median ? `, median £${Math.round(median).toLocaleString('en-GB')} over the last ${d.stats.months} months` : ''}. Every sale registered with HM Land Registry, with the official average price for the area.`
+      : `What homes sold for near ${where}, from HM Land Registry.`,
+    index: !!d && d.coverage === 'england-wales' && d.totalSales > 0,
+    canonical: `/sold-prices/${slugPlace(term)}`,
+  };
 }
 
 function LiveSales({ term }: { term: string }) {
@@ -66,6 +86,7 @@ function LiveSales({ term }: { term: string }) {
   useEffect(() => { if (doneFor) heading.current?.focus({ preventScroll: true }); }, [doneFor]);
 
   const data = state.kind === 'done' ? state.data : null;
+  usePageMeta(soldMeta(term, data));
   const types = useMemo(() => (data ? [...new Set(data.sales.map((s) => s.type))] : []), [data]);
   const sales = useMemo(() => (data ? data.sales.filter((s) => type === 'all' || s.type === type) : []), [data, type]);
 
@@ -142,6 +163,7 @@ function DemoSales({ term }: { term: string }) {
     ...p.comparables.filter((c) => c.kind === 'sold').map((c) => ({ key: p.id + c.address, address: c.address, area: `${p.town.split(',')[0]} · ${p.district}`, beds: c.beds, price: c.price, date: c.date, note: c.refurbished ? 'Refurbished' : 'Unmodernised', near: p })),
     ...p.priceHistory.filter((h) => h.event === 'Sold').map((h) => ({ key: p.id + h.date, address: p.street, area: `${p.town.split(',')[0]} · ${p.district}`, beds: p.beds, price: h.price, date: h.date, note: 'Previous sale', near: p })),
   ]).sort((a, b) => b.date.localeCompare(a.date)), [t]);
+  usePageMeta({ ...soldMeta(term, null), index: false }); // example sales are never offered to search engines
   const recent = rows.filter((r) => r.date >= '2025-11');
   const sorted = [...recent].map((r) => r.price).sort((a, b) => a - b);
   const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;

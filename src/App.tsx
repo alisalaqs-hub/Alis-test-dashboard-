@@ -171,12 +171,16 @@ export default function App() {
       <Route element={<Layout />}>
         <Route index element={<Home />} />
         <Route path="search" element={<Search />} />
+        {/* Place pages with their own address, for search engines and sharing: /for-sale/leeds, /to-rent/e17, /sold-prices/st-albans */}
+        <Route path="for-sale/:place" element={<Search />} />
+        <Route path="to-rent/:place" element={<Search />} />
         <Route path="property/:id" element={<PropertyDetails />} />
         <Route path="property/:id/intelligence" element={<PropertyPage />} />
         <Route path="compare" element={<Compare />} />
         <Route path="saved" element={<Saved />} />
         <Route path="my-home" element={<MyHome />} />
         <Route path="prices" element={<Prices />} />
+        <Route path="sold-prices/:place" element={<Prices />} />
         <Route path="list" element={<ListRoute />} />
         <Route path="import" element={<ImportListing />} />
         <Route path="sources" element={<Sources />} />

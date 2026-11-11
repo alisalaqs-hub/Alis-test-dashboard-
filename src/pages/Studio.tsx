@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { pageUrl } from '../lib/meta';
 import { getProperty, PROPERTIES } from '../data/properties';
 import { designCost, fitBudget, parseDesignBrief, planLayout, STUDIO_BUDGET, studioBudget, STYLES, TIERS, type Dims, type RoomType, type Style, type Tier } from '../engine/design';
 import { regionFromPostcode } from '../engine/refurb';
@@ -326,7 +327,7 @@ export default function Studio() {
     else setQuoteNote({ title: quoteTitle, text });
   };
   const studioQuery = () => new URLSearchParams({ ...(linked ? { property: linked.id } : {}), room, style: styleId, tier }).toString();
-  const shareUrl = `${window.location.origin}${window.location.pathname}#/studio?${studioQuery()}`;
+  const shareUrl = pageUrl(`/studio?${studioQuery()}`);
   const groups = [...new Set(cost.lines.map((l) => l.group))];
   const beforeName = photo ? 'your photo' : 'the room before';
   const afterName = ai ? 'the AI design' : photo ? 'the colour preview' : 'the concept';
