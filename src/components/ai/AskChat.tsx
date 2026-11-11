@@ -287,7 +287,7 @@ export function AskLauncher({ onOpen }: { onOpen: () => void }) {
   }, []);
   return (
     <button type="button" className="ask-launch desktop-only" aria-haspopup="dialog" onClick={onOpen}>
-      <Icon name={available ? 'spark' : 'search'} size={18} /><span>{available ? 'Ask Streetkey AI' : 'Search Streetkey'}</span>
+      <Icon name="spark" size={18} stroke={2.2} /><span>{available ? 'Ask Streetkey AI' : 'Search Streetkey'}</span>
     </button>
   );
 }

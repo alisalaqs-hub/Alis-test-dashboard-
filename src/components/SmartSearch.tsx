@@ -121,7 +121,7 @@ export function SmartSearch({ autoFocus, onDone, compact, inlineList }: { autoFo
         ))}
       </div>
       <form className="smart-box" onSubmit={(e) => { e.preventDefault(); if (expanded && hi >= 0 && list[hi]) choose(list[hi]); else go(text); }}>
-        <span className="smart-icon" aria-hidden="true"><Icon name="search" /></span>
+        <span className="smart-icon smart-icon-ai" aria-hidden="true"><Icon name="spark" stroke={2.2} /></span>
         <input ref={ref} value={text} placeholder={compact ? 'Place, postcode or describe it…' : m.placeholder} aria-label="Search Streetkey" autoComplete="off" enterKeyHint="search"
           role="combobox" aria-autocomplete="list" aria-expanded={expanded} aria-controls={expanded ? listId : undefined}
           aria-activedescendant={expanded && hi >= 0 ? optId(hi) : undefined} aria-describedby={hintId}

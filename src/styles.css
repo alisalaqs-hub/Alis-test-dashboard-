@@ -306,6 +306,8 @@ pre.code { font-family: var(--mono); font-size: 12.5px; background: #0d1014; col
 .smart-box input { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 16px; padding: 12px 4px; outline: none; color: var(--ink); }
 .smart-box:focus-within { outline: 3px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 .smart-icon { color: var(--muted); display: inline-flex; }
+/* the AI asterisk on the smart search */
+.smart-icon-ai { color: var(--accent); }
 .smart-clear { border: 0; background: none; color: var(--muted); width: 36px; height: 36px; cursor: pointer; display: grid; place-items: center; }
 .smart-go { border: 0; background: var(--accent); color: var(--on-accent); font-weight: 700; border-radius: 13px; padding: 0 18px; min-height: 46px; cursor: pointer; font-size: 15px; font-family: var(--sans); }
 .suggest { position: absolute; left: 0; right: 0; top: calc(100% + 6px); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); list-style: none; margin: 0; padding: 6px; z-index: 40; text-align: left; }

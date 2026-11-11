@@ -253,6 +253,7 @@ export default function Search() {
         <div className="stack" style={{ gap: 16 }}>
           <div className="card ai-card search-head">
             <form className="smart-box" style={{ boxShadow: 'none' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
+              <span className="smart-icon smart-icon-ai" aria-hidden="true"><Icon name="spark" stroke={2.2} /></span>
               <input ref={inputRef} value={text} maxLength={MAX_QUERY_CHARS} onChange={(e) => setText(e.target.value)} aria-label="Search Streetkey" aria-describedby={nearLimit ? 'search-count' : undefined} enterKeyHint="search" placeholder="Place or describe it" />
               <button className="smart-go" type="submit">Search</button>
             </form>

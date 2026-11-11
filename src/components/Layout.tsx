@@ -96,7 +96,7 @@ export default function Layout() {
         <NavLink to="/" end className={({ isActive }) => (isActive || pathname.startsWith('/search') || pathname.startsWith('/property') ? 'on' : '')}><Icon name="search" /><span>Search</span></NavLink>
         <NavLink to="/saved" className={({ isActive }) => (isActive ? 'on' : '')}><span className="tab-ic"><Icon name="heart" />{saved.length > 0 && <span className="dot-badge">{saved.length}</span>}</span><span>Saved</span></NavLink>
         {/* Says "AI" only when AI can answer; without it the sheet is Streetkey's search. */}
-        <button type="button" className="tab-ask" onClick={() => openSheet('ask')} aria-label={aiOn ? 'Ask Streetkey AI' : 'Ask Streetkey'} aria-haspopup="dialog"><span className="ask-bubble"><Icon name={aiOn ? 'spark' : 'search'} size={26} /></span><span>Ask</span></button>
+        <button type="button" className="tab-ask" onClick={() => openSheet('ask')} aria-label={aiOn ? 'Ask Streetkey AI' : 'Ask Streetkey'} aria-haspopup="dialog"><span className="ask-bubble"><Icon name="spark" size={26} stroke={2.2} /></span><span>Ask</span></button>
         <NavLink to="/my-home" className={({ isActive }) => (isActive ? 'on' : '')}><Icon name="home" /><span>My Home</span></NavLink>
         <button type="button" data-more className={sheet === 'more' ? 'on' : ''} onClick={() => openSheet('more')} aria-haspopup="dialog"><Icon name="menu" /><span>More</span></button>
       </nav>

@@ -4,7 +4,8 @@ const P: Record<string, string> = {
   heart: 'M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z',
   home: 'M4 11l8-7 8 7v9H4zM9 20v-6h6v6',
   menu: 'M4 7h16M4 12h16M4 17h16',
-  spark: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
+  // Streetkey's AI mark: a six-armed asterisk. Used wherever AI is at work, and on the smart search.
+  spark: 'M12 3.5v17M4.6 7.75l14.8 8.5M19.4 7.75l-14.8 8.5',
   pound: 'M16 6.5A3.5 3.5 0 0 0 9.5 8v4M7 12h7M8 19h9M9.5 12c0 3-1.5 5-2.5 7',
   tools: 'M14 6l4 4-9 9H5v-4zM16 4l4 4',
   palette: 'M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-1-1.5-1-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8zM7.5 11.5h.01M10 7.5h.01M15 7.5h.01',
