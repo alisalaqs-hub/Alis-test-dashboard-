@@ -164,6 +164,8 @@ table.t tfoot td { font-weight: 600; border-top: 1px solid var(--ink); }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 12px; font-size: 13px; cursor: pointer; text-align: left; }
 .chip:hover { border-color: var(--ink); }
+/* a chip that is a link */
+a.chip { text-decoration: none; display: inline-block; color: inherit; }
 .parsed { display: flex; gap: 6px; flex-wrap: wrap; }
 .parsed span { overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; background: var(--ink); color: var(--paper); border-radius: 6px; padding: 3px 8px; }
 
