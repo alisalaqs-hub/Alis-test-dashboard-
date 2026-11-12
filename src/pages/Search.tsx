@@ -5,6 +5,7 @@ import { describeQuery, runSearch, type SearchHit, type SearchQuery } from '../e
 import { gbp, gbpK, HouseArt, Seg, streetName, Tag, UKMap } from '../components/ui';
 import { useStore } from '../store';
 import { pointInPolygon, type LngLat } from '../engine/geo';
+import { latestPriceMove } from '../engine/history';
 import type { Property } from '../data/properties';
 import { ApiError } from '../lib/api';
 import { aiPost, useAi } from '../lib/ai/core';
@@ -374,6 +375,9 @@ export default function Search() {
                   <button className={`save-btn${compare.includes(h.property.id) ? ' on' : ''}`} aria-label={`${compare.includes(h.property.id) ? 'Comparing' : 'Compare'}: ${h.property.title}`} onClick={() => toggleCompare(h.property.id)}>{compare.includes(h.property.id) ? '✓ Comparing' : '+ Compare'}</button>
                   <Link className="save-btn" to={`/property/${h.property.id}/intelligence`} style={{ textDecoration: 'none' }} aria-label={`Intelligence: ${h.property.title}`}>Intelligence →</Link>
                   <Tag kind={sourceLabel(h.property).tone}>{sourceLabel(h.property).text}</Tag>
+                  {/* Real listings: Streetkey's own record of the listing, which the big portals don't show. */}
+                  {h.property.history && h.property.history.daysOnMarket <= 7 && <Tag kind="ok">New</Tag>}
+                  {latestPriceMove(h.property.history) === 'reduced' && <Tag kind="warn">Reduced</Tag>}
                   {h.property.alsoListedBy?.length ? <span className="xs muted">also listed by {h.property.alsoListedBy.join(', ')}</span> : null}
                   {h.property.listing !== 'rent' && <Tag kind="est">Indicative value-add {gbpK(h.estProfit)}</Tag>}
                 </div>
