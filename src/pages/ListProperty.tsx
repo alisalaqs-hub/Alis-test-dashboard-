@@ -21,6 +21,9 @@ import {
   saveDraftPhotos, setPhotoOrder, severityClass, severityLabel, sizeBatches, TONES, UPLOAD_BATCH_BYTES,
   type DescribeResult, type ListingPhotosResult, type PhotoAnalysis, type PhotoJobOutput, type PrecheckResult, type PriceGuideResult, type PriorItem, type Tone,
 } from '../lib/ai/listing';
+import { ListingFloorPlan } from '../components/ListingFloorPlan';
+import { isFloorPlanCaption, planCaption, planSummary, renderPlanSvg, svgDataUrl, type PlanRoom } from '../engine/floorplan';
+import { planPng, storedRooms } from '../lib/floorplan';
 import '../components/ai/listing.css';
 
 const STEPS = ['Basics', 'Address', 'Details', 'Photos', 'Price', 'Description', 'Review'];
@@ -481,6 +484,8 @@ const BLANK: ListingInput = {
 interface Draft {
   f: ListingInput; step: number; seen: number; who: 'owner' | 'landlord' | 'agent'; staged: boolean; createdRef: string | null; photoCount: number;
   declared?: { owner: boolean; accurate: boolean };
+  /** A floor plan made in the form and not yet sent (its rooms), and whether the floor area was typed by the person. */
+  plan?: PlanRoom[] | null; areaTyped?: boolean;
 }
 const DRAFT_KEY = LISTING_DRAFT_KEY;
 
@@ -518,6 +523,10 @@ function ListPropertyForm() {
   const [declared, setDeclared] = useState({ owner: !!restored?.declared?.owner, accurate: !!restored?.declared?.accurate });
   const [done, setDone] = useState<Property | null>(null);
   const [photoChecks, setPhotoChecks] = useState<Checks>(() => new Map());
+  // A floor plan made here: its rooms are kept until the listing is sent, when the drawing is added as the listing's floor plan.
+  const [plan, setPlan] = useState<PlanRoom[] | null>(() => storedRooms(restored?.plan));
+  // Whether the floor area was typed by the person (then it's only replaced by a plan's total if they say so).
+  const [areaTyped, setAreaTyped] = useState(!!restored?.areaTyped);
   const [photoAdvice, setPhotoAdvice] = useState<{ order: string[]; tips: string[] } | null>(null);
   const [pre, setPre] = useState<{ key: string; r: PrecheckResult } | null>(null);
   // The draft created on the first Submit, so a retry after a failed photo upload updates it instead of creating another.
@@ -565,10 +574,10 @@ function ListPropertyForm() {
     if (editParam || done || serverDone) return;
     // An untouched form isn't kept (coming back to it shouldn't say "We kept the details you entered").
     const untouched = keyOf({ ...f, photos: [] }) === keyOf(BLANK) && !f.photos?.length && step === 0 && seen === 0 && who === 'owner'
-      && !staged && !createdRef && !declared.owner && !declared.accurate;
+      && !staged && !createdRef && !declared.owner && !declared.accurate && !plan;
     if (untouched) clearDraft(DRAFT_KEY);
-    else saveDraft<Draft>(DRAFT_KEY, { f: { ...f, photos: [] }, step, seen, who, staged, createdRef, photoCount: f.photos?.length ?? 0, declared });
-  }, [editParam, f, step, seen, who, staged, createdRef, declared, done, serverDone]);
+    else saveDraft<Draft>(DRAFT_KEY, { f: { ...f, photos: [] }, step, seen, who, staged, createdRef, photoCount: f.photos?.length ?? 0, declared, plan, areaTyped });
+  }, [editParam, f, step, seen, who, staged, createdRef, declared, done, serverDone, plan, areaTyped]);
   useEffect(() => {
     if (editParam || done || serverDone) return;
     setPhotosKept(saveDraftPhotos(DRAFT_KEY, f.photos ?? []));
@@ -577,6 +586,7 @@ function ListPropertyForm() {
     clearDraft(DRAFT_KEY);
     setF(BLANK); setStep(0); setSeen(0); setWho('owner'); setStaged(false); setCreatedRef(null); setDeclared({ owner: false, accurate: false });
     setPhotoChecks(new Map()); setPhotoAdvice(null); setPre(null); setServerError(null); setPhotoError(null); setRestoreNote('');
+    setPlan(null); setAreaTyped(false);
   };
   // Signed out (or a different account now uses this tab): a new listing's unsent form belongs to the last person, so it is cleared.
   useEffect(() => {
@@ -610,6 +620,7 @@ function ListPropertyForm() {
         features: d.features.filter((t) => t !== STAGED), description: d.description ?? '', photos: [] }));
       setStaged(d.features.includes(STAGED));
       setExisting(d.photos);
+      setAreaTyped(true); // the saved floor area is the person's own figure
       setEditStatus(d.status);
       // Already confirmed when the owner first submitted it (someone else, e.g. an admin, confirms for themselves).
       if (d.mine) setDeclared({ owner: true, accurate: true });
@@ -644,7 +655,8 @@ function ListPropertyForm() {
   const addressProblem = placeFieldProblem(f.addressLine, 'addressLine');
   const townProblem = placeFieldProblem(f.town, 'town');
   const checks: Check[] = [
-    ...complianceChecks({ ...f, description: f.description, photos: [...existing.map((p) => p.url), ...(f.photos ?? [])] }, { minPhotos: online ? 1 : 0 }),
+    // A floor plan is stored with the photos, but it isn't a photo of the home: it doesn't count towards the photos a listing needs.
+    ...complianceChecks({ ...f, description: f.description, photos: [...existing.filter((p) => !isFloorPlanCaption(p.alt)).map((p) => p.url), ...(f.photos ?? [])] }, { minPhotos: online ? 1 : 0 }),
     ...(addressProblem ? [{ id: 'address', ok: false, severity: 'block' as const, message: addressProblem }] : []),
     ...(townProblem ? [{ id: 'town', ok: false, severity: 'block' as const, message: townProblem }] : []),
   ];
@@ -769,6 +781,41 @@ function ListPropertyForm() {
     return { left: photos.filter((p) => !gone.has(p)).length, notes };
   };
 
+  /**
+   * Adds the floor plan made in the form to the listing: the drawing is turned into a PNG in the browser and sent
+   * through the photo upload, captioned "Floor plan: …" (that caption is what marks it as the listing's floor plan).
+   * An earlier floor plan on the listing is taken off once the new one is safely stored.
+   */
+  const attachPlan = async (ref: string, rooms: PlanRoom[]) => {
+    const fail = (reason: string) => new ApiError(0, `Your floor plan wasn’t added: ${reason.replace(/[.\s]+$/, '')}. Your listing is saved: press the button again to send the floor plan, or take it off on the Photos step.`, 'upload_incomplete');
+    setUploadProgress('Adding your floor plan…');
+    try {
+      const old = existing.filter((p) => isFloorPlanCaption(p.alt));
+      const caption = planCaption(rooms);
+      let png: Blob;
+      try { png = await planPng(renderPlanSvg(rooms)); }
+      catch { throw fail('it couldn’t be turned into a picture on this device'); }
+      const send = () => api.listings.uploadPhotos(ref, [new File([png], 'floor-plan.png', { type: 'image/png' })], [{ alt: caption }]);
+      const gone = new Set<string>();
+      const takeOff = async () => { for (const p of old) if (!gone.has(p.id)) { try { await api.listings.deletePhoto(ref, p.id); gone.add(p.id); } catch { /* stays with the photos, where it can be removed */ } } };
+      let up: Awaited<ReturnType<typeof send>>;
+      try { up = await send(); }
+      catch (e) {
+        // No room left for another picture: the earlier floor plan makes way first.
+        if (!(e instanceof ApiError) || !old.length || !/limit of \d+ photos/i.test(e.message)) throw e;
+        await takeOff();
+        up = await send();
+      }
+      const added = up.added[0];
+      if (!added) throw fail(up.error?.message ?? up.rejected[0] ?? 'the picture wasn’t stored');
+      await takeOff();
+      setExisting((x) => [...x.filter((p) => !gone.has(p.id)), { id: added.id, url: added.url, alt: added.alt ?? caption }]);
+      setPlan(null); // it's on the listing now, so a retry of a later step doesn't send it twice
+    } catch (e) {
+      throw e instanceof ApiError && e.code === 'upload_incomplete' ? e : fail(e instanceof ApiError ? e.message : 'something went wrong');
+    } finally { setUploadProgress(''); }
+  };
+
   const publishToServer = async () => {
     setBusy(true); setServerError(null);
     try {
@@ -788,6 +835,7 @@ function ListPropertyForm() {
       if (up.left) {
         throw new ApiError(0, `${up.left === 1 ? '1 photo wasn’t' : `${up.left} photos weren’t`} uploaded. Your listing is saved: press the button again to send the rest.`, 'upload_incomplete', Object.fromEntries(up.notes.map((n, i) => [`note${i}`, n])));
       }
+      if (plan) await attachPlan(ref, plan);
       if (['draft', 'rejected', 'withdrawn'].includes(status)) status = (await api.listings.submit(ref)).status;
       await refreshListings();
       clearDraft(DRAFT_KEY);
@@ -799,6 +847,10 @@ function ListPropertyForm() {
     if (online) { void publishToServer(); return; }
     const p = buildListing({ ...f, description: f.description || draftDescription(f), features: staged ? [...f.features, STAGED] : f.features,
       source: { kind: who === 'landlord' ? 'landlord' : 'owner', name: who === 'landlord' ? 'Private landlord' : 'Private seller', licence: 'Posted by the owner on Streetkey', verified: false } });
+    if (plan) {
+      p.floorPlan = { url: svgDataUrl(renderPlanSvg(plan)), alt: planSummary(plan) };
+      p.documents = [...(p.documents ?? []).filter((d) => !d.startsWith('Floor plan')), 'Floor plan'];
+    }
     publishListing(p); setDone(p); clearDraft(DRAFT_KEY);
   };
 
@@ -935,7 +987,7 @@ function ListPropertyForm() {
             <div className="grid g3" style={{ gap: 10 }}>
               <label className="field">Bedrooms<input className="input num" type="number" min={0} value={f.beds} onChange={(e) => set('beds', Math.max(0, Number(e.target.value) || 0))} /></label>
               <label className="field">Bathrooms<input className="input num" type="number" min={1} value={f.baths} onChange={(e) => set('baths', Math.max(1, Number(e.target.value) || 1))} /></label>
-              <label className="field">Floor area m²<input className="input num" type="number" value={f.floorArea} onChange={(e) => set('floorArea', Number(e.target.value) || 0)} /></label>
+              <label className="field">Floor area m²<input className="input num" type="number" value={f.floorArea} onChange={(e) => { set('floorArea', Number(e.target.value) || 0); setAreaTyped(true); }} /></label>
               <label className="field">EPC rating<select className="input" value={f.epc} onChange={(e) => set('epc', e.target.value)}><option value="">Select…</option>{'ABCDEFG'.split('').map((x) => <option key={x}>{x}</option>)}</select></label>
               <label className="field">Council tax band<select className="input" value={f.councilTax} onChange={(e) => set('councilTax', e.target.value)}><option value="">Select…</option>{'ABCDEFGH'.split('').map((x) => <option key={x}>{x}</option>)}</select></label>
               <label className="field">Built<select className="input" value={f.era} onChange={(e) => set('era', e.target.value as Era)}>{['pre-1919', '1919-1944', '1945-1979', '1980-1999', '2000+'].map((x) => <option key={x}>{x}</option>)}</select></label>
@@ -951,7 +1003,7 @@ function ListPropertyForm() {
             <h3 ref={photosHeading} tabIndex={-1}>Photos</h3>
             {photoError && <div className="lp-alert" role="alert"><b>{photoError.title}</b><ul>{photoError.items.map((m) => <li key={m}>{m}</li>)}</ul></div>}
             {existing.length > 0 && <div className="photo-grid">{existing.map((p, i) => (
-              <div key={p.id} className="photo-item"><img src={mediaUrl(p.url)} alt={p.alt ?? `Photo ${i + 1}`} />{i === 0 && <span className="cap-lead">Lead</span>}
+              <div key={p.id} className="photo-item"><img src={mediaUrl(p.url)} alt={p.alt ?? `Photo ${i + 1}`} />{isFloorPlanCaption(p.alt) ? <span className="cap-lead">Floor plan</span> : i === 0 && <span className="cap-lead">Lead</span>}
                 {removing === p.id
                   ? <div className="lp-confirm" role="group" aria-label={`Remove photo ${i + 1}?`}>
                     <span>{liveEdit ? 'Remove it from your live listing now?' : 'Remove this photo now?'}</span>
@@ -984,6 +1036,8 @@ function ListPropertyForm() {
             <label className="check"><input type="checkbox" checked={staged} onChange={(e) => setStaged(e.target.checked)} />Some photos are virtually staged or edited (they will be labelled — required by consumer protection law)</label>
             {online && photoCount === 0 && <p className="xs muted">Add at least one photo: listings need one before they can be published.</p>}
             <p className="xs muted">Tip: the Streetkey Design Studio can create a labelled “what it could look like” concept for rooms that need work.</p>
+            <ListingFloorPlan plan={plan} onPlan={setPlan} hasAttached={existing.some((p) => isFloorPlanCaption(p.alt))} floorArea={f.floorArea} areaTyped={areaTyped}
+              onArea={(m2) => set('floorArea', m2)} when={editRef ? 'when you save your changes' : online ? 'when you submit your listing' : 'when you publish your listing'} />
           </>}
           {step === 4 && <>
             <h3>{f.listing === 'rent' ? 'Monthly rent' : 'Asking price'}</h3>

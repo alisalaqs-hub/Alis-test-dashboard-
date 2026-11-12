@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getProperty, photosFor, type Property } from '../data/properties';
 import { dealScore, refurbInputFor } from '../engine/insights';
@@ -17,6 +17,7 @@ import { isServerRef } from '../lib/listingAdapter';
 import { listingMeta, usePageMeta } from '../lib/meta';
 import { EpcValue, FloodValue, OfficialListingPanel, PriceCheckStat, useOfficialListing } from '../components/official/ListingData';
 import { useServer } from '../lib/server';
+import '../components/floorplan.css';
 
 /** The next few viewing slots: Saturday mornings and weekday evenings. */
 function nextSlots(n = 4) {
@@ -63,6 +64,40 @@ function EnquiryBox({ listingRef, rental, slots, lister }: { listingRef: string;
       <button className="btn accent" disabled={busy || !f.name || !f.email || (kind === 'question' && !f.message.trim())}>{busy ? 'Sending…' : kind === 'viewing' ? 'Request viewing' : 'Send question'}</button>
       <p className="xs muted">Your details go only to {lister}. See our <Link to="/privacy">privacy notice</Link>.</p>
     </form>
+  );
+}
+
+/**
+ * The listing's own floor plan at full size, as a dialog: focus moves to Close, Tab stays inside,
+ * Escape or a click outside closes it, and focus goes back to the button that opened it.
+ */
+function PlanViewer({ plan, onClose }: { plan: { url: string; alt: string }; onClose: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    box.current?.querySelector<HTMLElement>('button')?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+      if (e.key !== 'Tab') return;
+      const f = [...(box.current?.querySelectorAll<HTMLElement>('button, [tabindex="0"]') ?? [])];
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); if (opener?.isConnected) opener.focus(); };
+  }, [onClose]);
+  return (
+    <div className="lightbox" onClick={onClose}>
+      <div ref={box} role="dialog" aria-modal="true" aria-label="Floor plan, full size" onClick={(e) => e.stopPropagation()}>
+        <div className="row between" style={{ marginBottom: 10 }}>
+          <b style={{ color: '#fff' }}>Floor plan</b>
+          <button type="button" className="btn ghost sm" onClick={onClose}>Close</button>
+        </div>
+        <div className="fp-shown-full" tabIndex={0} role="group" aria-label="Floor plan (scrolls)"><img src={plan.url} alt={plan.alt} /></div>
+      </div>
+    </div>
   );
 }
 
@@ -120,6 +155,8 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
   const official = useOfficialListing(p.id, live);
   const { saved, compare, toggleSaved, toggleCompare, requestViewing, viewings } = useStore();
   const [lightbox, setLightbox] = useState<number | null>(null);
+  const [planOpen, setPlanOpen] = useState(false);
+  const closePlan = useCallback(() => setPlanOpen(false), []);
   const [consent, setC] = useState(getConsent());
   const [events, setEvents] = useState(recentEvents());
   const [slot, setSlot] = useState('');
@@ -164,6 +201,8 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
         </div>
       )}
 
+      {planOpen && p.floorPlan && <PlanViewer plan={p.floorPlan} onClose={closePlan} />}
+
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
           <div className="stack" style={{ gap: 8 }}>
@@ -206,7 +245,10 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           </Section>
 
           <div className="grid g2">
-            <Section title="Floor plan" right={<button className="btn ghost sm" onClick={() => track('floorplan_open', p.id)}>Open full size</button>}><FloorPlan beds={p.beds} type={p.type} area={p.floorArea} /></Section>
+            <Section title="Floor plan" right={<button className="btn ghost sm" onClick={() => { track('floorplan_open', p.id); if (p.floorPlan) setPlanOpen(true); }}>Open full size</button>}>
+              {/* The lister's own plan when they added one; otherwise the indicative layout. */}
+              {p.floorPlan ? <img className="fp-shown" src={p.floorPlan.url} alt={p.floorPlan.alt} /> : <FloorPlan beds={p.beds} type={p.type} area={p.floorArea} />}
+            </Section>
             <Section title="Key facts" kicker="Material information">
               <dl className="kv">
                 <dt>Tenure</dt><dd>{p.tenure}{p.leaseYears ? ` (${p.leaseYears} yrs)` : ''}</dd>
@@ -225,7 +267,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           <OfficialListingPanel official={official} price={p.price} rental={rental} where={p.postcode || p.district} />
 
           <Section title="Documents">
-            <ul className="clean">{(p.documents ?? ['EPC', 'Floor plan']).map((d) => <li key={d} className="row between"><span className="small">📄 {d}</span>{/requested/.test(d) ? <Tag kind="neutral">Requested</Tag> : <button className="btn ghost sm" onClick={() => track('document_open', p.id, { doc: d })}>View</button>}</li>)}</ul>
+            <ul className="clean">{(p.documents ?? ['EPC', 'Floor plan']).map((d) => <li key={d} className="row between"><span className="small">📄 {d}</span>{/requested/.test(d) ? <Tag kind="neutral">Requested</Tag> : <button className="btn ghost sm" onClick={() => { track('document_open', p.id, { doc: d }); if (d === 'Floor plan' && p.floorPlan) setPlanOpen(true); }}>View</button>}</li>)}</ul>
             <p className="xs muted" style={{ marginTop: 8 }}>Documents are provided by the seller or their agent. Example listings have no files to open.</p>
           </Section>
 

@@ -21,6 +21,7 @@ import { aiInboxRoutes } from './routes/ai-inbox';
 import { aiImportRoutes } from './routes/ai-import';
 import { aiPropertyRoutes } from './routes/ai-property';
 import { aiBriefingRoutes } from './routes/ai-briefing';
+import { aiFloorplanRoutes } from './routes/ai-floorplan';
 import { DataError } from './data/http';
 import { seoRoutes } from './routes/seo';
 import { orgReportRoutes } from './routes/org-report';
@@ -149,6 +150,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(aiImportRoutes);
   await app.register(aiPropertyRoutes);
   await app.register(aiBriefingRoutes);
+  await app.register(aiFloorplanRoutes);
   await app.register(eventRoutes);
   await app.register(dataRoutes);
   await app.register(seoRoutes);

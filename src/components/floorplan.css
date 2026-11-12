@@ -1,0 +1,85 @@
+/* Floor plan maker (src/components/FloorPlanMaker.tsx) and the plan shown on a listing. One light theme. */
+.fp-p { margin: 0; }
+.fp-sub { margin: 0; font-family: inherit; font-size: 15px; font-weight: 700; letter-spacing: normal; line-height: 1.35; color: var(--ink); }
+.fp-buttons { margin-top: 12px; }
+.fp .btn[aria-disabled='true'], .fp-listing .btn[aria-disabled='true'] { opacity: 0.55; }
+.fp-said { min-height: 1em; }
+.fp-msg { display: block; }
+.fp-list { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+
+/* ───── the rooms table ───── */
+.fp-table-wrap { container: fp / inline-size; overflow-x: auto; margin: 12px 0 0; }
+.fp-table { min-width: 1000px; }
+.fp-table td { vertical-align: top; }
+.fp-table label { display: block; }
+/* Each box has its own label. In the table it is for screen readers (the column heading is what's seen); as cards it is shown. */
+.fp-lab { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+table.fp-table .fp-group th { text-transform: none; letter-spacing: normal; font-size: 12.5px; font-weight: 700; color: var(--ink-2); background: var(--surface-2); padding: 6px 10px; border-bottom: 0; border-radius: 8px; white-space: normal; }
+/* The totals: the Total line reads like the rows above it, with one rule across the whole table. */
+.fp table.t tfoot th { text-transform: none; letter-spacing: normal; font-size: inherit; font-weight: 700; color: var(--ink); border-top: 1px solid var(--ink); border-bottom: 0; padding: 9px 6px; }
+.fp-group-note { font-weight: 500; color: var(--muted); margin-left: 6px; }
+.fp-c-name { min-width: 170px; }
+.fp-c-floor { min-width: 132px; }
+.fp-c-row { width: 72px; }
+.fp-c-w, .fp-c-l { width: 104px; }
+.fp-c-unit { min-width: 150px; }
+.fp-c-plan { min-width: 150px; font-size: 13px; line-height: 1.35; }
+.fp-ai { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 5px; }
+.fp-actions { display: flex; gap: 6px; flex-wrap: nowrap; justify-content: flex-end; }
+.fp-arrow { min-width: 36px; padding-left: 8px; padding-right: 8px; justify-content: center; }
+.fp-actions .btn[aria-disabled='true'] { opacity: 0.4; }
+
+/* Narrow space (a phone, or inside the listing form): each room becomes a card with its labels shown. */
+@container fp (max-width: 999px) {
+  .fp-table { min-width: 0; display: block; }
+  .fp-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .fp-table tbody, .fp-table tr { display: block; }
+  table.fp-table td, table.fp-table th { display: block; padding: 0; border: 0; width: auto; min-width: 0; }
+  table.fp-table .fp-group th { padding: 6px 10px; margin-top: 10px; }
+  .fp-table tr.fp-room { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 8px 0; background: var(--surface); }
+  .fp-c-name { grid-column: span 2; }
+  .fp-c-actions { grid-column: 1 / -1; }
+  .fp-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .fp-lab { position: static; width: auto; height: auto; margin: 0 0 4px; overflow: visible; clip: auto; white-space: normal; display: block; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+}
+@container fp (max-width: 519px) {
+  .fp-table tr.fp-room { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fp-c-name { grid-column: 1 / -1; }
+}
+/* The narrowest phones: the first column is wider, so "Ground floor" and "Feet and inches" aren't cut short. */
+@container fp (max-width: 379px) {
+  .fp-table tr.fp-room { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  .fp-table select.input { padding-left: 8px; padding-right: 4px; }
+}
+
+/* ───── read my sketch ───── */
+.fp-sketch { display: flex; flex-direction: column; gap: 10px; border: 1px dashed var(--line); border-radius: var(--radius); padding: 14px; background: var(--surface-2); margin-top: 12px; }
+.fp-sketch-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fp-sketch-pick { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.fp-drop { position: relative; flex: 1 1 220px; background: var(--surface); color: var(--ink-2); font-weight: 600; }
+.fp-drop:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; border-color: var(--ink); color: var(--ink); }
+.fp-thumb { width: 96px; height: 72px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
+.fp-consent { align-items: flex-start; }
+.fp-consent input { flex: none; margin-top: 2px; }
+
+/* ───── the plan and the totals ───── */
+.fp-preview { border: 1px solid var(--line); border-radius: 12px; background: #fff; overflow: hidden; }
+.fp-preview img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.fp-preview.full { overflow: auto; max-height: 80vh; }
+.fp-preview.full img { max-width: none; }
+.fp-preview:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.fp-total { display: flex; flex-direction: column; gap: 2px; margin: 14px 0 10px; }
+.fp-total .num { font-size: 1.45rem; line-height: 1.2; }
+.fp-title { margin-bottom: 12px; }
+.fp-inline .fp-sub { font-size: 14px; }
+
+/* ───── in the listing form, and on a listing's page ───── */
+.fp-listing { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); padding-top: 14px; }
+.fp-listing h4 { margin: 0; font-size: 1rem; letter-spacing: -0.01em; }
+.fp-listing h4:focus { outline: none; }
+.fp-listing h4:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.fp-listing-plan { display: block; max-width: 100%; max-height: 360px; width: auto; height: auto; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.fp-area-ask { display: flex; flex-direction: column; gap: 8px; }
+.fp-shown { display: block; width: 100%; height: auto; border-radius: 10px; background: #fff; border: 1px solid var(--line); }
+.fp-shown-full { background: #fff; border-radius: 12px; overflow: auto; max-height: calc(100vh - 110px); }
+.fp-shown-full img { display: block; width: 100%; height: auto; }

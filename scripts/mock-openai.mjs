@@ -58,6 +58,18 @@ function png(w = 64, h = 48) {
 function crc32(buf) { let c, crc = 0xffffffff; for (let n = 0; n < buf.length; n++) { c = (crc ^ buf[n]) & 0xff; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crc = (crc >>> 8) ^ c; } return crc ^ 0xffffffff; }
 const IMAGE = png();
 
+// "Read my sketch" (floor plan maker): rooms as they might be written on a hand sketch, one in feet and inches and one with no size.
+const sketchRoom = (name, floor, width, length, unit, row, order) => ({ name, floor, width, length, unit, row, order });
+const SKETCH = {
+  isSketch: true,
+  rooms: [
+    sketchRoom('Kitchen', 'ground', '3.2', '3.0', 'm', 1, 1), sketchRoom('Dining rm', 'ground', '3.6', '3.0', 'm', 1, 2),
+    sketchRoom('Hall', 'ground', '1.8', '4.2', 'm', 2, 1), sketchRoom('Lounge', 'ground', '5.0', '4.2', 'm', 2, 2), sketchRoom('Utility', 'ground', null, null, 'unknown', 3, 1),
+    sketchRoom('Bed 1', 'first', '13\'9"', '12\'10"', 'ft', 1, 1), sketchRoom('Bathroom', 'first', '2.6', '2.1', 'm', 1, 2),
+  ],
+  notes: 'No size is written for the utility room.',
+};
+
 function embedding(text) { const v = new Array(64).fill(0); for (const w of String(text).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) { let h = 0; for (const c of w) h = (h * 31 + c.charCodeAt(0)) >>> 0; v[h % 64] += 1; } return v; }
 
 const server = http.createServer(async (req, res) => {
@@ -73,7 +85,8 @@ const server = http.createServer(async (req, res) => {
   if (path === '/chat/completions') {
     const body = JSON.parse(raw.toString() || '{}');
     const schema = body.response_format?.json_schema?.schema;
-    const content = schema ? JSON.stringify(sample(schema, body.response_format.json_schema.name)) : WORDS.reply;
+    const name = body.response_format?.json_schema?.name;
+    const content = name === 'floor_plan_sketch' ? JSON.stringify(SKETCH) : schema ? JSON.stringify(sample(schema, name)) : WORDS.reply;
     return send({ choices: [{ message: { role: 'assistant', content, refusal: null }, finish_reason: 'stop' }], usage: { prompt_tokens: 200, completion_tokens: 120 } });
   }
   send({ error: { message: `mock: no handler for ${path}` } }, 404);

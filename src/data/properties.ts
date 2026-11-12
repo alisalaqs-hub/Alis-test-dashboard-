@@ -56,6 +56,8 @@ export interface Property {
   /** private = only visible to the user who added it (e.g. a listing analysed from another website). */
   visibility?: 'public' | 'private';
   photos?: string[];          // data URLs (prototype) / CDN URLs (production)
+  /** The listing's own floor plan (a picture) and what it shows in words, when the lister added one. */
+  floorPlan?: { url: string; alt: string };
   description?: string;
   status?: 'pending' | 'live' | 'under offer' | 'withdrawn';
   alsoListedBy?: string[];
