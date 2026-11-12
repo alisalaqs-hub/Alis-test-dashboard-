@@ -6,6 +6,7 @@ import { newToken, verifyPassword } from '../auth/crypto';
 import { getUser, publicUser } from '../auth/session';
 import { config } from '../config';
 import { one, q, tx } from '../db';
+import { recordHistory } from '../services/history';
 import { audit, HttpError, notFound, parse, requireUser } from '../services/http';
 import { deleteFile } from '../services/storage';
 import { SavedFiltersSchema, savedMode, storedFilters } from '../ai/search/saved';
@@ -73,7 +74,8 @@ export async function meRoutes(app: FastifyInstance) {
       ...(await q<{ k: string }>(`SELECT p.storage_key AS k FROM listing_photos p JOIN listings l ON l.id = p.listing_id WHERE l.owner_user_id = $1 AND l.status = 'draft'`, [u.id])),
     ].map((r) => r.k).filter((k): k is string => !!k && !k.startsWith('ext:'));
     await tx(async (c) => {
-      await q(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE owner_user_id = $1 AND status NOT IN ('draft', 'withdrawn')`, [u.id], c);
+      const withdrawn = await q<{ id: string }>(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE owner_user_id = $1 AND status NOT IN ('draft', 'withdrawn') RETURNING id`, [u.id], c);
+      await recordHistory(withdrawn.map((w) => w.id), c);
       await q('DELETE FROM ai_images WHERE user_id = $1', [u.id], c);
       await q('DELETE FROM ai_jobs WHERE user_id = $1', [u.id], c);
       await q(`DELETE FROM listings WHERE owner_user_id = $1 AND status = 'draft'`, [u.id], c);

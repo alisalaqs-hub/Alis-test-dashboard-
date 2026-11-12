@@ -1,5 +1,7 @@
 // Hourly: recover stuck AI jobs first, refresh the AI model list, send saved-search alerts (time-boxed),
 // and run the daily clean-up when it's due. Netlify gives scheduled functions about 30 seconds.
+// Alerts: the daily and weekly digests, plus anything the instant alerts (sent from the API the moment a
+// listing goes live, see server/src/jobs/alerts.ts) didn't get to. Neither path repeats what the other sent.
 import '../../server/src/netlify/env';
 import type { Config } from '@netlify/functions';
 import { getApp } from '../../server/src/netlify/handler';

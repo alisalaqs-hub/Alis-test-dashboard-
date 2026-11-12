@@ -9,6 +9,7 @@ import { parseBLM, type FeedReport } from '../../../src/engine/listings';
 import { listingRef, newToken, sha256 } from '../auth/crypto';
 import { config } from '../config';
 import { one, q, tx } from '../db';
+import { recordHistory } from '../services/history';
 import { audit, forbidden, HttpError, notFound, parse, requireUser } from '../services/http';
 import { limit } from '../services/ratelimit';
 import { safeExternalUrl } from '../services/storage';
@@ -185,19 +186,21 @@ export async function feedRoutes(app: FastifyInstance) {
         }
       }
 
-      // Price changes, for the price history (one insert for the whole file).
+      // Price changes, for the audit trail (one insert for the whole file). The public history is written below.
       const moves = before.flatMap((b) => { const r = rowByRef.get(b.source_ref); return r && idOf.has(b.source_ref) && Number(b.price) !== Number(r.price) ? [{ ref: b.ref, from: Number(b.price), to: Number(r.price) }] : []; });
       if (moves.length) {
         await q(`INSERT INTO audit_log (action, subject, detail) SELECT 'listing.updated', s, d FROM unnest($1::text[], $2::jsonb[]) AS t(s, d)`,
           [moves.map((m) => `listing:${m.ref}`), moves.map((m) => JSON.stringify({ fields: ['price'], priceFrom: m.from, priceTo: m.to, via: 'feed' }))], c);
       }
 
-      const withdrawn = await q(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE organisation_id = $1 AND source_kind = 'agent-feed'
+      const withdrawn = await q<{ id: string }>(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE organisation_id = $1 AND source_kind = 'agent-feed'
         AND status IN ('live', 'under_offer', 'pending') AND NOT (source_ref = ANY($2))
         AND (feed_key_id = $3 OR (
           (feed_key_id IS NULL OR feed_key_id IN (SELECT id FROM feed_keys WHERE organisation_id = $1 AND revoked_at IS NOT NULL))
           AND NOT EXISTS (SELECT 1 FROM feed_keys WHERE organisation_id = $1 AND revoked_at IS NULL AND id <> $3)))
         RETURNING id`, [fk.organisation_id, refs, fk.id], c);
+      // Listing history for the whole file in one statement: first listed, price changes, under offer, withdrawn, relisted.
+      await recordHistory([...touched, ...withdrawn.map((w) => w.id)], c);
       await q('INSERT INTO feed_runs (organisation_id, feed_key_id, format, accepted, withdrawn, rejected) VALUES ($1, $2, $3, $4, $5, $6)',
         [fk.organisation_id, fk.id, `BLM ${report.version}`, saved.length, withdrawn.length, JSON.stringify(rejected)], c);
       await q('UPDATE feed_keys SET last_used_at = now() WHERE id = $1', [fk.id], c);

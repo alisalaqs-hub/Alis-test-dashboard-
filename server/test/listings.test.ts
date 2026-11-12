@@ -143,12 +143,11 @@ describe('listings', () => {
     await upload(seller.c, ref);
     await seller.c.post(`/api/listings/${ref}/submit`);
     await admin.c.post(`/api/admin/listings/${ref}/approve`);
-    const later = new Date(Date.now() + 2 * 3600_000);
-    const res = await runAlerts(later);
-    expect(res.emails).toBeGreaterThanOrEqual(1);
+    // "As soon as they're listed": the alert goes out with the approval (see alerts.test.ts for the hourly job's side)
     const mail = lastMail(buyer.email)!;
     expect(mail.template).toBe('search_alert');
     expect(mail.text).toContain(ref);
+    const later = new Date(Date.now() + 2 * 3600_000);
     expect((await runAlerts(later)).emails).toBe(0); // not sent twice
   });
 });

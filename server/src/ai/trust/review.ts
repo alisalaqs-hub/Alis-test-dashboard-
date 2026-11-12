@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { config } from '../../config';
 import { one, q, tx } from '../../db';
 import { mails, sendMail } from '../../services/email';
+import { recordHistory } from '../../services/history';
 import { audit } from '../../services/http';
 import { sniffImage } from '../../services/images';
 import { checksFor, LISTING_SELECT, streetOnly, type ListingRow } from '../../services/listings';
@@ -518,6 +519,7 @@ export async function reviewListing(listingId: string, o: {
     const up = eligible ? await one<{ v: string }>(
       `UPDATE listings SET status = 'live', rejection_reason = NULL, published_at = coalesce(published_at, now()), updated_at = now()
         WHERE id = $1 AND status = 'pending' AND updated_at = $2::timestamptz RETURNING updated_at::text AS v`, [row.id, row.version], c) : null;
+    if (up) await recordHistory([row.id], c); // first listed
     const down = hold ? await one<{ id: string }>(`UPDATE listings SET status = 'pending', updated_at = now() WHERE id = $1 AND status IN ('live', 'under_offer') RETURNING id`, [row.id], c) : null;
     const ins = await one<{ id: string }>(
       `INSERT INTO listing_ai_reviews (listing_id, risk, score, flags, signals, summary, suggested_reason, auto_approved, model, triggered_by, listing_updated_at, content_hash)

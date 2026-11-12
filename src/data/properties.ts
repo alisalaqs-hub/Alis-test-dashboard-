@@ -5,6 +5,7 @@
  * levels for the postcode district. They are NOT live listings and are not
  * sourced from any portal, agent feed or HM Land Registry record.
  */
+import type { ListingHistory } from '../engine/history';
 import type { Condition, Era, PropertyType } from '../engine/refurb';
 import type { Nation } from '../engine/tax';
 
@@ -59,6 +60,8 @@ export interface Property {
   status?: 'pending' | 'live' | 'under offer' | 'withdrawn';
   alsoListedBy?: string[];
   createdAt?: string;
+  /** Real listings only: Streetkey's record of when it was first listed, its days on the market and each asking price change. */
+  history?: ListingHistory;
 }
 
 export type SourceKind = 'demo' | 'owner' | 'landlord' | 'agent-feed' | 'external-link';

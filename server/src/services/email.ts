@@ -18,19 +18,28 @@ function wrap(subject: string, text: string) {
 <p style="font-size:12px;color:#555B6E;margin-top:28px">You’re receiving this because of activity on your Streetkey account.</p></div></body></html>`;
 }
 
-export async function sendMail(m: Mail) {
+/**
+ * What became of a message. refused: the email provider answered and turned the message down (a 4xx
+ * answer: too many requests, a rejected address or key), so nothing was sent and it is safe to send it
+ * again later. A timeout, a network fault or a fault on the provider's side (5xx) is not a refusal: the
+ * message may have gone, so those are never sent again automatically.
+ */
+export interface Delivery { status: 'sent' | 'logged' | 'failed'; refused: boolean }
+
+/** Sends one message and records it in the emails table. timeoutMs: how long to wait for the provider (15 seconds unless given). */
+export async function deliver(m: Mail, o: { timeoutMs?: number } = {}): Promise<Delivery> {
   const html = m.html ?? wrap(m.subject, m.text);
-  let status: 'sent' | 'logged' | 'failed' = 'logged', providerId: string | null = null, error: string | null = null;
+  let status: Delivery['status'] = 'logged', providerId: string | null = null, error: string | null = null, refused = false;
   if (config.email.resendApiKey) {
     try {
       const r = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { Authorization: `Bearer ${config.email.resendApiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ from: config.email.from, to: [m.to], subject: m.subject, text: m.text, html }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(o.timeoutMs ?? 15_000),
       });
       const j = (await r.json().catch(() => ({}))) as { id?: string; message?: string };
-      if (r.ok) { status = 'sent'; providerId = j.id ?? null; } else { status = 'failed'; error = j.message ?? `HTTP ${r.status}`; }
+      if (r.ok) { status = 'sent'; providerId = j.id ?? null; } else { status = 'failed'; refused = r.status >= 400 && r.status < 500; error = j.message ?? `HTTP ${r.status}`; }
     } catch (e) { status = 'failed'; error = (e as Error).message; }
   } else {
     outbox.push(m);
@@ -39,7 +48,11 @@ export async function sendMail(m: Mail) {
   }
   await q('INSERT INTO emails (to_address, template, subject, status, provider_id, error) VALUES ($1, $2, $3, $4, $5, $6)',
     [m.to, m.template, m.subject, status, providerId, error]).catch(() => {});
-  return status;
+  return { status, refused };
+}
+
+export async function sendMail(m: Mail) {
+  return (await deliver(m)).status;
 }
 
 const link = (path: string) => `${config.publicUrl}${path}`;
@@ -63,7 +76,8 @@ export const mails = {
     text: `${title} (${ref}) was submitted and is waiting for review.\n\nReview it in the admin area:\n${link('/admin')}` }),
   listingRejected: (to: string, title: string, reason: string) => sendMail({ to, template: 'listing_rejected', subject: 'Your listing needs changes',
     text: `We couldn’t publish ${title} yet.\n\nReason: ${reason}\n\nYou can edit it and submit it again from ${link('/account/listings')}.` }),
-  searchAlert: (to: string, query: string, items: { title: string; ref: string; price: string }[]) => sendMail({ to, template: 'search_alert',
+  /** One wording for every saved-search alert, whether it goes out the moment a home is listed or with the hourly job. */
+  searchAlert: (to: string, query: string, items: { title: string; ref: string; price: string }[], o: { timeoutMs?: number } = {}) => deliver({ to, template: 'search_alert',
     subject: `${items.length} new ${items.length === 1 ? 'home matches' : 'homes match'} “${query}”`,
-    text: `New on Streetkey for “${query}”:\n\n${items.map((i) => `• ${i.title}, ${i.price}\n  ${link(`/property/${i.ref}`)}`).join('\n')}\n\nManage alerts: ${link('/account/searches')}` }),
+    text: `New on Streetkey for “${query}”:\n\n${items.map((i) => `• ${i.title}, ${i.price}\n  ${link(`/property/${i.ref}`)}`).join('\n')}\n\nManage alerts: ${link('/account/searches')}` }, o),
 };

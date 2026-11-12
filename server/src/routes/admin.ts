@@ -1,8 +1,9 @@
 /** Admin: review listings, verify agencies and ownership, manage roles, read the audit trail. */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { one, q } from '../db';
+import { one, q, tx } from '../db';
 import { mails } from '../services/email';
+import { historyFor, recordHistory } from '../services/history';
 import { audit, HttpError, notFound, parse, requireAdmin } from '../services/http';
 import { checksFor, LISTING_SELECT, photosFor, toDTO, type ListingRow } from '../services/listings';
 import { emit } from '../ai/hooks';
@@ -35,12 +36,12 @@ export async function adminRoutes(app: FastifyInstance) {
     const admin = requireAdmin(req);
     const { status } = parse(z.object({ status: z.enum(['draft', 'pending', 'live', 'under_offer', 'sold', 'let', 'withdrawn', 'rejected']).default('pending') }), req.query);
     const rows = await q<ListingRow>(`${LISTING_SELECT} WHERE l.status = $1 ORDER BY l.updated_at ASC LIMIT 200`, [status]);
-    const photos = await photosFor(rows.map((r) => r.id));
+    const [photos, history] = await Promise.all([photosFor(rows.map((r) => r.id)), historyFor(rows.map((r) => r.id))]);
     // Agency feed photos are hosted on the agency's own website: the admin page asks before loading them (it would share the admin's IP address).
     const external = new Set((await q<{ id: string }>(`SELECT id FROM listing_photos WHERE listing_id = ANY($1) AND storage_key LIKE 'ext:%'`, [rows.map((r) => r.id)])).map((p) => p.id));
     return {
       items: rows.map((r) => ({
-        ...toDTO(r, (photos.get(r.id) ?? []).map((p) => (external.has(p.id) ? { ...p, external: true } : p)), { userId: admin.id, admin: true }),
+        ...toDTO(r, (photos.get(r.id) ?? []).map((p) => (external.has(p.id) ? { ...p, external: true } : p)), { userId: admin.id, admin: true }, history.get(r.id)),
         lister: r.organisation_name ?? r.owner_name ?? null, ownershipDeclared: r.ownership_declared,
         checks: checksFor(r, (photos.get(r.id) ?? []).length),
       })),
@@ -50,10 +51,14 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post('/api/admin/listings/:ref/approve', async (req) => {
     requireAdmin(req);
     const { ref } = parse(RefParams, req.params);
-    const r = await one<{ id: string; title: string | null; address_line: string; email: string | null }>(
-      `WITH up AS (UPDATE listings SET status = 'live', rejection_reason = NULL, published_at = coalesce(published_at, now()), updated_at = now()
-                   WHERE ref = $1 AND status = 'pending' RETURNING id, title, address_line, owner_user_id)
-       SELECT up.id, up.title, up.address_line, u.email FROM up LEFT JOIN users u ON u.id = up.owner_user_id`, [ref]);
+    const r = await tx(async (c) => {
+      const up = await one<{ id: string; title: string | null; address_line: string; email: string | null }>(
+        `WITH up AS (UPDATE listings SET status = 'live', rejection_reason = NULL, published_at = coalesce(published_at, now()), updated_at = now()
+                     WHERE ref = $1 AND status = 'pending' RETURNING id, title, address_line, owner_user_id)
+         SELECT up.id, up.title, up.address_line, u.email FROM up LEFT JOIN users u ON u.id = up.owner_user_id`, [ref], c);
+      if (up) await recordHistory([up.id], c); // first listed (or back on the market after changes)
+      return up;
+    });
     if (!r) throw new HttpError(409, 'Only pending listings can be approved. Someone may have dealt with it already.', 'bad_status');
     if (r.email) await mails.listingLive(r.email, r.title ?? r.address_line, ref);
     await audit(req, 'admin.listing_approved', `listing:${ref}`, await reviewContext(r.id));
@@ -65,10 +70,14 @@ export async function adminRoutes(app: FastifyInstance) {
     requireAdmin(req);
     const { ref } = parse(RefParams, req.params);
     const { reason } = parse(z.object({ reason: z.string().trim().min(5, 'Give the lister a reason they can act on.').max(1000) }), req.body);
-    const r = await one<{ id: string; title: string | null; address_line: string; email: string | null }>(
-      `WITH up AS (UPDATE listings SET status = 'rejected', rejection_reason = $2, updated_at = now()
-                   WHERE ref = $1 AND status IN ('pending', 'live', 'under_offer') RETURNING id, title, address_line, owner_user_id)
-       SELECT up.id, up.title, up.address_line, u.email FROM up LEFT JOIN users u ON u.id = up.owner_user_id`, [ref, reason]);
+    const r = await tx(async (c) => {
+      const up = await one<{ id: string; title: string | null; address_line: string; email: string | null }>(
+        `WITH up AS (UPDATE listings SET status = 'rejected', rejection_reason = $2, updated_at = now()
+                     WHERE ref = $1 AND status IN ('pending', 'live', 'under_offer') RETURNING id, title, address_line, owner_user_id)
+         SELECT up.id, up.title, up.address_line, u.email FROM up LEFT JOIN users u ON u.id = up.owner_user_id`, [ref, reason], c);
+      if (up) await recordHistory([up.id], c); // a listing that had been on the market is now off it
+      return up;
+    });
     if (!r) throw new HttpError(409, 'That listing can’t be rejected in its current state. Someone may have dealt with it already.', 'bad_status');
     if (r.email) await mails.listingRejected(r.email, r.title ?? r.address_line, reason);
     await audit(req, 'admin.listing_rejected', `listing:${ref}`, { reason, ...(await reviewContext(r.id)) });
@@ -100,9 +109,13 @@ export async function adminRoutes(app: FastifyInstance) {
     const r = await one('UPDATE organisations SET verified = $2 WHERE id = $1 RETURNING id', [id, verified]);
     if (!r) throw notFound('That organisation');
     // Verifying an agency releases its pending feed listings.
-    const released = verified ? await q(`UPDATE listings SET status = 'live', published_at = coalesce(published_at, now()), updated_at = now() WHERE organisation_id = $1 AND status = 'pending' AND source_kind IN ('agent-feed', 'agent') RETURNING id`, [id]) : [];
+    const released = verified ? await tx(async (c) => {
+      const rows = await q<{ id: string }>(`UPDATE listings SET status = 'live', published_at = coalesce(published_at, now()), updated_at = now() WHERE organisation_id = $1 AND status = 'pending' AND source_kind IN ('agent-feed', 'agent') RETURNING id`, [id], c);
+      await recordHistory(rows.map((x) => x.id), c);
+      return rows;
+    }) : [];
     await audit(req, 'admin.org_verified', `org:${id}`, { verified, released: released.length });
-    if (released.length) await emit('listingsPublished', { listingIds: (released as { id: string }[]).map((r) => r.id) });
+    if (released.length) await emit('listingsPublished', { listingIds: released.map((x) => x.id) });
     return { ok: true, released: released.length };
   });
 

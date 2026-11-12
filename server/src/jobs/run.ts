@@ -1,30 +1,29 @@
 /**
  * Scheduled jobs. Run with: npm run job -- <name>
- *   alerts   email saved-search matches (instant/daily/weekly), run hourly. Each alert runs the filters the
- *            person saw when saving (older saves: their words, read by the built-in rules in the saved mode)
+ *   alerts   email saved-search matches, run hourly: the daily and weekly digests, and for searches set to
+ *            "as soon as they're listed" whatever wasn't emailed the moment the listing went live (see
+ *            jobs/alerts.ts, which holds the matching and sending both paths share). Each alert runs the
+ *            filters the person saw when saving (older saves: their words, read by the built-in rules in
+ *            the saved mode)
  *   cleanup  remove expired sessions and links, and raw analytics older than 13 months, run daily
  */
 import { ensureLiveRegistry } from '../ai/registry';
 import { knownPlaces } from '../ai/search/intent';
-import { alertSearch } from '../ai/search/saved';
 import { deleteFile } from '../services/storage';
-import { runSearch } from '../../../src/engine/search';
-import { applyExtras } from '../../../src/lib/ai/search';
 import { one, q } from '../db';
-import { mails } from '../services/email';
-import { LISTING_SELECT, type ListingRow } from '../services/listings';
+import type { ListingRow } from '../services/listings';
+import { ALERT_SEARCHES, ALERTABLE_LISTINGS, alertHits, sendAlert, type AlertSearch } from './alerts';
 
 const DUE: Record<string, string> = { instant: '50 minutes', daily: '23 hours', weekly: '6 days 23 hours' };
 
 export async function runAlerts(now = new Date(), o: { deadline?: number; limit?: number } = {}) {
-  const searches = await q<{ id: string; query: string; mode: string; filters: unknown; alert_frequency: string; last_alerted_at: Date | null; created_at: Date; email: string }>(
-    `SELECT s.id, s.query, s.mode, s.filters, s.alert_frequency, s.last_alerted_at, s.created_at, u.email FROM saved_searches s JOIN users u ON u.id = s.user_id
-      WHERE u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL AND s.alert_frequency <> 'off'
+  const searches = await q<AlertSearch>(
+    `${ALERT_SEARCHES}
         AND (s.last_alerted_at IS NULL OR s.last_alerted_at < $1::timestamptz - (CASE s.alert_frequency WHEN 'instant' THEN $2 WHEN 'daily' THEN $3 ELSE $4 END)::interval)
       ORDER BY s.last_alerted_at NULLS FIRST LIMIT $5`,
     [now, DUE.instant, DUE.daily, DUE.weekly, o.limit ?? 200]);
   if (!searches.length) return { searches: 0, emails: 0, more: false };
-  const rows = await q<ListingRow>(`${LISTING_SELECT} WHERE l.status = 'live' AND l.published_at > now() - interval '8 days'`);
+  const rows = await q<ListingRow>(ALERTABLE_LISTINGS);
   const byRef = new Map(rows.map((r) => [r.ref, r]));
   // Search the same registry the website uses (demo + every live listing), then keep recent live matches.
   await ensureLiveRegistry(0);
@@ -32,16 +31,18 @@ export async function runAlerts(now = new Date(), o: { deadline?: number; limit?
   let emails = 0, done = 0;
   for (const s of searches) {
     if (o.deadline && Date.now() > o.deadline) break; // the rest go out next run
-    const since = s.last_alerted_at ?? s.created_at;
-    const { query, extras } = alertSearch(s, places);
-    const hits = applyExtras(runSearch(query), extras).map((h) => byRef.get(h.property.id)).filter((r): r is ListingRow => !!r && !!r.published_at && r.published_at > since);
-    if (hits.length) {
-      await mails.searchAlert(s.email, s.query, hits.slice(0, 10).map((r) => ({ title: r.title ?? `${r.beds}-bed ${r.property_type} in ${r.town}`, ref: r.ref, price: `£${Math.round(r.price).toLocaleString('en-GB')}${r.channel === 'rent' ? ' pcm' : ''}` })));
-      emails++;
-    }
+    const hits = alertHits(s, places, byRef);
+    try {
+      // Anything already emailed the moment it went live is left out (and the other way round): see sendAlert.
+      const r = hits.length ? await sendAlert(s, hits, 'hourly') : null;
+      if (r?.emailed) emails++;
+      // The email provider turned it down, so nothing was sent: leave the search as it is and try again next run.
+      if (r?.refused) continue;
+    } catch { continue; } // e.g. the saved search was deleted a moment ago
     await q('UPDATE saved_searches SET last_alerted_at = $2 WHERE id = $1', [s.id, now]);
     done++;
   }
+  // more: searches left for the next run (time ran out, or an email was refused).
   return { searches: done, emails, more: done < searches.length };
 }
 

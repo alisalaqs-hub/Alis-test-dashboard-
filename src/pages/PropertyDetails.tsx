@@ -6,8 +6,10 @@ import { estimateRefurb } from '../engine/refurb';
 import { rentalScenario, valuationScenario } from '../engine/valuation';
 import { getConsent, recentEvents, setConsent, track } from '../engine/tracking';
 import { propertySkills } from '../ai/skills';
+import { onMarketLine } from '../engine/history';
 import { AssistantPanel } from '../components/Assistant';
 import { SimilarHomes } from '../components/ai/SimilarHomes';
+import { PriceHistory, ReducedTag } from '../components/ListingHistory';
 import { gbp, gbpK, HouseArt, Section, Stat, streetName, Tag } from '../components/ui';
 import { useStore } from '../store';
 import { api, ApiError } from '../lib/api';
@@ -129,6 +131,10 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
   const val = useMemo(() => valuationScenario(p), [p]);
   const rent = useMemo(() => rentalScenario(p), [p]);
   const rental = p.listing === 'rent';
+  // Real listings carry Streetkey's record of the listing (first listed, days on the market, price changes); example listings keep their own figures.
+  const history = isServerRef(p.id) ? p.history : undefined;
+  const offMarket = p.status === 'withdrawn'; // sold, let or withdrawn
+  const priceLabel = rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price';
   useEffect(() => { track('listing_view', p.id); const h = () => setEvents(recentEvents()); window.addEventListener('streetkey-track', h); h(); return () => window.removeEventListener('streetkey-track', h); }, [p.id, consent]);
   const slots = useMemo(() => nextSlots(), []);
   const myViewing = viewings.find((v) => v.propertyId === p.id);
@@ -167,7 +173,8 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
             {p.source?.url && <a href={p.source.url} target="_blank" rel="noopener noreferrer" className="small">View the original listing ↗</a>}
             {p.alsoListedBy?.length ? <div className="xs muted">Also listed by {p.alsoListedBy.join(', ')}</div> : null}
             <div className="row" style={{ alignItems: 'flex-end', gap: 22 }}>
-              <Stat big label={rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price'} value={rental ? `${gbp(p.price)} pcm` : gbp(p.price)} sub={`Listed by ${p.agent} · ${p.daysOnMarket} days`} />
+              <Stat big label={history ? <>{priceLabel} <ReducedTag history={history} rental={rental} /></> : priceLabel} value={rental ? `${gbp(p.price)} pcm` : gbp(p.price)}
+                sub={history ? `Listed by ${p.agent} · ${onMarketLine(history.daysOnMarket, offMarket)}` : `Listed by ${p.agent} · ${p.daysOnMarket} days`} />
               <div className="row">
                 <button className={`save-btn${saved.includes(p.id) ? ' on' : ''}`} onClick={() => { toggleSaved(p.id); track('save', p.id); }}>{saved.includes(p.id) ? '♥ Saved' : '♡ Save'}</button>
                 <button className={`save-btn${compare.includes(p.id) ? ' on' : ''}`} onClick={() => { toggleCompare(p.id); track('compare_add', p.id); }}>{compare.includes(p.id) ? '✓ Comparing' : '+ Compare'}</button>
@@ -212,6 +219,8 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
               </dl>
             </Section>
           </div>
+
+          {history && <PriceHistory history={history} rental={rental} closed={offMarket} />}
 
           <OfficialListingPanel official={official} price={p.price} rental={rental} where={p.postcode || p.district} />
 

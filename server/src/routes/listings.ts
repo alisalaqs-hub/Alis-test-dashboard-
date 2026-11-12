@@ -7,11 +7,13 @@ import { config } from '../config';
 import { one, q, tx } from '../db';
 import { mails } from '../services/email';
 import { audit, forbidden, HttpError, notFound, parse, requireUser } from '../services/http';
+import { historyFor, recordHistory } from '../services/history';
 import { cleanImage, sniffImage } from '../services/images';
 import { checksFor, columnsFrom, geocode, LISTING_SELECT, ListingBody, ListingPatch, photosFor, PUBLIC_STATUSES, toDTO, type ListingRow } from '../services/listings';
 import { deleteFile, newKey, putFile } from '../services/storage';
 import { limit } from '../services/ratelimit';
-import { emit } from '../ai/hooks';
+import { emit, on } from '../ai/hooks';
+import { instantAlerts } from '../jobs/alerts';
 import { bytesHash, readPreview } from '../ai/listing/previewToken';
 import type { PhotoAnalysis } from '../ai/listing/photos';
 
@@ -99,6 +101,11 @@ function uploadLimitMessage(code: string | undefined, index: number): { code: st
 const roomAlt = (a: PhotoAnalysis) => a.room.charAt(0).toUpperCase() + a.room.slice(1);
 
 export async function listingRoutes(app: FastifyInstance) {
+  // The moment listings become publicly live (published by a verified agency, approved by an admin or by the trust
+  // review, released when their agency is verified, imported from a feed), saved searches set to "as soon as they're
+  // listed" are emailed. Time-boxed; whatever isn't sent here goes out with the hourly job (jobs/alerts.ts).
+  on('listingsPublished', ({ listingIds }) => instantAlerts(listingIds));
+
   /* ---------- public search ---------- */
   app.get('/api/listings', async (req) => {
     const p = parse(SearchQ, req.query);
@@ -119,9 +126,10 @@ export async function listingRoutes(app: FastifyInstance) {
     const total = (await one<{ n: number }>(`SELECT count(*)::int AS n FROM listings l WHERE ${whereSql}`, args))!.n;
     args.push(p.pageSize, (p.page - 1) * p.pageSize);
     const rows = await q<ListingRow>(`${LISTING_SELECT} WHERE ${whereSql} ORDER BY ${rank}${SORTS[p.sort]} LIMIT $${args.length - 1} OFFSET $${args.length}`, args);
-    const photos = await photosFor(rows.map((r) => r.id));
+    const ids = rows.map((r) => r.id);
+    const [photos, history] = await Promise.all([photosFor(ids), historyFor(ids)]);
     const viewer = await viewerOf(req);
-    return { items: rows.map((r) => toDTO(r, photos.get(r.id) ?? [], viewer)), total, page: p.page, pageSize: p.pageSize };
+    return { items: rows.map((r) => toDTO(r, photos.get(r.id) ?? [], viewer, history.get(r.id))), total, page: p.page, pageSize: p.pageSize };
   });
 
   app.get('/api/listings/:ref', async (req) => {
@@ -133,7 +141,8 @@ export async function listingRoutes(app: FastifyInstance) {
       || row.owner_user_id === viewer.userId || (row.organisation_id && viewer.orgIds.includes(row.organisation_id));
     if (!canSee) throw notFound('That listing');
     const photos = (await photosFor([row.id])).get(row.id) ?? [];
-    const dto = toDTO(row, photos, viewer);
+    // First listed, days on the market and every asking price change: prices and dates only, the same for everyone.
+    const dto = toDTO(row, photos, viewer, (await historyFor([row.id])).get(row.id));
     return { listing: dto, checks: dto.mine || viewer.admin ? checksFor(row, photos.length) : undefined };
   });
 
@@ -157,11 +166,12 @@ export async function listingRoutes(app: FastifyInstance) {
          LEFT JOIN organisations o ON o.id = l.organisation_id LEFT JOIN users u ON u.id = l.owner_user_id
          LEFT JOIN e ON e.listing_id = l.id LEFT JOIN v ON v.listing_id = l.id LEFT JOIN s ON s.listing_key = l.ref
         ORDER BY l.updated_at DESC`, [u.id, orgs]);
-    const photos = await photosFor(rows.map((r) => r.id));
+    const ids = rows.map((r) => r.id);
+    const [photos, history] = await Promise.all([photosFor(ids), historyFor(ids)]);
     const viewer = { userId: u.id, orgIds: orgs, admin: u.role === 'admin' };
     return {
       items: rows.map((r) => ({
-        ...toDTO(r, photos.get(r.id) ?? [], viewer),
+        ...toDTO(r, photos.get(r.id) ?? [], viewer, history.get(r.id)),
         stats: { enquiries: r.enquiries, newEnquiries: r.new_enquiries, filtered: r.held_enquiries, views30d: r.views_30d, saves: r.saves },
         checks: checksFor(r, (photos.get(r.id) ?? []).length),
       })),
@@ -212,7 +222,11 @@ export async function listingRoutes(app: FastifyInstance) {
     if (row.status === 'rejected' && fields.length) cols.status = 'draft';
     const keys = Object.keys(cols);
     if (keys.length) {
-      await q(`UPDATE listings SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() WHERE id = $1`, [row.id, ...Object.values(cols)]);
+      await tx(async (c) => {
+        await q(`UPDATE listings SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() WHERE id = $1`, [row.id, ...Object.values(cols)], c);
+        // A new asking price on a listing that is on the market goes into its public history.
+        if ('price' in cols || 'status' in cols) await recordHistory([row.id], c);
+      });
       await audit(req, 'listing.updated', `listing:${ref}`, { fields, ...(b.price != null && Number(b.price) !== Number(row.price) ? { priceFrom: row.price, priceTo: b.price } : {}) });
       await emit('listingUpdated', { listingId: row.id, ref, fields: keys, userId: req.user!.id });
     }
@@ -221,7 +235,7 @@ export async function listingRoutes(app: FastifyInstance) {
     // The trust review's automatic rules take a live listing off the site at once if the edit needs a closer look.
     const held = PUBLIC_STATUSES.includes(row.status) && fresh.status === 'pending';
     return {
-      listing: toDTO(fresh, photos, await viewerOf(req)), checks: checksFor(fresh, photos.length),
+      listing: toDTO(fresh, photos, await viewerOf(req), (await historyFor([fresh.id])).get(fresh.id)), checks: checksFor(fresh, photos.length),
       ...(held ? { held: true, note: 'Your changes are saved. Some of them need a quick check by our team, so the listing is hidden from search until then. We’ll email you when it’s back.' } : {}),
     };
   });
@@ -236,7 +250,10 @@ export async function listingRoutes(app: FastifyInstance) {
     if (blocking.length) throw checksFailed(blocking);
     const trustedAgency = row.organisation_id && row.organisation_verified;
     const goLive = !config.moderateOwnerListings || trustedAgency;
-    await q(`UPDATE listings SET status = $2, rejection_reason = NULL, published_at = CASE WHEN $2 = 'live' THEN now() ELSE published_at END, updated_at = now() WHERE id = $1`, [row.id, goLive ? 'live' : 'pending']);
+    await tx(async (c) => {
+      await q(`UPDATE listings SET status = $2, rejection_reason = NULL, published_at = CASE WHEN $2 = 'live' THEN now() ELSE published_at END, updated_at = now() WHERE id = $1`, [row.id, goLive ? 'live' : 'pending'], c);
+      await recordHistory([row.id], c); // first listed, or relisted (with any change of price since it was last on the market)
+    });
     await audit(req, goLive ? 'listing.published' : 'listing.submitted', `listing:${ref}`);
     await emit('listingSubmitted', { listingId: row.id, ref, userId: req.user!.id });
     if (goLive) await emit('listingsPublished', { listingIds: [row.id] });
@@ -255,7 +272,10 @@ export async function listingRoutes(app: FastifyInstance) {
     if (!TRANSITIONS[row.status]?.includes(status)) throw new HttpError(409, `A ${row.status.replace('_', ' ')} listing can’t be marked ${status.replace('_', ' ')}.`, 'bad_transition');
     if (status === 'let' && row.channel !== 'rent') throw new HttpError(409, 'Only rentals can be marked let.', 'bad_transition');
     if (status === 'sold' && row.channel !== 'sale') throw new HttpError(409, 'Only sales can be marked sold.', 'bad_transition');
-    await q('UPDATE listings SET status = $2, updated_at = now() WHERE id = $1', [row.id, status]);
+    await tx(async (c) => {
+      await q('UPDATE listings SET status = $2, updated_at = now() WHERE id = $1', [row.id, status], c);
+      await recordHistory([row.id], c); // under offer, back on the market, sold or let, withdrawn
+    });
     await audit(req, 'listing.status', `listing:${ref}`, { from: row.status, to: status });
     return { status };
   });
@@ -270,7 +290,10 @@ export async function listingRoutes(app: FastifyInstance) {
       await audit(req, 'listing.deleted', `listing:${ref}`);
       return { deleted: true };
     }
-    await q(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE id = $1`, [row.id]);
+    await tx(async (c) => {
+      await q(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE id = $1`, [row.id], c);
+      await recordHistory([row.id], c);
+    });
     await audit(req, 'listing.withdrawn', `listing:${ref}`);
     return { withdrawn: true };
   });

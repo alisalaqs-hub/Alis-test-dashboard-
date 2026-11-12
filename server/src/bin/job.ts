@@ -1,6 +1,6 @@
 /**
  * npm run job -- alerts | cleanup | hourly
- *   alerts   email saved-search matches
+ *   alerts   email saved-search matches (digests, and whatever the instant alerts didn't get to)
  *   cleanup  remove expired sessions/links and analytics older than 13 months
  *   hourly   alerts every run, plus cleanup in the 03:00 UTC run (one scheduled job does both)
  */

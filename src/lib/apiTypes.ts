@@ -4,11 +4,18 @@
  */
 import type { SavedSearchFilters } from './ai/search';
 import type { EpcBand, EvidenceRange, FloodResult, HpiSummary, SoldSale, SoldStats } from '../engine/evidence';
+import type { ListingHistory } from '../engine/history';
 
 export type ListingStatus = 'draft' | 'pending' | 'live' | 'under_offer' | 'sold' | 'let' | 'withdrawn' | 'rejected';
 export type SourceKindDTO = 'owner' | 'landlord' | 'agent-feed' | 'agent';
 
 export interface PhotoDTO { id: string; url: string; alt: string | null }
+
+/**
+ * A listing's public history: when it was first listed, how long it has been on the market and every
+ * change to the asking price. Prices and dates only, the same for every viewer and every kind of lister.
+ */
+export type ListingHistoryDTO = ListingHistory;
 
 export interface ListingDTO {
   ref: string;
@@ -46,6 +53,8 @@ export interface ListingDTO {
   createdAt: string;
   publishedAt: string | null;
   updatedAt: string;
+  /** Null until the listing has been on the market (absent on older servers). */
+  history?: ListingHistoryDTO | null;
   /** True when the signed-in person listed it (or belongs to the listing agency). */
   mine: boolean;
 }

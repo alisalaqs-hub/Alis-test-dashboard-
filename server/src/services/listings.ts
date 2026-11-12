@@ -3,7 +3,7 @@
  * database row ⇄ API shape, privacy redaction, compliance checks and geocoding.
  */
 import { z } from 'zod';
-import type { CheckDTO, ListingDTO, ListingStatus, PhotoDTO } from '../../../src/lib/apiTypes';
+import type { CheckDTO, ListingDTO, ListingHistoryDTO, ListingStatus, PhotoDTO } from '../../../src/lib/apiTypes';
 import { complianceChecks, locate, normalisePostcode, placeFieldProblem, POSTCODE_RE, streetOnly, type ListingInput } from '../../../src/engine/listings';
 import type { PropertyType } from '../../../src/engine/refurb';
 import { q, type Q } from '../db';
@@ -64,7 +64,8 @@ export const LISTING_SELECT = `SELECT l.*, o.name AS organisation_name, o.verifi
 /** Hide the house number for private sellers, e.g. "Flat 2, 14 Elm Road" → "Elm Road" (shared with the website's preview). */
 export { streetOnly };
 
-export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: string | null; orgIds?: string[]; admin?: boolean }): ListingDTO {
+/** history: the listing's public history from historyFor (services/history), when the caller loaded it. */
+export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: string | null; orgIds?: string[]; admin?: boolean }, history?: ListingHistoryDTO | null): ListingDTO {
   const mine = !!(viewer.userId && r.owner_user_id === viewer.userId) || !!(r.organisation_id && viewer.orgIds?.includes(r.organisation_id));
   const full = mine || !!viewer.admin || r.source_kind === 'agent-feed' || r.source_kind === 'agent';
   const name = r.organisation_name ? r.organisation_name : r.source_kind === 'landlord' ? 'Private landlord' : 'Private seller';
@@ -81,6 +82,7 @@ export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: stri
     ownershipVerified: r.ownership_verified,
     rejectionReason: mine || viewer.admin ? r.rejection_reason : undefined,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(), publishedAt: r.published_at?.toISOString() ?? null,
+    history: history ?? null,
     mine,
   };
 }

@@ -26,7 +26,9 @@ export function dtoToProperty(d: ListingDTO): Property {
   });
   if (!d.epc) p.documents = ['EPC (not yet provided)'];
   p.createdAt = d.publishedAt ?? d.createdAt;
-  p.daysOnMarket = d.publishedAt ? Math.max(0, Math.floor((Date.now() - Date.parse(d.publishedAt)) / 86_400_000)) : 0;
+  // The server's record of the listing (days actually on the market, price changes) when it has one.
+  if (d.history) p.history = d.history;
+  p.daysOnMarket = d.history ? d.history.daysOnMarket : d.publishedAt ? Math.max(0, Math.floor((Date.now() - Date.parse(d.publishedAt)) / 86_400_000)) : 0;
   return p;
 }
 

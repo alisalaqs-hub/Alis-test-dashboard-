@@ -1,0 +1,8 @@
+/* Listing history on real listings: time on the market and each change to the asking price. */
+
+.lh-list { list-style: none; margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid var(--line); display: grid; gap: 8px; font-size: 14.5px; line-height: 1.45; }
+.lh-list li { position: relative; padding-left: 18px; overflow-wrap: anywhere; }
+.lh-list li::before { content: ''; position: absolute; left: 2px; top: 0.5em; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.lh-date, .lh-to { white-space: nowrap; }
+.lh-to { color: var(--muted); }
+.lh-note { margin: 12px 0 0; line-height: 1.5; }
