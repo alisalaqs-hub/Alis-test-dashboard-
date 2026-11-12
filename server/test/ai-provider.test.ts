@@ -86,13 +86,14 @@ describe('AI on another provider', () => {
     const p = otherProvider(() => answer('Hello'));
     try {
       expect([aiCan('main'), aiCan('fast'), aiCan('vision'), aiCan('image'), aiCan('embedding'), aiCan('moderation')]).toEqual([true, true, false, false, false, false]);
+      // Each call starts only when it is awaited: started together, a later one could fail before anything was listening for it.
       for (const attempt of [
-        moderate({ text: 'a lovely terrace' }, { purpose: 'trust.moderation' }),
-        embed(['three bed house'], { purpose: 'search.rank' }),
-        editImage(TINY_PNG, 'image/png', 'make it modern', { purpose: 'studio.room_image' }),
-        chatText(ASK, { purpose: 'design.describe_photo', role: 'vision' }),
+        () => moderate({ text: 'a lovely terrace' }, { purpose: 'trust.moderation' }),
+        () => embed(['three bed house'], { purpose: 'search.rank' }),
+        () => editImage(TINY_PNG, 'image/png', 'make it modern', { purpose: 'studio.room_image' }),
+        () => chatText(ASK, { purpose: 'design.describe_photo', role: 'vision' }),
       ]) {
-        const e = await failure(attempt);
+        const e = await failure(attempt());
         expect(e).toBeInstanceOf(AiError);
         expect(e.code).toBe('ai_unsupported');
         expect(e.status).toBe(503);
