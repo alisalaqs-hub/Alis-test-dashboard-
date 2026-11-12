@@ -13,7 +13,7 @@ import { slugPlace } from '../../../src/engine/places';
 import { config } from '../config';
 import { q } from '../db';
 
-const PAGES = ['/', '/prices', '/list', '/import', '/my-home', '/estimate', '/studio', '/invest', '/sources', '/data-sources', '/privacy', '/terms', '/accessibility'];
+const PAGES = ['/', '/prices', '/list', '/floor-plan', '/import', '/my-home', '/estimate', '/studio', '/invest', '/sources', '/data-sources', '/privacy', '/terms', '/accessibility'];
 /** Sold prices come from HM Land Registry, which covers England and Wales. */
 const PLACES = ['London', 'Birmingham', 'Manchester', 'Leeds', 'Liverpool', 'Sheffield', 'Bristol', 'Newcastle upon Tyne', 'Nottingham', 'Leicester', 'Coventry', 'Bradford', 'Cardiff',
   'Stoke-on-Trent', 'Wolverhampton', 'Plymouth', 'Derby', 'Southampton', 'Swansea', 'Portsmouth', 'Brighton', 'Reading', 'Hull', 'Milton Keynes', 'Northampton', 'Luton', 'Norwich', 'Oxford',

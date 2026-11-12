@@ -7,7 +7,7 @@ const path = require('path');
 const AXE = path.resolve('node_modules/axe-core/axe.min.js');
 const BASE = (process.env.A11Y_BASE || 'http://localhost:4173').replace(/\/$/, '');
 const SIGNED_IN = ['account', 'account/listings', 'account/inbox', 'account/searches', 'account/designs', 'account/privacy', 'account/agency', 'admin'];
-const routes = [...(process.env.A11Y_EMAIL ? SIGNED_IN : ['account', 'admin']), '', 'search?q=Croydon', 'property/wal-001', 'property/wal-001/intelligence', 'my-home', 'prices?q=Croydon', 'list', 'import', 'sources', 'studio', 'estimate', 'invest', 'owner', 'agents', 'landlord', 'developer', 'marketplace', 'automation', 'enterprise', 'compare', 'saved', 'privacy', 'terms', 'accessibility', 'list', 'import', 'sources'];
+const routes = [...(process.env.A11Y_EMAIL ? SIGNED_IN : ['account', 'admin']), '', 'search?q=Croydon', 'property/wal-001', 'property/wal-001/intelligence', 'my-home', 'prices?q=Croydon', 'list', 'floor-plan', 'import', 'sources', 'studio', 'estimate', 'invest', 'owner', 'agents', 'landlord', 'developer', 'marketplace', 'automation', 'enterprise', 'compare', 'saved', 'privacy', 'terms', 'accessibility', 'list', 'floor-plan', 'import', 'sources'];
 (async () => {
   const b = await chromium.launch();
   const summary = {};
