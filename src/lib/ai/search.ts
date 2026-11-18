@@ -327,9 +327,12 @@ export function fromRules(text: string, mode?: SearchMode | null): IntentResult 
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** The must-haves a listing's own text mentions ("balcony" also matches "balconies"). Never a guess. */
-export function mustHavesIn(p: Pick<Property, 'features' | 'description' | 'title'>, mustHaves: string[]): string[] {
-  const text = `${p.features.join(' ')} ${p.description ?? ''} ${p.title}`.toLowerCase();
+/**
+ * The must-haves a listing mentions ("balcony" also matches "balconies"): in its own words, or in what
+ * Streetkey AI saw in its photos. Never a guess.
+ */
+export function mustHavesIn(p: Pick<Property, 'features' | 'description' | 'title' | 'photoFeatures'>, mustHaves: string[]): string[] {
+  const text = `${p.features.join(' ')} ${p.description ?? ''} ${p.title} ${(p.photoFeatures ?? []).join(' ')}`.toLowerCase();
   return mustHaves.map((m) => m.toLowerCase()).filter((m) => {
     if (!m) return false;
     const forms = [escapeRe(m), ...(m.endsWith('y') ? [`${escapeRe(m.slice(0, -1))}ies`] : [])];
@@ -349,7 +352,11 @@ export function applyExtras(hits: SearchHit[], extras: SearchExtras): SearchHit[
   return kept
     .map((h, i) => {
       const found = mustHavesIn(h.property, musts);
-      return { h: found.length ? { ...h, reasons: [`Mentions ${found.join(', ')}`, ...h.reasons] } : h, n: found.length, i };
+      // Said in the listing's words, or only seen in its photos: the card says which.
+      const said = mustHavesIn({ ...h.property, photoFeatures: undefined }, musts);
+      const seen = found.filter((m) => !said.includes(m));
+      const why = [...(said.length ? [`Mentions ${said.join(', ')}`] : []), ...(seen.length ? [`Seen in the photos: ${seen.join(', ')}`] : [])];
+      return { h: found.length ? { ...h, reasons: [...why, ...h.reasons] } : h, n: found.length, i };
     })
     .sort((a, b) => b.n - a.n || a.i - b.i)
     .map((x) => x.h);

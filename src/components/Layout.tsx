@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
-import { StreetkeyBow, StreetkeyWordmark } from './Brand';
+import { StreetkeyWordmark } from './Brand';
 import { Icon } from './Icons';
 import { AskLauncher, AskSheet } from './ai/AskChat';
 import { useStore } from '../store';
@@ -8,9 +8,25 @@ import { applyMeta, metaFor } from '../lib/meta';
 import { useAi } from '../lib/ai/core';
 import { useServer } from '../lib/server';
 
-const PRIMARY = [
-  ['/search', 'Search'], ['/list', 'List a property'], ['/prices', 'Sold prices'], ['/studio', 'Design'], ['/estimate', 'Costs'], ['/invest', 'Invest'], ['/my-home', 'My Home'],
-] as const;
+/** The header: what people come to a property site to do. Everything else is in the menu. */
+const BUY = '/search?q=homes%20for%20sale&mode=buy';
+const RENT = '/search?q=homes%20to%20rent&mode=rent';
+const PRIMARY = [[BUY, 'Buy', 'buy'], [RENT, 'Rent', 'rent'], ['/prices', 'Sold prices', 'sold'], ['/list', 'Sell or let', 'list'], ['/my-home', 'My home', 'mine']] as const;
+/** Which header link the current page belongs to. */
+function section(pathname: string, search: string): string {
+  if (pathname.startsWith('/to-rent') || (pathname === '/search' && /[?&]mode=rent\b|to%20rent|to\+rent/.test(search))) return 'rent';
+  if (pathname === '/search' || pathname.startsWith('/for-sale')) return 'buy';
+  if (pathname.startsWith('/prices') || pathname.startsWith('/sold-prices')) return 'sold';
+  if (pathname.startsWith('/list') || pathname.startsWith('/floor-plan')) return 'list';
+  if (pathname.startsWith('/my-home')) return 'mine';
+  return '';
+}
+const FOOTER: { title: string; links: [to: string, label: string][] }[] = [
+  { title: 'Find a home', links: [[BUY, 'Homes for sale'], [RENT, 'Homes to rent'], ['/prices', 'Sold prices'], ['/saved', 'Saved homes'], ['/compare', 'Compare homes']] },
+  { title: 'Sell or let', links: [['/list', 'List your property'], ['/floor-plan', 'Floor plan maker'], ['/my-home', 'What is my home worth?'], ['/account/listings', 'My listings']] },
+  { title: 'Tools', links: [['/import', 'Check any listing'], ['/estimate', 'Renovation costs'], ['/studio', 'Room design'], ['/invest', 'Investment calculator']] },
+  { title: 'For professionals', links: [['/sources', 'Connect your listings'], ['/agents', 'Estate agents'], ['/landlord', 'Landlords'], ['/developer', 'Developers']] },
+];
 const MORE = [
   { title: 'Explore', items: [['/search', 'search', 'Search homes', 'Buy, rent, commercial'], ['/prices', 'pound', 'Sold prices', 'What things really sold for'], ['/import', 'spark', 'Check any listing', 'From any website, privately'], ['/compare', 'chart', 'Compare', 'Side-by-side intelligence'], ['/saved', 'heart', 'Saved', 'Homes, searches & designs']] },
   { title: 'Sell & let', items: [['/list', 'tag', 'List your property', 'Sell or let it yourself'], ['/floor-plan', 'home', 'Floor plan maker', 'Draw a plan from your measurements'],['/account/listings', 'key', 'My listings & inbox', 'Manage listings, reply to buyers'], ['/owner', 'chart', 'Owner dashboard', 'How your listing performs']] },
@@ -19,7 +35,8 @@ const MORE = [
 ] as const;
 
 export default function Layout() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  const here = section(pathname, search);
   const { saved } = useStore();
   const { online, user } = useServer();
   const { available: aiOn } = useAi();
@@ -76,7 +93,7 @@ export default function Layout() {
         <div className="topbar-inner">
           <Link to="/" className="logo" aria-label="Streetkey home" onClick={() => { if (pathname === '/') window.dispatchEvent(new Event('streetkey:turn')); }}><StreetkeyWordmark /></Link>
           <nav className="nav desktop-only" aria-label="Primary">
-            {PRIMARY.map(([to, label]) => <NavLink key={to} to={to} className={({ isActive }) => (isActive ? 'active' : '')}>{label}</NavLink>)}
+            {PRIMARY.map(([to, label, id]) => <Link key={id} to={to} className={here === id ? 'active' : ''} aria-current={here === id ? 'page' : undefined}>{label}</Link>)}
           </nav>
           <div className="row" style={{ gap: 8, marginLeft: 'auto', flexWrap: 'nowrap' }}>
             <Link to="/saved" className="icon-btn desktop-only" aria-label={`Saved (${saved.length})`}><Icon name="heart" />{saved.length > 0 && <span className="dot-badge">{saved.length}</span>}</Link>
@@ -90,10 +107,24 @@ export default function Layout() {
 
       <main id="main" tabIndex={-1} className={isHome ? 'home-main' : undefined}><Outlet /></main>
 
-      <footer className="site"><div>
-        <span className="row" style={{ gap: 10 }}><StreetkeyBow size={22} /> <span><b>Streetkey</b> — See Beyond the Property. {online ? 'Listings marked “Example” are illustrations, not homes for sale. Estimates are a guide, not advice.' : 'Listings shown are examples, not homes for sale. Estimates are a guide, not advice.'}</span></span>
-        <nav aria-label="Legal"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/accessibility">Accessibility</Link><Link to="/data-sources">Data sources</Link><Link to="/sources">Listing feeds</Link></nav>
-      </div></footer>
+      <footer className="site">
+        <div className="foot">
+          <div className="foot-brand">
+            <Link to="/" className="logo" aria-label="Streetkey home"><StreetkeyWordmark /></Link>
+            <p>Homes for sale and to rent, with the full picture: real sold prices, flood risk, energy ratings and the cost of works.</p>
+          </div>
+          {FOOTER.map((g) => (
+            <nav key={g.title} aria-label={g.title} className="foot-col">
+              <h2>{g.title}</h2>
+              <ul>{g.links.map(([to, label]) => <li key={label}><Link to={to}>{label}</Link></li>)}</ul>
+            </nav>
+          ))}
+        </div>
+        <div className="foot-base">
+          <p>© {new Date().getFullYear()} Streetkey. {online ? 'Listings marked “Example” are illustrations, not homes for sale.' : 'Listings shown are examples, not homes for sale.'} Estimates are a guide, not advice. Sold prices from HM Land Registry; flood risk from the Environment Agency.</p>
+          <nav aria-label="Legal"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/accessibility">Accessibility</Link><Link to="/data-sources">Data sources</Link></nav>
+        </div>
+      </footer>
 
       <nav className="tabbar" aria-label="App">
         <NavLink to="/" end className={({ isActive }) => (isActive || pathname.startsWith('/search') || pathname.startsWith('/property') ? 'on' : '')}><Icon name="search" /><span>Search</span></NavLink>

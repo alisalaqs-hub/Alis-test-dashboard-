@@ -4,13 +4,14 @@ import { getProperty, photosFor, type Property } from '../data/properties';
 import { dealScore, refurbInputFor } from '../engine/insights';
 import { estimateRefurb } from '../engine/refurb';
 import { rentalScenario, valuationScenario } from '../engine/valuation';
-import { getConsent, recentEvents, setConsent, track } from '../engine/tracking';
+import { getConsent, setConsent, track } from '../engine/tracking';
 import { propertySkills } from '../ai/skills';
 import { onMarketLine } from '../engine/history';
 import { AssistantPanel } from '../components/Assistant';
 import { SimilarHomes } from '../components/ai/SimilarHomes';
 import { PriceHistory, ReducedTag } from '../components/ListingHistory';
-import { gbp, gbpK, HouseArt, Section, Stat, streetName, Tag } from '../components/ui';
+import { gbp, gbpK, HouseArt, sceneFor, Section, Stat, streetName, Tag } from '../components/ui';
+import { Icon } from '../components/Icons';
 import { useStore } from '../store';
 import { api, ApiError } from '../lib/api';
 import { isServerRef } from '../lib/listingAdapter';
@@ -158,7 +159,6 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
   const [planOpen, setPlanOpen] = useState(false);
   const closePlan = useCallback(() => setPlanOpen(false), []);
   const [consent, setC] = useState(getConsent());
-  const [events, setEvents] = useState(recentEvents());
   const [slot, setSlot] = useState('');
   const [msg, setMsg] = useState('');
   const [sent, setSent] = useState(false);
@@ -172,7 +172,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
   const history = isServerRef(p.id) ? p.history : undefined;
   const offMarket = p.status === 'withdrawn'; // sold, let or withdrawn
   const priceLabel = rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price';
-  useEffect(() => { track('listing_view', p.id); const h = () => setEvents(recentEvents()); window.addEventListener('streetkey-track', h); h(); return () => window.removeEventListener('streetkey-track', h); }, [p.id, consent]);
+  useEffect(() => { track('listing_view', p.id); }, [p.id, consent]);
   const slots = useMemo(() => nextSlots(), []);
   const myViewing = viewings.find((v) => v.propertyId === p.id);
 
@@ -182,7 +182,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
       <div className="gallery">
         {photos.slice(0, 5).map((ph, i) => (
           <button key={ph.id} onClick={() => { setLightbox(i); track('photo_enlarge', p.id, { photo: ph.label }); }} aria-label={`Enlarge ${ph.label}`}>
-            {p.photos?.[i] ? <img src={p.photos[i]} alt={ph.label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <HouseArt hue={(p.photoHue + i * 23) % 360} type={i === 0 ? p.type : i % 2 ? 'flat' : p.type} seed={i} after={i > 0 && i % 2 === 0} />}
+            {p.photos?.[i] ? <img src={p.photos[i]} alt={ph.label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <HouseArt hue={p.photoHue} type={p.type} scene={sceneFor(ph.label)} />}
             <span className="cap">{ph.label}</span>
           </button>
         ))}
@@ -191,7 +191,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
       {lightbox != null && (
         <div className="lightbox" onClick={() => setLightbox(null)} role="dialog" aria-label="Photo viewer">
           <div onClick={(e) => e.stopPropagation()}>
-            <div style={{ borderRadius: 16, overflow: 'hidden', aspectRatio: '16/10' }}>{p.photos?.[lightbox] ? <img src={p.photos[lightbox]} alt={photos[lightbox].label} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} /> : <HouseArt hue={(p.photoHue + lightbox * 23) % 360} type={p.type} seed={lightbox} />}</div>
+            <div style={{ borderRadius: 16, overflow: 'hidden', aspectRatio: '16/10' }}>{p.photos?.[lightbox] ? <img src={p.photos[lightbox]} alt={photos[lightbox].label} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} /> : <HouseArt hue={p.photoHue} type={p.type} scene={sceneFor(photos[lightbox].label)} />}</div>
             <div className="row between" style={{ color: '#fff', marginTop: 10 }}>
               <button className="btn ghost sm" style={{ color: '#fff' }} onClick={() => setLightbox((lightbox + photos.length - 1) % photos.length)}>← Prev</button>
               <span>{photos[lightbox].label} · {lightbox + 1}/{photos.length}</span>
@@ -223,7 +223,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           </div>
 
           <div className="grid g4 keep2">
-            {[['Bedrooms', p.beds || '—'], ['Bathrooms', p.baths], ['Floor area', `${p.floorArea}m²`], ['EPC', `${p.epc.current} (${p.epc.score})`]].map(([a, b]) => <div key={a as string} className="card flat" style={{ padding: 12 }}><div className="xs muted">{a}</div><div className="num">{b}</div></div>)}
+            {([['bed', 'Bedrooms', p.beds || '—'], ['bath', 'Bathrooms', p.baths], ['area', 'Floor area', `${p.floorArea} m²`], ['bolt', 'Energy rating', `${p.epc.current} (${p.epc.score})`]] as const).map(([ic, a, b]) => <div key={a} className="fact-tile"><span className="trust-ic"><Icon name={ic} size={20} /></span><span><span className="xs muted">{a}</span><span className="num">{b}</span></span></div>)}
           </div>
 
           {!rental && <section className="card ai-card">
@@ -241,6 +241,13 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           <Section title="About this property">
             {p.description && <p style={{ marginBottom: 10 }}>{p.description}</p>}
             <ul className="ticks">{p.features.map((f) => <li key={f}>{f}</li>)}</ul>
+            {p.photoFeatures?.length ? (
+              <div className="seen-in">
+                <span className="seen-in-h"><Icon name="spark" size={15} stroke={2.2} /> Seen in the photos</span>
+                <ul className="chips">{p.photoFeatures.map((f) => <li key={f} className="chip static">{f}</li>)}</ul>
+                <p className="xs muted">Spotted by Streetkey AI in this listing’s photos, so check them yourself before relying on them.</p>
+              </div>
+            ) : null}
             {p.commute.minutes > 0 && p.station.walkMins > 0 && <p className="small muted" style={{ marginTop: 10 }}>{p.commute.minutes} minutes to {p.commute.to} ({p.commute.mode}); {p.station.name} is a {p.station.walkMins}-minute walk.</p>}
           </Section>
 
@@ -267,39 +274,38 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           <OfficialListingPanel official={official} price={p.price} rental={rental} where={p.postcode || p.district} />
 
           <Section title="Documents">
-            <ul className="clean">{(p.documents ?? ['EPC', 'Floor plan']).map((d) => <li key={d} className="row between"><span className="small">📄 {d}</span>{/requested/.test(d) ? <Tag kind="neutral">Requested</Tag> : <button className="btn ghost sm" onClick={() => { track('document_open', p.id, { doc: d }); if (d === 'Floor plan' && p.floorPlan) setPlanOpen(true); }}>View</button>}</li>)}</ul>
+            <ul className="clean">{(p.documents ?? ['EPC', 'Floor plan']).map((d) => <li key={d} className="row between"><span className="small">{d}</span>{/requested/.test(d) ? <Tag kind="neutral">Requested</Tag> : <button className="btn ghost sm" onClick={() => { track('document_open', p.id, { doc: d }); if (d === 'Floor plan' && p.floorPlan) setPlanOpen(true); }}>View</button>}</li>)}</ul>
             <p className="xs muted" style={{ marginTop: 8 }}>Documents are provided by the seller or their agent. Example listings have no files to open.</p>
           </Section>
 
           <AssistantPanel title="Ask about this property" kicker="Property AI" skills={propertySkills} ctx={p} onAnswer={(skill) => track('ai_question', p.id, { topic: skill })} />
 
           <SimilarHomes property={p} />
+
+          <div className="privacy-bar">
+            <p className="small"><b>Your privacy.</b> With your consent, Streetkey records anonymous activity on listings (such as a photo being enlarged) to show owners totals only. Groups under 10 people are never shown.</p>
+            <div className="row" style={{ flexWrap: 'nowrap' }}>
+              <button className={`save-btn${consent === 'granted' ? ' on' : ''}`} aria-pressed={consent === 'granted'} onClick={() => { setConsent('granted'); setC('granted'); }}>Allow</button>
+              <button className={`save-btn${consent === 'denied' ? ' on' : ''}`} aria-pressed={consent === 'denied'} onClick={() => { setConsent('denied'); setC('denied'); }}>Essential only</button>
+            </div>
+          </div>
         </div>
 
         <div className="stack sticky" style={{ gap: 16 }}>
           {live ? <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}><EnquiryBox listingRef={p.id} rental={rental} slots={slots} lister={p.agent} /></Section> : <>
           <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}>
-            {myViewing ? <div className="callout ok small">Viewing requested for <b>{myViewing.slot}</b>. The agent confirms in the app. (Demo: nothing is sent.)</div> : <>
+            {myViewing ? <div className="callout ok small" role="status">Viewing requested for <b>{myViewing.slot}</b>. This is an example listing, so nothing has been sent.</div> : <>
               <div className="stack" style={{ gap: 6 }}>{slots.map((s) => <label key={s} className="check"><input type="radio" name="slot" checked={slot === s} onChange={() => setSlot(s)} />{s}</label>)}</div>
               <button className="btn" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }} disabled={!slot} onClick={() => { requestViewing(p.id, slot); track('viewing_request', p.id); }}>Request viewing</button>
             </>}
           </Section>
           <Section title={p.source?.kind === 'owner' || p.source?.kind === 'landlord' ? 'Message the owner' : p.source?.kind === 'external-link' ? 'Contact via the original listing' : 'Contact the agent'}>
-            {sent ? <div className="callout ok small">Message queued. (Demo: no message is sent; production routes via the agent’s CRM.)</div> : <>
+            {sent ? <div className="callout ok small" role="status">This is an example listing, so no message has been sent.</div> : <>
               <textarea className="input" rows={3} placeholder="I'd like to know about…" value={msg} onChange={(e) => setMsg(e.target.value)} />
               <button className="btn ghost" style={{ marginTop: 8 }} disabled={!msg.trim()} onClick={() => { setSent(true); track('enquiry', p.id); }}>Send enquiry</button>
             </>}
           </Section>
           </>}
-          <Section title="Your privacy" kicker="What Streetkey records">
-            <p className="small">With your consent, Streetkey records anonymous interactions (e.g. photo enlarged, floor plan opened) to give owners <b>aggregated</b> insights. Groups under 10 people are never shown.</p>
-            <div className="row" style={{ marginTop: 8 }}>
-              <button className={`save-btn${consent === 'granted' ? ' on' : ''}`} onClick={() => { setConsent('granted'); setC('granted'); }}>Allow analytics</button>
-              <button className={`save-btn${consent === 'denied' ? ' on' : ''}`} onClick={() => { setConsent('denied'); setC('denied'); setEvents([]); }}>Essential only</button>
-            </div>
-            <div className="xs muted" style={{ marginTop: 8 }}>{consent === 'granted' ? `${events.length} event(s) this session:` : 'No interaction events are being recorded.'}</div>
-            {consent === 'granted' && <ul className="clean xs mono" style={{ marginTop: 6, maxHeight: 140, overflow: 'auto' }}>{events.slice(0, 8).map((e, i) => <li key={i}>{e.at.slice(11, 19)} {e.name}{e.props ? ` ${JSON.stringify(e.props)}` : ''}</li>)}</ul>}
-          </Section>
         </div>
       </div>
     </div>

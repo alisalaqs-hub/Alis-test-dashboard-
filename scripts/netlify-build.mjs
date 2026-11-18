@@ -7,6 +7,9 @@ run('node scripts/gen-migrations.mjs');
 run('npm run build');
 run('node scripts/spa-redirects.mjs'); // page addresses → the site (see the script)
 run('node scripts/robots.mjs');        // robots.txt as a plain file
+// Apps that show a preview of a shared link need the picture's full address, which is only known here.
+const site = (process.env.PUBLIC_URL || process.env.URL || '').replace(/\/$/, '');
+if (site) fs.writeFileSync('dist/index.html', fs.readFileSync('dist/index.html', 'utf8').replace('content="/share.png"', `content="${site}/share.png"`));
 // An address that isn't a page gets the site's own "Page not found" (Netlify serves 404.html with a 404 status).
 fs.copyFileSync('dist/index.html', 'dist/404.html');
 const db = process.env.DATABASE_URL || process.env.NETLIFY_DB_URL || process.env.NETLIFY_DATABASE_URL;

@@ -7,6 +7,7 @@ import { ServerProvider } from './lib/server';
 import { PORTABLE } from './lib/meta';
 import '@fontsource-variable/plus-jakarta-sans/wght.css';
 import './styles.css';
+import './styles/site.css';
 
 // Addresses used to look like /#/property/abc. Links people saved or were emailed still work:
 // they are turned into the clean address before the page starts.

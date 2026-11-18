@@ -9,7 +9,11 @@ import type { ListingHistory } from '../engine/history';
 export type ListingStatus = 'draft' | 'pending' | 'live' | 'under_offer' | 'sold' | 'let' | 'withdrawn' | 'rejected';
 export type SourceKindDTO = 'owner' | 'landlord' | 'agent-feed' | 'agent';
 
-export interface PhotoDTO { id: string; url: string; alt: string | null }
+export interface PhotoDTO {
+  id: string; url: string; alt: string | null;
+  /** What Streetkey AI saw in this photo ("period fireplace", "bay window"), when the lister had their photos checked. */
+  features?: string[];
+}
 
 /**
  * A listing's public history: when it was first listed, how long it has been on the market and every

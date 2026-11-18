@@ -56,6 +56,8 @@ export interface Property {
   /** private = only visible to the user who added it (e.g. a listing analysed from another website). */
   visibility?: 'public' | 'private';
   photos?: string[];          // data URLs (prototype) / CDN URLs (production)
+  /** What Streetkey AI saw in the listing's photos ("period fireplace", "bay window"). Shown as AI's reading, and searchable. */
+  photoFeatures?: string[];
   /** The listing's own floor plan (a picture) and what it shows in words, when the lister added one. */
   floorPlan?: { url: string; alt: string };
   description?: string;

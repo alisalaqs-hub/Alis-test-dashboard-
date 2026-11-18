@@ -13,8 +13,6 @@ export const MODES: { id: Mode; label: string; placeholder: string }[] = [
   { id: 'buy', label: 'Buy', placeholder: 'Place or describe it' },
   { id: 'rent', label: 'Rent', placeholder: 'Where do you want to rent?' },
   { id: 'sold', label: 'Sold prices', placeholder: 'Town or postcode' },
-  { id: 'commercial', label: 'Commercial', placeholder: 'Area or type of space' },
-  { id: 'invest', label: 'Invest', placeholder: 'Area, budget or strategy' },
 ];
 
 /** Example prompts shown when AI search is available and there's nothing typed or recent. */
@@ -134,8 +132,8 @@ export function SmartSearch({ autoFocus, onDone, compact, inlineList }: { autoFo
       </form>
       {inlineList && suggestions}
       {ai.available
-        ? <p className="smart-hint aisr-hint" id={hintId}><AiLabel>AI search</AiLabel><span>Describe it in your own words, e.g. “3 bed with a garden under £450k near a station”, and Streetkey AI turns it into filters.</span></p>
-        : <p className="smart-hint" id={hintId}>Type a place — or just describe what you want, e.g. “3 bed with a garden under £450k near a station”.</p>}
+        ? <p className="smart-hint aisr-hint" id={hintId}><AiLabel>AI search</AiLabel><span>Type a place, or describe the home you want in your own words.</span></p>
+        : <p className="smart-hint" id={hintId}>Type a place or postcode, or describe the home you want.</p>}
       {!compact && <div className="quick-chips">
         {(mode === 'rent' ? ['1 bed', '2 bed', 'Pets', 'Under £1,500 pcm', 'Near a station'] : mode === 'invest' ? ['7% yield', 'HMO', 'BRRR', 'Needs work', 'Auction'] : mode === 'commercial' ? ['Office', 'Class MA conversion', 'Retail', 'Near London'] : ['Under £350k', '3+ beds', 'Garden', 'Needs work', 'Loft potential', 'Near a station']).map((c) => (
           <button key={c} type="button" className="chip" onClick={() => { const n = text ? `${text} ${c.toLowerCase()}` : c; setText(n); ref.current?.focus(); setOpen(true); }}>+ {c}</button>

@@ -260,34 +260,8 @@ export function Stacked({ parts }: { parts: { label: string; value: number; colo
   );
 }
 
-/** Generated facade illustration — the demo has no licensed listing photography. */
-export function HouseArt({ hue, type, seed = 1, after = false }: { hue: number; type: string; seed?: number; after?: boolean }) {
-  const brick = after ? `hsl(${hue} 18% 86%)` : `hsl(${hue} 42% ${type === 'flat' ? 62 : 48}%)`;
-  const sky = after ? 'hsl(205 60% 86%)' : `hsl(${(hue + 190) % 360} 30% 82%)`;
-  const door = after ? '#1f3b33' : `hsl(${(hue + seed * 70) % 360} 45% 35%)`;
-  const frame = after ? '#1b1f24' : '#f5f2ea';
-  const flat = type === 'flat';
-  const det = type === 'detached' || type === 'bungalow';
-  return (
-    <svg viewBox="0 0 320 240" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Illustrative facade (not a photograph)">
-      <rect width="320" height="240" fill={sky} />
-      <circle cx={260} cy={46} r={18} fill="#fff" opacity={0.5} />
-      {!flat && <polygon points={det ? '40,92 160,30 280,92' : '0,92 60,40 260,40 320,92'} fill={after ? '#3b4249' : `hsl(${hue} 15% 30%)`} />}
-      {!flat && <rect x={det ? 210 : 230} y={det ? 40 : 22} width={18} height={30} fill={after ? '#3b4249' : `hsl(${hue} 20% 34%)`} />}
-      <rect x={det ? 40 : 0} y={flat ? 20 : 92} width={det ? 240 : 320} height={flat ? 220 : 148} fill={brick} />
-      {flat && Array.from({ length: 3 }).map((_, r) => Array.from({ length: 4 }).map((__, c) => <rect key={`${r}${c}`} x={28 + c * 72} y={40 + r * 62} width={44} height={40} fill="#cfd8de" stroke={frame} strokeWidth={4} />))}
-      {!flat && <>
-        <rect x={det ? 70 : 34} y={108} width={58} height={44} fill={after ? '#bfd3dc' : '#c7cfd4'} stroke={frame} strokeWidth={5} />
-        <rect x={det ? 192 : 196} y={108} width={58} height={44} fill={after ? '#bfd3dc' : '#c7cfd4'} stroke={frame} strokeWidth={5} />
-        <path d={`M${det ? 70 : 24} 240 v-62 h${det ? 70 : 92} v62`} fill={after ? '#dfe7ea' : '#c4ccd1'} stroke={frame} strokeWidth={5} />
-        <rect x={det ? 150 : 130} y={170} width={36} height={70} fill={door} />
-        <circle cx={det ? 178 : 158} cy={206} r={2.5} fill="#e7c76b" />
-        <rect x={det ? 148 : 128} y={164} width={40} height={6} fill={frame} />
-      </>}
-      {after && <rect x={0} y={232} width={320} height={8} fill="#5d7a5a" />}
-    </svg>
-  );
-}
+/** The picture for a home with no photograph: see ./art/HomeArt. */
+export { HouseArt, sceneFor, type Scene } from './art/HomeArt';
 
 /* ---------- Schematic UK map (no tile provider needed) ---------- */
 const GB: [number, number][] = [[-3.03,58.64],[-3.1,58.44],[-3.65,58.12],[-4.2,57.48],[-3.28,57.72],[-2.0,57.69],[-2.1,57.15],[-2.47,56.7],[-2.6,56.28],[-3.1,55.98],[-2.5,56.0],[-2.0,55.77],[-1.6,55.3],[-1.4,55.0],[-1.2,54.7],[-0.6,54.48],[-0.08,54.12],[0.12,53.58],[0.34,53.14],[0.3,52.9],[1.3,52.93],[1.75,52.48],[1.35,51.96],[0.95,51.6],[0.7,51.53],[1.4,51.38],[1.33,51.12],[0.6,50.85],[-0.14,50.82],[-1.1,50.78],[-2.45,50.6],[-3.4,50.6],[-3.64,50.22],[-5.2,49.96],[-5.7,50.07],[-5.08,50.42],[-4.5,51.0],[-3.47,51.2],[-2.7,51.5],[-3.17,51.45],[-3.94,51.6],[-5.3,51.88],[-4.66,52.1],[-4.08,52.41],[-4.6,52.85],[-4.5,53.4],[-3.83,53.33],[-3.05,53.42],[-3.05,53.82],[-2.9,54.07],[-3.25,54.1],[-3.6,54.5],[-3.2,54.95],[-4.1,54.8],[-4.86,54.64],[-4.65,55.46],[-4.9,55.95],[-5.8,55.3],[-5.47,56.4],[-5.83,57.0],[-5.7,57.5],[-5.16,57.9],[-5.0,58.62],[-3.53,58.6]];

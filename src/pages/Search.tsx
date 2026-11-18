@@ -2,11 +2,11 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useMatch, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import { slugPlace, unslugPlace, usePageMeta } from '../lib/meta';
 import { describeQuery, runSearch, type SearchHit, type SearchQuery } from '../engine/search';
-import { gbp, gbpK, HouseArt, Seg, streetName, Tag, UKMap } from '../components/ui';
+import { gbp, gbpK, HouseArt, Seg, streetName, UKMap } from '../components/ui';
+import { homeKind } from '../components/PropertyCard';
 import { useStore } from '../store';
 import { pointInPolygon, type LngLat } from '../engine/geo';
 import { latestPriceMove } from '../engine/history';
-import type { Property } from '../data/properties';
 import { ApiError } from '../lib/api';
 import { aiPost, useAi } from '../lib/ai/core';
 import {
@@ -17,18 +17,12 @@ import { AiErrorNote, AiLabel, AiThinking, AiUnavailable } from '../components/a
 import { Icon } from '../components/Icons';
 import '../components/ai/search.css';
 
-function sourceLabel(p: Property) {
-  if (!p.source) return { text: 'Example listing', tone: 'demo' as const };
-  if (p.source.kind === 'agent-feed') return { text: p.source.name.replace(' (agent feed)', ''), tone: 'ok' as const };
-  return { text: p.source.name, tone: 'neutral' as const };
-}
-
 /** Streetkey's own summary of the results, written in code from the engine's figures (never by AI). */
 function narrate(q: SearchQuery, hits: SearchHit[]): string[] {
   const out: string[] = [];
-  if (!hits.length) return ['Nothing in the current dataset meets the hard constraints (type, budget, beds, location/commute). Try widening the budget, commute or area.'];
+  if (!hits.length) return ['No homes match this search yet. Try a wider area, a higher budget or fewer bedrooms.'];
   const best = hits[0];
-  out.push(`${hits.length} propert${hits.length === 1 ? 'y meets' : 'ies meet'} your hard constraints, ranked by fit and underwritten potential (refurb cost from the Streetkey engine, value from comparables, risk and demand).`);
+  out.push(`${hits.length} home${hits.length === 1 ? ' matches' : 's match'} your search. They are in order of how well they fit what you asked for, then Streetkey’s view of the price, the cost of works and the risks.`);
   if (q.minRefurbProfit) {
     const meeting = hits.filter((h) => h.estProfit >= q.minRefurbProfit!);
     if (meeting.length) out.push(`${meeting.length} clear your £${Math.round(q.minRefurbProfit / 1000)}k profit target on base-case assumptions.`);
@@ -59,7 +53,7 @@ const orList = (items: string[]) => {
 };
 
 type Channel = 'any' | 'buy' | 'rent' | 'commercial';
-type Sort = 'fit' | 'price' | 'score' | 'ai';
+type Sort = 'fit' | 'price' | 'price-desc' | 'new' | 'ai';
 const CHANNELS: readonly Channel[] = ['any', 'buy', 'rent', 'commercial'];
 const PRICE_OPTIONS = [250_000, 350_000, 500_000, 750_000, 1_000_000, 2_000_000];
 const BED_OPTIONS = [1, 2, 3, 4, 5];
@@ -219,7 +213,8 @@ export default function Search() {
 
   const hits = useMemo(() => {
     if (sort === 'price') return [...fitHits].sort((a, b) => a.property.price - b.property.price);
-    if (sort === 'score') return [...fitHits].sort((a, b) => a.dealGrade.localeCompare(b.dealGrade) || b.score - a.score);
+    if (sort === 'price-desc') return [...fitHits].sort((a, b) => b.property.price - a.property.price);
+    if (sort === 'new') return [...fitHits].sort((a, b) => a.property.daysOnMarket - b.property.daysOnMarket);
     if (rankReady && rank) return blend(fitHits, rank.scores);
     return fitHits;
   }, [fitHits, sort, rankReady, rank]);
@@ -262,34 +257,34 @@ export default function Search() {
   const toggleSave = () => toggleSavedSearch(submitted, modeOfQuery(q), savedFilters(q, state.extras));
 
   const sortValue: Sort = sort === 'ai' && !canRank ? 'fit' : sort;
+  const heading = placeName ? `Homes ${toRent ? 'to rent' : 'for sale'} in ${placeName}` : q.commercial ? 'Commercial property' : q.intent === 'rent' ? 'Homes to rent' : 'Homes for sale';
+  /** Match reasons are written for a results list; a comma reads better than a dash on a card. */
+  const plain = (r: string) => r.replace(/\s+—\s+/g, ', ');
   const extrasShown = state.extras.minPrice != null || state.extras.maxBeds != null || state.extras.mustHaves.length > 0;
   const nearLimit = text.length >= MAX_QUERY_CHARS - 40;
 
   return (
-    <div className="stack" style={{ gap: 20 }}>
-      <div className="page-head desktop-only">
-        <div><div className="eyebrow">{ai.available ? 'AI property search' : 'Property search'}</div><h2 style={{ marginTop: 6 }}>Describe what you want</h2></div>
-      </div>
-      <div className="view-switch chips" role="group" aria-label="Show results as">
-        <button type="button" className="chip" aria-pressed={view === 'list'} onClick={() => setView('list')}>List</button>
-        <button type="button" className="chip" aria-pressed={view === 'map'} onClick={() => setView('map')}>Map</button>
+    <div className="stack srch" style={{ gap: 16 }}>
+      <div className="srch-head">
+        <h2 className="srch-h">{heading}</h2>
+        <div className="view-switch chips" role="group" aria-label="Show results as">
+          <button type="button" className="chip" aria-pressed={view === 'list'} onClick={() => setView('list')}>List</button>
+          <button type="button" className="chip" aria-pressed={view === 'map'} onClick={() => setView('map')}>Map</button>
+        </div>
       </div>
       <div className={`split-r search-cols show-${view}`}>
-        <div className="stack results-col" style={{ gap: 16 }}>
-          <div className="card ai-card search-head">
+        <div className="stack results-col" style={{ gap: 14 }}>
+          <div className="card search-head">
             <form className="smart-box" style={{ boxShadow: 'none' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
               <span className="smart-icon smart-icon-ai" aria-hidden="true"><Icon name="spark" stroke={2.2} /></span>
-              <input ref={inputRef} value={text} maxLength={MAX_QUERY_CHARS} onChange={(e) => setText(e.target.value)} aria-label="Search Streetkey" aria-describedby={nearLimit ? 'search-count' : undefined} enterKeyHint="search" placeholder="Place or describe it" />
+              <input ref={inputRef} value={text} maxLength={MAX_QUERY_CHARS} onChange={(e) => setText(e.target.value)} aria-label="Search Streetkey" aria-describedby={nearLimit ? 'search-count' : undefined} enterKeyHint="search" placeholder="Place, postcode or describe it" />
               <button className="smart-go" type="submit">Search</button>
             </form>
             {nearLimit && <p id="search-count" className="xs muted aisr-count" aria-live="polite">{MAX_QUERY_CHARS - text.length} of {MAX_QUERY_CHARS} characters left</p>}
             {shortened && <p className="xs muted aisr-note" role="note">Only the first {MAX_QUERY_CHARS} characters of this search were used.</p>}
-            <div className="row between" style={{ marginTop: 10, flexWrap: 'nowrap', gap: 8 }}>
-              <b className="small aisr-count-n" ref={countRef} tabIndex={-1} aria-live="polite">{shown.length} result{shown.length === 1 ? '' : 's'}{area ? ' in your area' : ''}</b>
-              <button className={`save-btn${searchSaved ? ' on' : ''}`} onClick={toggleSave}>{searchSaved ? '♥ Saved' : '♡ Save search'}</button>
-            </div>
 
-            {!ai.available && <AiUnavailable reason={ai.reason} feature="Streetkey AI search" />}
+            {/* Only a temporary pause is worth a note: without AI the search still reads the words with Streetkey's own rules. */}
+            {ai.reason === 'paused' && <AiUnavailable reason={ai.reason} feature="Streetkey AI search" />}
             {limitError && (
               <div className="aisr-limit">
                 <AiErrorNote error={limitError} />
@@ -329,75 +324,94 @@ export default function Search() {
               {!understanding && reading.policyNote && <p className="callout info small aisr-policy" role="note">{reading.policyNote}</p>}
             </div>
 
-            {/* Written by Streetkey's code from the engine's results, so it is never labelled as AI. */}
-            <div className="msg sk-summary" style={{ maxWidth: '100%', marginTop: 10 }}>
-              <div className="row" style={{ gap: 6, flexWrap: 'nowrap', alignItems: 'flex-start' }}><Tag kind="neutral">Streetkey summary</Tag><p className="small">{narrative[narrative.length > 2 && /^Honest/.test(narrative[1]) ? 1 : 0]}</p></div>
-              <details className="why"><summary>Why these results?</summary>
-                <div className="stack" style={{ gap: 6, marginTop: 8 }}>{narrative.map((n, i) => <p key={i} className="small">{n}</p>)}</div>
-                {q.unsupported.length > 0 && <div className="callout info small" style={{ marginTop: 10 }}><b>Not yet covered:</b> {q.unsupported.join(' ')}</div>}
-                <div className="parsed" style={{ marginTop: 10 }}>{describeQuery(q).map((d) => <span key={d}>{d}</span>)}</div>
-                <p className="xs muted" style={{ marginTop: 8 }}>{usingAi ? 'Streetkey AI turned your words into these filters; the listings, prices, scores and this summary come from Streetkey’s own data and engines.' : 'Streetkey turned your words into these filters; the listings, prices, scores and this summary come from Streetkey’s own data and engines.'}</p>
-                <button className="btn ghost sm" style={{ marginTop: 10 }} aria-expanded={showJson} onClick={() => setShowJson(!showJson)}>{showJson ? 'Hide' : 'Show'} structured query</button>
-                {showJson && <pre tabIndex={0} className="code" style={{ marginTop: 10 }}>{`${usingAi ? '// Built by Streetkey AI from your words (JSON-schema validated, numbers checked against what you typed).' : '// Built by Streetkey’s rule-based parser.'}\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})${extrasShown ? `\n// Also applied: ${JSON.stringify(state.extras)}` : ''}`}</pre>}
-              </details>
+            <div className="filter-bar">
+              <div className="field"><span id="search-market">Show</span><Seg aria-labelledby="search-market" value={channel} onChange={(v) => update({ market: v === defaultChannel ? null : v })} options={[{ value: 'any', label: 'All' }, { value: 'buy', label: 'Buy' }, { value: 'rent', label: 'Rent' }, ...(channel === 'commercial' || q.commercial ? [{ value: 'commercial' as const, label: 'Commercial' }] : [])]} /></div>
+              <label className="field">Max price<select className="input" value={maxPrice} onChange={(e) => update({ max: e.target.value || null })}><option value="">Any price</option>{PRICE_OPTIONS.map((v) => <option key={v} value={v}>{gbpK(v)}</option>)}</select></label>
+              <label className="field">Bedrooms<select className="input" value={minBeds} onChange={(e) => update({ beds: e.target.value || null })}><option value="">Any</option>{BED_OPTIONS.map((v) => <option key={v} value={v}>{v}+</option>)}</select></label>
+              <label className="field">Listed by<select className="input" value={src} onChange={(e) => setSrc(e.target.value as typeof src)}><option value="all">Everyone</option><option value="agents">Estate agents</option><option value="private">Owners and landlords</option></select></label>
+              <label className="field">Sort by<select className="input" value={sortValue} onChange={(e) => setSort(e.target.value as Sort)}><option value="fit">Best match</option>{canRank && <option value="ai">Best match with AI</option>}<option value="new">Newest</option><option value="price">Lowest price</option><option value="price-desc">Highest price</option></select></label>
             </div>
           </div>
 
-          <details className="card flat filters-wrap" open={typeof window !== 'undefined' && window.innerWidth > 900}><summary className="filters-sum">Filters & sort</summary><div className="filters">
-            <div className="field"><span id="search-market">Market</span><Seg aria-labelledby="search-market" value={channel} onChange={(v) => update({ market: v === defaultChannel ? null : v })} options={[{ value: 'any', label: 'From query' }, { value: 'buy', label: 'Buy' }, { value: 'rent', label: 'Rent' }, { value: 'commercial', label: 'Commercial' }]} /></div>
-            <label className="field">Max price<select className="input" value={maxPrice} onChange={(e) => update({ max: e.target.value || null })}><option value="">From query</option>{PRICE_OPTIONS.map((v) => <option key={v} value={v}>{gbpK(v)}</option>)}</select></label>
-            <label className="field">Min beds<select className="input" value={minBeds} onChange={(e) => update({ beds: e.target.value || null })}><option value="">From query</option>{BED_OPTIONS.map((v) => <option key={v} value={v}>{v}+</option>)}</select></label>
-            <label className="field">Listed by<select className="input" value={src} onChange={(e) => setSrc(e.target.value as typeof src)}><option value="all">Everyone</option><option value="agents">Estate agents</option><option value="private">Private sellers & landlords</option></select></label>
-            <label className="field">Sort<select className="input" value={sortValue} onChange={(e) => setSort(e.target.value as Sort)}><option value="fit">Best match</option>{canRank && <option value="ai">Best match + AI relevance</option>}<option value="score">Deal grade</option><option value="price">Price (low–high)</option></select></label>
-          </div></details>
+          <div className="row between srch-count" style={{ flexWrap: 'nowrap', gap: 8 }}>
+            <b className="aisr-count-n" ref={countRef} tabIndex={-1} aria-live="polite">{shown.length} home{shown.length === 1 ? '' : 's'}{area ? ' in your area' : ''}</b>
+            <button className={`save-btn${searchSaved ? ' on' : ''}`} onClick={toggleSave}><Icon name="bell" size={16} /> {searchSaved ? 'Search saved' : 'Save search and get alerts'}</button>
+          </div>
 
           {sortValue === 'ai' && (rankBusy ? <AiThinking label="Ranking by relevance" />
             : rankReady ? <p className="xs aisr-sortnote"><AiLabel /> Sorted by how closely each listing matches what you’re searching for, blended with Streetkey’s best-match score.</p>
               : rankFailed === rankKey ? <p className="xs aisr-sortnote" role="status">AI relevance isn’t available right now, so these are in Streetkey’s best-match order.</p> : null)}
 
-          <div className="stack aisr-results" style={{ gap: 16 }} aria-busy={understanding || rankBusy || undefined}>
-          {shown.map((h, i) => (
-            <div key={h.property.id} id={`hit-${h.property.id}`} className={`listing${active === h.property.id ? ' hl' : ''}`} onMouseEnter={() => setActive(h.property.id)}>
-              <Link to={`/property/${h.property.id}`} className="ph" tabIndex={-1} aria-hidden="true"><HouseArt hue={h.property.photoHue} type={h.property.type} seed={i} /></Link>
-              <div className="stack" style={{ gap: 6, minWidth: 0 }}>
-                <div className="row between" style={{ alignItems: 'flex-start', flexWrap: 'nowrap' }}>
-                  <Link to={`/property/${h.property.id}`} style={{ minWidth: 0, textDecoration: 'none' }}>
-                    <div className="num" style={{ fontSize: 22 }}>{h.property.listing === 'rent' ? `${gbp(h.property.price)} pcm` : gbp(h.property.price)}{h.property.listing === 'auction' && <span className="xs muted"> guide</span>}</div>
-                    <div style={{ fontWeight: 600 }}>{h.property.title}</div>
-                    <div className="small muted">{streetName(h.property.street)}, {h.property.town} · {h.property.beds ? `${h.property.beds} bed · ` : ''}{h.property.floorArea}m² · EPC {h.property.epc.current}</div>
+          <div className="stack aisr-results" style={{ gap: 14 }} aria-busy={understanding || rankBusy || undefined}>
+            {shown.map((h) => {
+              const p = h.property;
+              const on = saved.includes(p.id);
+              const cmp = compare.includes(p.id);
+              const rental = p.listing === 'rent';
+              return (
+                <article key={p.id} id={`hit-${p.id}`} className={`rcard${active === p.id ? ' hl' : ''}`} onMouseEnter={() => setActive(p.id)}>
+                  <Link to={`/property/${p.id}`} className="rcard-img" tabIndex={-1} aria-hidden="true">
+                    {p.photos?.[0] ? <img src={p.photos[0]} alt="" loading="lazy" /> : <HouseArt hue={p.photoHue} type={p.type} />}
                   </Link>
-                  {h.property.listing !== 'rent' && <div className={`grade grade-${h.dealGrade}`} title="Streetkey deal grade">{h.dealGrade}</div>}
-                </div>
-                <ul className="ticks">{h.reasons.slice(0, 3).map((r) => <li key={r}>{r}</li>)}</ul>
-                {h.cautions.length > 0 && <div className="xs" style={{ color: 'var(--danger)' }}>⚠ {h.cautions.slice(0, 2).join(' · ')}</div>}
-                <div className="row" style={{ gap: 6 }}>
-                  <button className={`save-btn${saved.includes(h.property.id) ? ' on' : ''}`} aria-label={`${saved.includes(h.property.id) ? 'Saved' : 'Save'}: ${h.property.title}`} onClick={() => toggleSaved(h.property.id)}>{saved.includes(h.property.id) ? '♥ Saved' : '♡ Save'}</button>
-                  <button className={`save-btn${compare.includes(h.property.id) ? ' on' : ''}`} aria-label={`${compare.includes(h.property.id) ? 'Comparing' : 'Compare'}: ${h.property.title}`} onClick={() => toggleCompare(h.property.id)}>{compare.includes(h.property.id) ? '✓ Comparing' : '+ Compare'}</button>
-                  <Link className="save-btn" to={`/property/${h.property.id}/intelligence`} style={{ textDecoration: 'none' }} aria-label={`Intelligence: ${h.property.title}`}>Intelligence →</Link>
-                  <Tag kind={sourceLabel(h.property).tone}>{sourceLabel(h.property).text}</Tag>
-                  {/* Real listings: Streetkey's own record of the listing, which the big portals don't show. */}
-                  {h.property.history && h.property.history.daysOnMarket <= 7 && <Tag kind="ok">New</Tag>}
-                  {latestPriceMove(h.property.history) === 'reduced' && <Tag kind="warn">Reduced</Tag>}
-                  {h.property.alsoListedBy?.length ? <span className="xs muted">also listed by {h.property.alsoListedBy.join(', ')}</span> : null}
-                  {h.property.listing !== 'rent' && <Tag kind="est">Indicative value-add {gbpK(h.estProfit)}</Tag>}
-                </div>
+                  <div className="hcard-tags">
+                    {!p.source && <span className="hcard-tag">Example</span>}
+                    {/* Real listings: Streetkey's own record of the listing, which the big portals don't show. */}
+                    {!!p.history && p.history.daysOnMarket <= 7 && <span className="hcard-tag is-new">New</span>}
+                    {latestPriceMove(p.history) === 'reduced' && <span className="hcard-tag is-reduced">Reduced</span>}
+                    {p.listing === 'auction' && <span className="hcard-tag">Auction</span>}
+                  </div>
+                  <div className="rcard-main">
+                    <div className="rcard-top">
+                      <Link to={`/property/${p.id}`} className="rcard-link">
+                        <span className="hcard-price">{gbp(p.price)}{rental ? <small> pcm</small> : p.listing === 'auction' ? <small> guide</small> : null}</span>
+                        <span className="rcard-kind">{homeKind(p)}{rental ? ' to rent' : ''}</span>
+                        <span className="rcard-place">{streetName(p.street)}, {p.town}</span>
+                      </Link>
+                      <button type="button" className={`hcard-heart rcard-heart${on ? ' on' : ''}`} aria-pressed={on} aria-label={`${on ? 'Saved' : 'Save'}: ${p.title}`} onClick={() => toggleSaved(p.id)}><Icon name="heart" size={20} /></button>
+                    </div>
+                    <p className="rcard-blurb">{p.title}</p>
+                    {h.reasons.length > 0 && <ul className="rcard-why">{h.reasons.slice(0, 2).map((r) => <li key={r}><Icon name="check" size={14} stroke={2.4} />{plain(r)}</li>)}</ul>}
+                    <div className="rcard-foot">
+                      <span className="hcard-facts">
+                        {p.beds > 0 && <span><Icon name="bed" size={16} />{p.beds}<span className="sr-only"> bedrooms</span></span>}
+                        {p.baths > 0 && <span><Icon name="bath" size={16} />{p.baths}<span className="sr-only"> bathrooms</span></span>}
+                        {p.floorArea > 0 && <span><Icon name="area" size={16} />{Math.round(p.floorArea)} m²</span>}
+                        {p.epc?.current && <span className="hcard-epc">EPC {p.epc.current}</span>}
+                      </span>
+                      <span className="rcard-by">{p.agent}{p.alsoListedBy?.length ? `, also ${p.alsoListedBy.join(', ')}` : ''}</span>
+                      <button type="button" className={`save-btn sm${cmp ? ' on' : ''}`} aria-pressed={cmp} aria-label={`${cmp ? 'Comparing' : 'Compare'}: ${p.title}`} onClick={() => toggleCompare(p.id)}>{cmp ? 'Comparing' : 'Compare'}</button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+            {shown.length === 0 && !understanding && (
+              <div className="card srch-empty">
+                <h3>No homes match yet</h3>
+                <p className="muted">Try a wider area, a higher budget or fewer bedrooms{area ? ', or clear the area you drew on the map' : ''}. Save this search and Streetkey will email you when a home that fits is listed.</p>
               </div>
-            </div>
-          ))}
+            )}
           </div>
+
+          {/* Written by Streetkey's code from the engine's results, so it is never labelled as AI. */}
+          <details className="why srch-why"><summary>How these results were chosen</summary>
+            <div className="stack" style={{ gap: 6, marginTop: 8 }}>{narrative.map((n, i) => <p key={i} className="small">{n}</p>)}</div>
+            {q.unsupported.length > 0 && <div className="callout info small" style={{ marginTop: 10 }}><b>Not yet covered:</b> {q.unsupported.join(' ')}</div>}
+            <div className="parsed" style={{ marginTop: 10 }}>{describeQuery(q).map((d) => <span key={d}>{d}</span>)}</div>
+            <p className="xs muted" style={{ marginTop: 8 }}>{usingAi ? 'Streetkey AI turned your words into these filters; the listings, prices and this summary come from Streetkey’s own data.' : 'Streetkey turned your words into these filters; the listings, prices and this summary come from Streetkey’s own data.'}</p>
+            <button className="btn ghost sm" style={{ marginTop: 10 }} aria-expanded={showJson} onClick={() => setShowJson(!showJson)}>{showJson ? 'Hide' : 'Show'} the search as data</button>
+            {showJson && <pre tabIndex={0} className="code" style={{ marginTop: 10 }}>{`${usingAi ? '// Built by Streetkey AI from your words (JSON-schema validated, numbers checked against what you typed).' : '// Built by Streetkey’s rule-based parser.'}\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})${extrasShown ? `\n// Also applied: ${JSON.stringify(state.extras)}` : ''}`}</pre>}
+          </details>
         </div>
         <div className="sticky stack map-col">
-          <section className="card">
-            <p className="small" style={{ margin: 0 }}><b>Found one you like elsewhere?</b> Paste it into Streetkey for a price check, renovation cost and investment view.</p>
-            <Link to="/import" className="btn sm" style={{ marginTop: 8 }}>Check any listing →</Link>
-          </section>
           {mapFailed
             ? <div className="map-block">{<UKMap pins={shown.map((h) => ({ id: h.property.id, lat: h.property.lat, lng: h.property.lng, label: h.property.town.split(',')[0], active: active === h.property.id }))} onPin={setActive} />}</div>
             : <Suspense fallback={<div className="map-block"><div className="map-real map-loading" role="status">Loading the map…</div></div>}>
                 <MapSearch homes={shown.map((h) => ({ id: h.property.id, lat: h.property.lat, lng: h.property.lng, label: h.property.title, price: h.property.listing === 'rent' ? `${gbp(h.property.price)} pcm` : gbpK(h.property.price) }))}
                   active={active} onPick={(id) => { setActive(id); setView('list'); requestAnimationFrame(() => document.getElementById(`hit-${id}`)?.scrollIntoView({ block: 'nearest' })); }} area={area} onArea={setArea} onFail={() => setMapFailed(true)} />
               </Suspense>}
-          {compare.length > 0 && <Link to="/compare" className="btn">Compare {compare.length} selected →</Link>}
+          {compare.length > 0 && <Link to="/compare" className="btn">Compare {compare.length} selected <Icon name="arrow" size={16} /></Link>}
+          <p className="small muted" style={{ margin: 0 }}>Found a home on another website? <Link to="/import">Check it on Streetkey</Link> for a price check and the cost of works.</p>
         </div>
       </div>
     </div>

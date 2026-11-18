@@ -1,32 +1,72 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { PROPERTIES } from '../data/properties';
-import { dealScore } from '../engine/insights';
 import { parseQuery, runSearch } from '../engine/search';
 import { destination, SmartSearch, type Mode } from '../components/SmartSearch';
 import { Icon } from '../components/Icons';
-import { gbp, gbpK, HouseArt, Tag } from '../components/ui';
+import { HouseArt } from '../components/ui';
+import { PropertyCard } from '../components/PropertyCard';
 import { useStore } from '../store';
-import { XRayHero } from '../components/XRay';
 import { JourneyScene } from '../components/JourneyScene';
+import { slugPlace } from '../lib/meta';
 
-const TASKS: { to: string; icon: string; label: string; sub: string; tone: string }[] = [
-  { to: destination('buy', 'homes for sale in London'), icon: 'search', label: 'Buy a home', sub: 'Search & AI matches', tone: 'ink' },
-  { to: destination('rent', 'homes'), icon: 'key', label: 'Rent a home', sub: 'Homes to let', tone: 'ink' },
-  { to: '/my-home', icon: 'home', label: 'What’s my home worth?', sub: 'Value, ideas & costs', tone: 'accent' },
-  { to: '/import', icon: 'spark', label: 'Check any listing', sub: 'Paste one from any website', tone: 'ai' },
-  { to: '/estimate', icon: 'tools', label: 'Cost a renovation', sub: 'Room-by-room estimate', tone: 'accent' },
-  { to: '/studio', icon: 'palette', label: 'Redesign a room', sub: 'See it, then price it', tone: 'ai' },
-  { to: '/invest', icon: 'chart', label: 'Check an investment', sub: 'Yield, cash flow, stress test', tone: 'ink' },
-  { to: '/list', icon: 'tag', label: 'List your property', sub: 'Sell or let it yourself', tone: 'accent' },
+/** Where the facts on every listing come from: the reason to search here. */
+const TRUST: [icon: string, title: string, source: string][] = [
+  ['pound', 'Real sold prices', 'HM Land Registry'],
+  ['water', 'Flood risk', 'Environment Agency'],
+  ['bolt', 'Energy ratings', 'EPC register'],
+  ['bell', 'Instant alerts', 'New homes by email'],
 ];
 
+const PLACES: { name: string; hue: number; type: string }[] = [
+  { name: 'London', hue: 300, type: 'terraced' }, { name: 'Manchester', hue: 77, type: 'terraced' },
+  { name: 'Birmingham', hue: 141, type: 'semi-detached' }, { name: 'Leeds', hue: 222, type: 'terraced' },
+  { name: 'Bristol', hue: 33, type: 'flat' }, { name: 'Liverpool', hue: 187, type: 'terraced' },
+  { name: 'Sheffield', hue: 265, type: 'detached' }, { name: 'Cardiff', hue: 111, type: 'terraced' },
+];
+
+const TOOLS: [to: string, icon: string, label: string][] = [
+  ['/import', 'spark', 'Check any listing'], ['/estimate', 'tools', 'Renovation costs'], ['/studio', 'palette', 'Room design'],
+  ['/invest', 'chart', 'Investment calculator'], ['/floor-plan', 'plan', 'Floor plan maker'], ['/compare', 'building', 'Compare homes'],
+];
+
+/** Small drawings for the three reasons to use Streetkey. They are decoration: shapes, never figures. */
+function FeatureArt({ kind }: { kind: 'sold' | 'works' | 'ask' }) {
+  return (
+    <svg viewBox="0 0 280 120" className="feat-art" aria-hidden="true">
+      {kind === 'sold' && <>
+        <path d="M16 96 L60 78 L104 84 L148 58 L192 62 L236 34 L264 26" fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M16 96 L60 78 L104 84 L148 58 L192 62 L236 34 L264 26 V110 H16 Z" fill="var(--accent)" opacity=".1" />
+        {[[60, 78], [148, 58], [236, 34]].map(([x, y]) => <circle key={x} cx={x} cy={y} r="5" fill="var(--surface)" stroke="var(--accent)" strokeWidth="2.5" />)}
+        <rect x="150" y="12" width="78" height="22" rx="11" fill="var(--ink)" />
+        <rect x="162" y="20" width="54" height="6" rx="3" fill="var(--paper)" opacity=".85" />
+      </>}
+      {kind === 'works' && <>
+        {[[18, 74, 'var(--ink)'], [96, 52, 'var(--ai)'], [152, 62, 'var(--accent)'], [218, 44, 'var(--glow)']].map(([x, w, c]) => <rect key={x as number} x={x as number} y="26" width={w as number} height="18" rx="4" fill={c as string} />)}
+        {[0, 1, 2].map((i) => <g key={i}><rect x="18" y={62 + i * 18} width={96 - i * 14} height="7" rx="3.5" fill="var(--line)" /><rect x="206" y={62 + i * 18} width={56 - i * 8} height="7" rx="3.5" fill="var(--ink)" opacity={0.75 - i * 0.2} /></g>)}
+      </>}
+      {kind === 'ask' && <>
+        <rect x="70" y="14" width="194" height="34" rx="17" fill="var(--ink)" />
+        <rect x="88" y="27" width="150" height="7" rx="3.5" fill="var(--paper)" opacity=".85" />
+        <rect x="16" y="62" width="208" height="46" rx="18" fill="var(--surface)" stroke="var(--line)" />
+        <path d="M38 76v18M30.200 80.500l15.600 9M45.800 80.500l-15.600 9" stroke="var(--accent)" strokeWidth="2.6" strokeLinecap="round" />
+        <rect x="60" y="76" width="140" height="6" rx="3" fill="var(--line)" />
+        <rect x="60" y="89" width="96" height="6" rx="3" fill="var(--line)" />
+      </>}
+    </svg>
+  );
+}
+
 export default function Home() {
-  const { recent, savedSearches, toggleSavedSearch, saved, toggleSaved } = useStore();
-  const forYou = useMemo(() => PROPERTIES.filter((p) => p.listing !== 'rent' && p.type !== 'commercial').map((p) => ({ p, ds: dealScore(p) })).sort((a, b) => b.ds.total - a.ds.total).slice(0, 8), []);
-  const resume = recent[0] ?? { q: '3 bed house in London under £500k', mode: 'buy', at: '' };
-  const resumeCount = useMemo(() => runSearch(parseQuery(resume.mode === 'rent' ? `${resume.q} to rent` : resume.q)).length, [resume.q, resume.mode]);
-  const isSaved = savedSearches.some((s) => s.q === resume.q);
+  const { recent, serverListings } = useStore();
+  // Real homes first, newest first. Until agents and owners have listed enough, example homes fill the row, each tagged "Example".
+  const real = useMemo(() => serverListings.filter((p) => p.status !== 'withdrawn' && p.visibility !== 'private')
+    .sort((a, b) => Date.parse(b.createdAt ?? '') - Date.parse(a.createdAt ?? '')).slice(0, 8), [serverListings]);
+  const examples = useMemo(() => PROPERTIES.filter((p) => p.type !== 'commercial').slice(0, 8), []);
+  const homes = real.length >= 4 ? real : [...real, ...examples].slice(0, 8);
+  const onlyExamples = real.length === 0;
+  const resume = recent[0];
+  const resumeCount = useMemo(() => (resume ? runSearch(parseQuery(resume.mode === 'rent' ? `${resume.q} to rent` : resume.q)).length : 0), [resume]);
 
   return (
     <div className="home">
@@ -41,87 +81,108 @@ export default function Home() {
       </section>
 
       <div className="home-body">
-        <section className="resume card">
-          <div className="row between" style={{ flexWrap: 'nowrap', gap: 12 }}>
-            <Link to={destination(resume.mode as Mode, resume.q)} className="row" style={{ flexWrap: 'nowrap', gap: 12, textDecoration: 'none', minWidth: 0 }}>
-              <span className="resume-thumb"><HouseArt hue={18} type="terraced" /></span>
-              <span style={{ minWidth: 0 }}>
-                <span className="eyebrow">{recent.length ? 'Pick up where you left off' : 'Suggested search'}</span>
-                <b className="resume-q">{resume.q}</b>
-                <span className="xs muted">{resumeCount} match{resumeCount === 1 ? '' : 'es'} · {resume.mode === 'rent' ? 'To rent' : 'For sale'}</span>
-              </span>
+        <ul className="trust" aria-label="On every home">
+          {TRUST.map(([icon, title, source]) => (
+            <li key={title}><span className="trust-ic"><Icon name={icon} size={20} /></span><span><b>{title}</b><small>{source}</small></span></li>
+          ))}
+        </ul>
+
+        {resume && (
+          <Link to={destination(resume.mode as Mode, resume.q)} className="resume-bar">
+            <span className="trust-ic"><Icon name="clock" size={20} /></span>
+            <span className="resume-bar-txt"><small>Pick up where you left off</small><b>{resume.q}</b></span>
+            <span className="resume-bar-n">{resumeCount} home{resumeCount === 1 ? '' : 's'} <Icon name="arrow" size={16} /></span>
+          </Link>
+        )}
+
+        <section aria-labelledby="home-latest">
+          <div className="sec-head">
+            <div>
+              <h2 id="home-latest" className="home-h">{onlyExamples ? 'Homes to explore' : 'Latest homes'}</h2>
+              {onlyExamples && <p className="sec-sub">Example listings, shown while agents and owners add theirs.</p>}
+            </div>
+            <Link to={destination('buy', 'homes for sale')} className="sec-link">See all homes <Icon name="arrow" size={16} /></Link>
+          </div>
+          <div className="carousel hcards">
+            {homes.map((p, i) => <PropertyCard key={p.id} p={p} eager={i < 4} />)}
+          </div>
+        </section>
+
+        <section aria-labelledby="home-places">
+          <div className="sec-head"><h2 id="home-places" className="home-h">Popular places</h2></div>
+          <ul className="places">
+            {PLACES.map((pl) => (
+              <li key={pl.name} className="place">
+                <Link to={`/for-sale/${slugPlace(pl.name)}`} className="place-img" tabIndex={-1} aria-hidden="true"><HouseArt hue={pl.hue} type={pl.type} /></Link>
+                <div className="place-body">
+                  <b>{pl.name}</b>
+                  <span className="place-links">
+                    <Link to={`/for-sale/${slugPlace(pl.name)}`} aria-label={`Homes for sale in ${pl.name}`}>For sale</Link>
+                    <Link to={`/to-rent/${slugPlace(pl.name)}`} aria-label={`Homes to rent in ${pl.name}`}>To rent</Link>
+                    <Link to={`/sold-prices/${slugPlace(pl.name)}`} aria-label={`Sold prices in ${pl.name}`}>Sold prices</Link>
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section aria-labelledby="home-why">
+          <div className="sec-head"><h2 id="home-why" className="home-h">More than a listing</h2></div>
+          <div className="feats">
+            <Link to="/prices" className="feat">
+              <FeatureArt kind="sold" />
+              <b>See what homes really sold for</b>
+              <p>Every sale registered with HM Land Registry, street by street, next to the asking price.</p>
+              <span className="feat-go">Look up sold prices <Icon name="arrow" size={16} /></span>
             </Link>
-            <button className={`icon-btn${isSaved ? ' saved' : ''}`} aria-label={isSaved ? 'Unsave search' : 'Save search & get alerts'} onClick={() => toggleSavedSearch(resume.q, resume.mode)}><Icon name="heart" /></button>
-          </div>
-          {isSaved && <div className="xs muted" style={{ marginTop: 8 }}>Saved. Sign in to get new matches by email.</div>}
-        </section>
-
-        <section>
-          <span className="label-mono">Get started</span>
-          <h2 className="home-h">What would you like to do?</h2>
-          <div className="task-grid">
-            {TASKS.map((t) => (
-              <Link key={t.label} to={t.to} className={`task task-${t.tone}`}>
-                <span className="task-ic"><Icon name={t.icon} /></span>
-                <b>{t.label}</b>
-                <small>{t.sub}</small>
-              </Link>
-            ))}
+            <Link to="/estimate" className="feat">
+              <FeatureArt kind="works" />
+              <b>Know the cost of the work first</b>
+              <p>A trade-by-trade estimate for your area, with VAT, fees and a contingency, before you make an offer.</p>
+              <span className="feat-go">Cost a renovation <Icon name="arrow" size={16} /></span>
+            </Link>
+            <Link to={destination('buy', '3 bed house with a garden under £450k near a station')} className="feat">
+              <FeatureArt kind="ask" />
+              <b>Search in your own words</b>
+              <p>Describe the home you want. Streetkey turns it into the right filters and shows why each home matches.</p>
+              <span className="feat-go">Try a search <Icon name="arrow" size={16} /></span>
+            </Link>
           </div>
         </section>
 
-        <section>
-          <span className="label-mono">For you</span>
-          <div className="row between"><h2 className="home-h">Picked for you <Tag kind="demo">Example listings</Tag></h2><Link to={destination('buy', 'homes for sale')} className="small" style={{ fontWeight: 600 }}>See all →</Link></div>
-          <p className="small muted" style={{ marginTop: -6, marginBottom: 12 }}>Ranked by Streetkey deal score — every card shows the price check and renovation cost.</p>
-          <div className="carousel">
-            {forYou.map(({ p, ds }, i) => (
-              <article key={p.id} className="pcard">
-                <Link to={`/property/${p.id}`} className="pcard-img"><HouseArt hue={p.photoHue} type={p.type} seed={i} /><span className={`grade grade-${ds.grade} pcard-grade`}>{ds.grade}</span></Link>
-                <button className={`pcard-heart${saved.includes(p.id) ? ' on' : ''}`} aria-label={saved.includes(p.id) ? 'Remove from saved' : 'Save'} onClick={() => toggleSaved(p.id)}><Icon name="heart" size={20} /></button>
-                <Link to={`/property/${p.id}`} className="pcard-body">
-                  <span className="num" style={{ fontSize: 19 }}>{gbp(p.price)}</span>
-                  <span className="small" style={{ fontWeight: 600 }}>{p.beds} bed {p.type} · {p.town.split(',')[0]}</span>
-                  <span className="pcard-ai"><Icon name="spark" size={14} /> Works ≈ {gbpK(ds.refurbEstimate)} · value-add {gbpK(ds.uplift)}</span>
-                </Link>
-              </article>
-            ))}
+        <section className="duo" aria-label="For owners">
+          <div className="duo-card ink">
+            <h2>Selling or letting? List it free.</h2>
+            <p>Add your home in minutes. Streetkey checks your price against real sales, writes a first description for you to edit and draws your floor plan.</p>
+            <div className="row" style={{ gap: 10 }}>
+              <Link to="/list" className="btn accent">List your property <Icon name="arrow" size={18} /></Link>
+              <Link to="/floor-plan" className="btn on-ink">Make a floor plan</Link>
+            </div>
+          </div>
+          <div className="duo-card">
+            <h2>Own a home? See what it is worth.</h2>
+            <p>A value range from real sales nearby, ideas for adding value and what they would cost, in under a minute.</p>
+            <div className="row"><Link to="/my-home" className="btn">Check my home <Icon name="arrow" size={18} /></Link></div>
           </div>
         </section>
 
-        <section className="xr-section" aria-labelledby="xr-h">
+        <section aria-labelledby="home-tools">
+          <div className="sec-head"><h2 id="home-tools" className="home-h">Tools</h2></div>
+          <div className="tool-row">
+            {TOOLS.map(([to, icon, label]) => <Link key={to} to={to} className="tool"><span className="trust-ic"><Icon name={icon} size={20} /></span>{label}</Link>)}
+          </div>
+        </section>
+
+        <section className="pro-band" aria-labelledby="home-pro">
           <div>
-            <span className="label-mono">Look inside</span>
-            <h2 id="xr-h" className="home-h">Look inside any listing</h2>
-            <p className="muted" style={{ maxWidth: 460 }}>Every Streetkey listing has its plans underneath: what the works really cost, where the space is, how efficient it could be and what it could be worth. Drag the lens across the house.</p>
-            <Link to="/import" className="btn" style={{ marginTop: 14 }}>Check a listing from any website →</Link>
+            <h2 id="home-pro">Estate and letting agents</h2>
+            <p>Put your listings on Streetkey free. Send them automatically from your software and see the views and enquiries each one gets.</p>
           </div>
-          <XRayHero />
-        </section>
-
-        <section className="myhome-cta card ink">
-          <div>
-            <span className="eyebrow" style={{ color: 'inherit', opacity: 0.6 }}>Own a home?</span>
-            <h2 style={{ marginTop: 6 }}>Know what it’s worth — and what it could be worth.</h2>
-            <p className="muted small" style={{ marginTop: 6 }}>Value range, loft & extension ideas, renovation costs and an energy upgrade plan in under a minute.</p>
-          </div>
-          <Link to="/my-home" className="btn accent">Check my home <Icon name="arrow" size={18} /></Link>
-        </section>
-
-        <section className="lenses">
-          {[
-            ['tag', 'Price check', 'Is the asking price fair? Ranges from comparable sales.'],
-            ['tools', 'True cost of works', 'Regional, trade-by-trade estimates with VAT.'],
-            ['palette', 'Design ideas', 'Restyle any room and see the price.'],
-            ['chart', 'Investment view', 'Yield, cash flow and stress tests.'],
-          ].map(([ic, t, s]) => <div key={t} className="lens"><span className="task-ic"><Icon name={ic} /></span><div><b>{t}</b><small>{s}</small></div></div>)}
-        </section>
-
-        <section>
-          <span className="label-mono">Professionals</span>
-          <h2 className="home-h">For professionals</h2>
-          <div className="chips">
-            {[['/agents', 'Estate agents'], ['/landlord', 'Landlords'], ['/developer', 'Developers'], ['/marketplace', 'Contractors'], ['/automation', 'AI agents'], ['/enterprise', 'API & white-label']].map(([to, l]) => <Link key={to} to={to} className="chip">{l} →</Link>)}
+          <div className="row" style={{ gap: 10 }}>
+            <Link to="/sources" className="btn">Connect your listings</Link>
+            <Link to="/agents" className="btn ghost">For agents</Link>
+            <Link to="/landlord" className="btn ghost">For landlords</Link>
           </div>
         </section>
       </div>

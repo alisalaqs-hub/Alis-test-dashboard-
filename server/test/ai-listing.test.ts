@@ -214,6 +214,10 @@ describe('photo analysis job', () => {
       expect(byId.get(ids[0])!.ai_quality.issues).toContain('small');
       expect(byId.get(ids[1])!.ai_features).toEqual(['bay window', 'front garden']);
       expect(byId.get(ids[0])!.ai_flags).toEqual(['people']);
+      // The listing itself carries what was seen in each photo, so a search for "bay window" can match it.
+      const shown = (await c.get(`/api/listings/${ref}`)).json.listing.photos as { id: string; features?: string[] }[];
+      expect(shown.find((x) => x.id === ids[1])!.features).toEqual(['bay window', 'front garden']);
+      expect(shown.every((x) => !('ai_flags' in x) && !('flags' in x))).toBe(true); // never the people / personal-detail flags
 
       // The owner sees the analysis, suggested order and tips; the job is visible
       const g = await c.get(`/api/ai/listing/${ref}/photos`);

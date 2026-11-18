@@ -90,9 +90,14 @@ export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: stri
 export async function photosFor(listingIds: string[], db?: Q): Promise<Map<string, PhotoDTO[]>> {
   const m = new Map<string, PhotoDTO[]>();
   if (!listingIds.length) return m;
-  const rows = await q<{ id: string; listing_id: string; url: string; alt: string | null }>(
-    'SELECT id, listing_id, url, alt FROM listing_photos WHERE listing_id = ANY($1) ORDER BY position, created_at', [listingIds], db);
-  for (const r of rows) { const a = m.get(r.listing_id) ?? []; a.push({ id: r.id, url: r.url, alt: r.alt }); m.set(r.listing_id, a); }
+  // ai_features: what Streetkey AI saw in the photo when the lister had their photos checked (short, already-filtered phrases).
+  const rows = await q<{ id: string; listing_id: string; url: string; alt: string | null; ai_features: string[] | null }>(
+    'SELECT id, listing_id, url, alt, ai_features FROM listing_photos WHERE listing_id = ANY($1) ORDER BY position, created_at', [listingIds], db);
+  for (const r of rows) {
+    const a = m.get(r.listing_id) ?? [];
+    a.push({ id: r.id, url: r.url, alt: r.alt, ...(r.ai_features?.length ? { features: r.ai_features } : {}) });
+    m.set(r.listing_id, a);
+  }
   return m;
 }
 
