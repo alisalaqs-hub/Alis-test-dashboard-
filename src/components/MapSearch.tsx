@@ -51,6 +51,11 @@ export default function MapSearch({ homes, active, onPick, area, onArea, onFail 
     m.addControl(new NavigationControl({ showCompass: false }), 'top-right');
     // If the street map hasn't arrived after a while, the page shows its simple map instead.
     const giveUp = window.setTimeout(() => { if (!m.isStyleLoaded()) fail.current(); }, 9000);
+    // A map that can't fetch its style will never draw: go to the simple map straight away, not after the wait.
+    // (Once the style is in, a single tile that fails is not a reason to give up.)
+    let styleIn = false;
+    m.once('style.load', () => { styleIn = true; });
+    m.on('error', () => { if (!styleIn) { window.clearTimeout(giveUp); fail.current(); } });
     m.once('load', () => {
       window.clearTimeout(giveUp);
       m.addSource(AREA_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });

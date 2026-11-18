@@ -37,3 +37,16 @@ describe('what Streetkey AI saw in a listing’s photos', () => {
     expect(out[0].reasons.slice(0, 2)).toEqual(['Mentions garden', 'Seen in the photos: fireplace']);
   });
 });
+
+describe('asking for a feature without AI', () => {
+  it('reads the common ones as preferences, never as a filter, and not when they are ruled out', async () => {
+    const { fromRules } = await import('./search');
+    expect(fromRules('3 bed house in Leeds with a fireplace and a bay window').extras.mustHaves).toEqual(['fireplace', 'bay window']);
+    expect(fromRules('flat with a balcony and parking, no garage').extras.mustHaves).toEqual(['balcony', 'parking']);
+    expect(fromRules('house without a driveway').extras.mustHaves).toEqual([]);
+    expect(fromRules('3 bed house in Leeds').extras.mustHaves).toEqual([]);
+    expect(fromRules('open-plan flat with an en suite').extras.mustHaves).toEqual(['open plan', 'en-suite']);
+    // shown as a removable preference chip
+    expect(fromRules('house with a fireplace').understood.some((c) => c.key === 'must:fireplace' && c.kind === 'preference')).toBe(true);
+  });
+});

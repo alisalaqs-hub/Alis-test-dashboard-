@@ -243,10 +243,31 @@ export function shortUnsupported(sentences: string[]) {
   return sentences.map((s) => map.find(([re]) => re.test(s))?.[1] ?? s.split(/\s+[—-]\s+/)[0].replace(/\.$/, '').toLowerCase()).filter(Boolean);
 }
 
+/**
+ * Things people ask for that a listing can show in its words or its photos. Read without AI, each one
+ * becomes a preference: homes that mention or show it come first, and no home is hidden.
+ * (A garden, a loft and being chain-free are understood by the search engine itself.)
+ */
+const FEATURE_WORDS = [
+  'fireplace', 'log burner', 'wood burner', 'balcony', 'roof terrace', 'patio', 'conservatory', 'bay window', 'sash windows', 'high ceilings',
+  'wooden floors', 'period features', 'original features', 'open plan', 'kitchen island', 'utility room', 'en-suite', 'ensuite', 'walk-in wardrobe',
+  'home office', 'cellar', 'basement', 'garage', 'driveway', 'parking', 'ev charger', 'solar panels', 'underfloor heating', 'annexe', 'summer house',
+  'lift', 'concierge', 'sea view', 'river view',
+];
+function featureWords(t: string): string[] {
+  const text = t.replace(/[‐-―]/g, '-');
+  return FEATURE_WORDS.filter((w) => {
+    const m = new RegExp(`(?:^|[^a-z0-9])(${w.replace(/[- ]/g, '[- ]?')})(?:s|es)?(?![a-z0-9])`).exec(text);
+    // "no garage" or "without parking" is not asking for one.
+    return !!m && !/(?:\bno|\bwithout|\bnot|\bdon'?t (?:need|want)(?: an?)?)\s+(?:an?\s+)?$/.test(text.slice(0, m.index + 1));
+  }).slice(0, 6);
+}
+
 /** A few extras the engine can't use, read by rules (the AI usually does better). */
 function rulesExtras(text: string, query: SearchQuery): SearchExtras {
   const t = text.toLowerCase();
   const ex = emptyExtras();
+  ex.mustHaves = featureWords(t);
   const amount = (raw: string) => { const m = raw.replace(/[£,\s]/g, '').match(/^(\d+(?:\.\d+)?)(k|m)?$/); if (!m) return NaN; const n = parseFloat(m[1]); return m[2] === 'k' ? n * 1e3 : m[2] === 'm' ? n * 1e6 : n; };
   const between = t.match(/\bbetween\s+(£?\s?[\d,.]+\s?[km]?)\s+(?:and|to|-)\s+(£?\s?[\d,.]+\s?[km]?)/);
   if (between) {

@@ -171,3 +171,10 @@ details.srch-why > summary { cursor: pointer; font-weight: 600; font-size: 14px;
 .seen-in ul.chips { list-style: none; margin: 0; padding: 0; }
 .chip.static { cursor: default; }
 .chip.static:hover { border-color: var(--line); }
+/* Fewer than five photos: the gallery fills its width instead of leaving gaps. */
+.gallery.g1 { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.gallery.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); }
+.gallery.g1 button:first-child, .gallery.g2 button:first-child { grid-row: auto; }
+.gallery.g3 { grid-template-columns: 2fr 1fr; }
+.gallery.g4 button:last-child { grid-column: span 2; }
+@media (max-width: 720px) { .gallery.g1 button:first-child { grid-column: auto; } .gallery.g1 { grid-template-columns: minmax(0, 1fr); } .gallery.g4 button:last-child { grid-column: auto; } }

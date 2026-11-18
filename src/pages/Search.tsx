@@ -214,9 +214,11 @@ export default function Search() {
   const hits = useMemo(() => {
     if (sort === 'price') return [...fitHits].sort((a, b) => a.property.price - b.property.price);
     if (sort === 'price-desc') return [...fitHits].sort((a, b) => b.property.price - a.property.price);
-    if (sort === 'new') return [...fitHits].sort((a, b) => a.property.daysOnMarket - b.property.daysOnMarket);
-    if (rankReady && rank) return blend(fitHits, rank.scores);
-    return fitHits;
+    // Real homes come before example ones in every order that isn't strictly by price.
+    const realFirst = (list: SearchHit[]) => [...list.filter((h) => !!h.property.source), ...list.filter((h) => !h.property.source)];
+    if (sort === 'new') return realFirst([...fitHits].sort((a, b) => a.property.daysOnMarket - b.property.daysOnMarket));
+    if (rankReady && rank) return realFirst(blend(fitHits, rank.scores));
+    return realFirst(fitHits);
   }, [fitHits, sort, rankReady, rank]);
   // Place pages are offered to search engines only when they show real homes: example listings never are.
   const realHits = hits.filter((h) => !!h.property.source).length;

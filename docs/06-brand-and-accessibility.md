@@ -49,3 +49,18 @@ npm run build
 npx vite preview --port 4173 &
 npm run a11y        # scripts/a11y-audit.cjs — prints violations or NO VIOLATIONS
 ```
+
+## Listing pictures and the share picture
+
+Example listings have no photographs, and a real listing has none until its lister adds them. In both cases
+the site draws the home (`src/components/art/`): a fine-line elevation with soft washes, in the same hand as
+the home-page street. There is one drawing per kind of home (terrace, semi, detached, flats, bungalow, shop)
+and one per room for the gallery of an example listing (living room, kitchen, bedroom, bathroom, garden,
+balcony, and office views for commercial). A home's own number chooses its wall, door and planting, so it
+looks the same on every page. Every drawing is labelled for screen readers as an illustration, not a
+photograph, and example listings keep their "Example" tag on the picture.
+
+`public/share.png` (1200 × 630) is the picture apps show when a Streetkey link is shared. `index.html` names
+it, and the Netlify build writes its full address (previews need one). It was drawn from the same artwork;
+to change it, edit the page head and replace the file.
+

@@ -21,13 +21,12 @@ import type { AgentProfileDTO, ValuationRequestDTO } from '../../../src/lib/apiT
 import { normalisePostcode } from '../../../src/engine/listings';
 import { one, q } from '../db';
 import { mails } from '../services/email';
-import { audit, HttpError, notFound, parse, requireUser } from '../services/http';
+import { audit, forbidden, HttpError, notFound, parse, requireUser } from '../services/http';
 import { historyFor } from '../services/history';
 import { LISTING_SELECT, photosFor, PROPERTY_TYPES, PUBLIC_STATUSES, toDTO, type ListingRow } from '../services/listings';
 import { enforce, limit } from '../services/ratelimit';
 import { UUID_RE } from '../ai/inbox/shared';
 import { viewerOf } from './listings';
-import { member } from './org-report';
 
 /** Listings shown on an agent's page. */
 const MAX_LISTINGS = 60;
@@ -73,12 +72,18 @@ const toRequest = (r: RequestRow): ValuationRequestDTO => ({
   intent: r.intent, propertyType: r.property_type, beds: r.beds, message: r.message, status: r.status, createdAt: r.created_at.toISOString(),
 });
 
-/** The organisation in the address, once the caller is known to run it (see member in routes/org-report). */
+/**
+ * The organisation in the address, once the caller is known to run it (an owner or admin of that agency).
+ * Unlike the agency's results, Streetkey's own staff are not let in: the person was told their request goes
+ * only to the agent they chose.
+ */
 async function ownOrg(req: FastifyRequest) {
   const { id } = req.params as { id: string };
-  requireUser(req);
+  const u = requireUser(req);
   if (!UUID_RE.test(id)) throw notFound('That organisation');
-  await member(req, id);
+  const m = await one<{ role: string }>('SELECT role FROM memberships WHERE organisation_id = $1 AND user_id = $2', [id, u.id]);
+  if (!m) throw notFound('That organisation');
+  if (!['owner', 'admin'].includes(m.role)) throw forbidden();
   return id;
 }
 
@@ -114,7 +119,8 @@ export async function agentRoutes(app: FastifyInstance) {
   app.post('/api/agents/:id/valuation-requests', { preHandler: [limit('valuation.create', 5, 60), dailyCap] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     if (honeypotFilled(req.body)) return reply.code(201).send({ ok: true }); // a script: answer as if it worked, keep nothing
-    const org = UUID_RE.test(id) ? await one<{ id: string; name: string }>('SELECT id, name FROM organisations WHERE id = $1', [id]) : null;
+    // Valuations are what estate and letting agents do: a landlord's or developer's page has no such form.
+    const org = UUID_RE.test(id) ? await one<{ id: string; name: string }>(`SELECT id, name FROM organisations WHERE id = $1 AND kind = 'agency'`, [id]) : null;
     if (!org) throw notFound('That agent');
     const b = parse(ValuationBody, req.body);
     const recent = await one<{ n: number }>(`SELECT count(*)::int n FROM valuation_requests WHERE organisation_id = $1 AND email = $2 AND created_at > now() - interval '1 day'`, [org.id, b.email]);

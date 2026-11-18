@@ -206,7 +206,7 @@ safe so a listing title can never run as a formula. Shown under *Account → Age
 
 Every organisation has a public page at `/agent/<id>` (`src/pages/AgentProfile.tsx`, `server/src/routes/agents.ts`,
 migration 017): its name, a *Verified* tag once an admin has checked it, its redress scheme, how many homes it
-has for sale and to rent, a *Book a valuation* form and its live listings. Search engines are offered the page
+has for sale and to rent, a *Book a valuation* form (estate and letting agencies only) and its live listings. Search engines are offered the page
 only while the agent has live listings. Listings say whose they are (`organisationId` and `agentName` on the
 listing, `agentId` on the website's `Property`), so a listing page can link to its agent.
 
@@ -219,10 +219,21 @@ listing, `agentId` on the website's `Property`), so a listing page can link to i
   same answer and nothing is kept. Limits: 5 a minute per network, 30 a day per account (or network), 300 a
   day per network, and 3 a day per email address per agent.
 - `GET /api/orgs/:id/valuation-requests` and `PATCH /api/orgs/:id/valuation-requests/:rid` with `{ status }`
-  (`new`, `contacted`, `closed`): the agency's owners and admins only, as for its results. Shown under
-  *Account → Agency & feeds → Valuation requests*.
+  (`new`, `contacted`, `closed`): the agency's owners and admins only. Streetkey's own admins cannot read
+  them (unlike the agency's results), because the person is told the request goes only to the agent they
+  chose. Shown under *Account → Agency & feeds → Valuation requests*.
 - Data protection: requests sent while signed in are in the person's data export and are deleted with their
   account; the daily clean-up deletes every request after 12 months; the privacy notice says so.
+
+### What the photos show
+
+When a lister has their photos checked by Streetkey AI (with their consent), each photo's short list of
+visible features ("period fireplace", "bay window") is kept in `listing_photos.ai_features`. The public
+listing now carries them (`photos[].features`); the website gathers them across the listing's photos
+(`Property.photoFeatures`, floor plans left out). They count towards the "must-haves" of a search, so a home
+whose photos show a fireplace comes first when someone asks for one, with the reason "Seen in the photos:
+fireplace"; they never hide a home. The listing page shows them under *Seen in the photos*, said to be
+AI's reading. The people and personal-detail flags from the same check are never sent to the website.
 
 ## Security and privacy
 

@@ -55,7 +55,7 @@ function EnquiryBox({ listingRef, rental, slots, lister }: { listingRef: string;
         <button type="button" className={kind === 'viewing' ? 'on' : ''} aria-pressed={kind === 'viewing'} onClick={() => setKind('viewing')}>Request a viewing</button>
         <button type="button" className={kind === 'question' ? 'on' : ''} aria-pressed={kind === 'question'} onClick={() => setKind('question')}>Ask a question</button>
       </div>
-      {err && <div className="callout small" role="alert">{err.message}{Object.values(err.fields).map((m) => <div key={m}>• {m}</div>)}</div>}
+      {err && <div className="callout small" role="alert">{err.message}{Object.values(err.fields).filter((m): m is string => typeof m === 'string').map((m) => <div key={m}>• {m}</div>)}</div>}
       {kind === 'viewing' && <fieldset className="stack" style={{ gap: 4, border: 0, padding: 0, margin: 0 }}><legend className="xs muted">Preferred time (the lister confirms)</legend>{slots.map((s) => <label key={s} className="check"><input type="radio" name="slot" checked={f.slot === s} onChange={() => setF({ ...f, slot: s })} />{s}</label>)}</fieldset>}
       <label className="field">Your name<input className="input" autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></label>
       <label className="field">Email<input className="input" type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></label>
@@ -179,7 +179,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="row small muted"><Link to="/search">← Search</Link><span>/</span><span>{p.town}</span></div>
-      <div className="gallery">
+      <div className={`gallery g${Math.min(5, photos.length)}`}>
         {photos.slice(0, 5).map((ph, i) => (
           <button key={ph.id} onClick={() => { setLightbox(i); track('photo_enlarge', p.id, { photo: ph.label }); }} aria-label={`Enlarge ${ph.label}`}>
             {p.photos?.[i] ? <img src={p.photos[i]} alt={ph.label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <HouseArt hue={p.photoHue} type={p.type} scene={sceneFor(ph.label)} />}
@@ -187,7 +187,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           </button>
         ))}
       </div>
-      <p className="xs muted" style={{ marginTop: -10 }}>{p.photos?.length ? `${p.photos.length} photo${p.photos.length > 1 ? 's' : ''} from the ${p.source?.kind === 'landlord' ? 'landlord' : 'owner'}${p.features.includes('Contains virtually staged images') ? ' · some images are virtually staged' : ''}` : 'Illustration only. This is an example listing, not a home for sale.'}</p>
+      <p className="xs muted" style={{ marginTop: -10 }}>{p.photos?.length ? `${p.photos.length} photo${p.photos.length > 1 ? 's' : ''} from the ${p.source?.kind === 'landlord' ? 'landlord' : p.source?.kind === 'agent-feed' ? 'agent' : 'owner'}${p.features.includes('Contains virtually staged images') ? ' · some images are virtually staged' : ''}` : 'Illustration only. This is an example listing, not a home for sale.'}</p>
       {lightbox != null && (
         <div className="lightbox" onClick={() => setLightbox(null)} role="dialog" aria-label="Photo viewer">
           <div onClick={(e) => e.stopPropagation()}>
@@ -213,7 +213,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
             {p.alsoListedBy?.length ? <div className="xs muted">Also listed by {p.alsoListedBy.join(', ')}</div> : null}
             <div className="row" style={{ alignItems: 'flex-end', gap: 22 }}>
               <Stat big label={history ? <>{priceLabel} <ReducedTag history={history} rental={rental} /></> : priceLabel} value={rental ? `${gbp(p.price)} pcm` : gbp(p.price)}
-                sub={history ? `Listed by ${p.agent} · ${onMarketLine(history.daysOnMarket, offMarket)}` : `Listed by ${p.agent} · ${p.daysOnMarket} days`} />
+                sub={<>Listed by {p.agentId ? <Link to={`/agent/${p.agentId}`}>{p.agent}</Link> : p.agent} · {history ? onMarketLine(history.daysOnMarket, offMarket) : `${p.daysOnMarket} days`}</>} />
               <div className="row">
                 <button className={`save-btn${saved.includes(p.id) ? ' on' : ''}`} onClick={() => { toggleSaved(p.id); track('save', p.id); }}>{saved.includes(p.id) ? '♥ Saved' : '♡ Save'}</button>
                 <button className={`save-btn${compare.includes(p.id) ? ' on' : ''}`} onClick={() => { toggleCompare(p.id); track('compare_add', p.id); }}>{compare.includes(p.id) ? '✓ Comparing' : '+ Compare'}</button>
@@ -252,9 +252,12 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           </Section>
 
           <div className="grid g2">
-            <Section title="Floor plan" right={<button className="btn ghost sm" onClick={() => { track('floorplan_open', p.id); if (p.floorPlan) setPlanOpen(true); }}>Open full size</button>}>
+            <Section title="Floor plan" right={p.floorPlan ? <button className="btn ghost sm" onClick={() => { track('floorplan_open', p.id); setPlanOpen(true); }}>Open full size</button> : undefined}>
               {/* The lister's own plan when they added one; otherwise the indicative layout. */}
-              {p.floorPlan ? <img className="fp-shown" src={p.floorPlan.url} alt={p.floorPlan.alt} /> : <FloorPlan beds={p.beds} type={p.type} area={p.floorArea} />}
+              {p.floorPlan ? <img className="fp-shown" src={p.floorPlan.url} alt={p.floorPlan.alt} />
+                // A real home is never given a made-up layout: until its lister adds a plan, the page says so.
+                : isServerRef(p.id) ? <p className="muted small">{p.agent} hasn’t added a floor plan yet. Ask for one when you get in touch.</p>
+                  : <FloorPlan beds={p.beds} type={p.type} area={p.floorArea} />}
             </Section>
             <Section title="Key facts" kicker="Material information">
               <dl className="kv">
@@ -292,7 +295,10 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
         </div>
 
         <div className="stack sticky" style={{ gap: 16 }}>
-          {live ? <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}><EnquiryBox listingRef={p.id} rental={rental} slots={slots} lister={p.agent} /></Section> : <>
+          {live ? <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}>
+            <EnquiryBox listingRef={p.id} rental={rental} slots={slots} lister={p.agent} />
+            {p.agentId && <p className="small" style={{ marginTop: 10 }}><Link to={`/agent/${p.agentId}`}>More homes from {p.agent}</Link></p>}
+          </Section> : <>
           <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}>
             {myViewing ? <div className="callout ok small" role="status">Viewing requested for <b>{myViewing.slot}</b>. This is an example listing, so nothing has been sent.</div> : <>
               <div className="stack" style={{ gap: 6 }}>{slots.map((s) => <label key={s} className="check"><input type="radio" name="slot" checked={slot === s} onChange={() => setSlot(s)} />{s}</label>)}</div>

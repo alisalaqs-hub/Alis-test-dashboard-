@@ -8,8 +8,8 @@
  */
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { gbp, HouseArt, Seg, Tag } from '../components/ui';
-import type { Property } from '../data/properties';
+import { Seg, Tag } from '../components/ui';
+import { PropertyCard } from '../components/PropertyCard';
 import { api, ApiError } from '../lib/api';
 import type { AgentProfileDTO } from '../lib/apiTypes';
 import { dtoToProperty } from '../lib/listingAdapter';
@@ -21,8 +21,6 @@ type Agent = AgentProfileDTO['agent'];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KIND: Record<Agent['kind'], string> = { agency: 'Estate and letting agent', landlord: 'Landlord', developer: 'Property developer', contractor: 'Contractor' };
-const TYPE: Record<string, string> = { terraced: 'terraced house', 'semi-detached': 'semi-detached house', detached: 'detached house', flat: 'flat', bungalow: 'bungalow', commercial: 'commercial property' };
-const priceOf = (p: Property) => (p.listing === 'rent' ? `${gbp(p.price)} pcm` : gbp(p.price));
 const countsLine = (c: Agent['counts']) => `${c.sale} for sale · ${c.rent} to rent`;
 
 function NotFoundCard() {
@@ -85,23 +83,6 @@ function ValuationForm({ agent }: { agent: Agent }) {
   );
 }
 
-function ListingCard({ p, n }: { p: Property; n: number }) {
-  const what = `${p.beds ? `${p.beds} bed ` : ''}${TYPE[p.type] ?? p.type}`;
-  return (
-    <li className="pcard">
-      {/* The picture repeats the link below it, so it is kept out of the tab order and away from screen readers. */}
-      <Link to={`/property/${p.id}`} className="pcard-img" tabIndex={-1} aria-hidden="true">
-        {p.photos?.[0] ? <img src={p.photos[0]} alt="" loading="lazy" /> : <HouseArt hue={p.photoHue} type={p.type} seed={n} />}
-      </Link>
-      <Link to={`/property/${p.id}`} className="pcard-body">
-        <span className="num agent-price">{priceOf(p)}</span>
-        <span className="small agent-what">{what.charAt(0).toUpperCase()}{what.slice(1)}{p.status === 'under offer' ? ' · Under offer' : ''}</span>
-        <span className="small muted">{p.town}</span>
-      </Link>
-    </li>
-  );
-}
-
 function AgentPage({ profile }: { profile: AgentProfileDTO }) {
   const { agent } = profile;
   const homes = useMemo(() => profile.listings.map(dtoToProperty), [profile.listings]);
@@ -122,20 +103,23 @@ function AgentPage({ profile }: { profile: AgentProfileDTO }) {
         {!Number.isNaN(since.getTime()) && <p className="xs muted" style={{ margin: 0 }}>On Streetkey since {since.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</p>}
       </header>
 
-      <div className="agent-layout">
-        <section className="card stack agent-valuation" aria-labelledby="agent-valuation-h">
-          <div>
-            <h2 id="agent-valuation-h" className="agent-h2">Book a valuation</h2>
-            <p className="small muted" style={{ margin: '6px 0 0' }}>Thinking of selling or letting? Ask {agent.name} to visit and tell you what your property could achieve.</p>
-          </div>
-          <ValuationForm key={agent.id} agent={agent} />
-        </section>
+      <div className={`agent-layout${agent.kind === 'agency' ? '' : ' no-form'}`}>
+        {/* Valuations are what estate and letting agents do; a landlord's or developer's page shows their homes only. */}
+        {agent.kind === 'agency' && (
+          <section className="card stack agent-valuation" aria-labelledby="agent-valuation-h">
+            <div>
+              <h2 id="agent-valuation-h" className="agent-h2">Book a valuation</h2>
+              <p className="small muted" style={{ margin: '6px 0 0' }}>Thinking of selling or letting? Ask {agent.name} to visit and tell you what your property could achieve.</p>
+            </div>
+            <ValuationForm key={agent.id} agent={agent} />
+          </section>
+        )}
 
         <section className="stack" aria-labelledby="agent-homes-h">
           <h2 id="agent-homes-h" className="agent-h2">Homes from {agent.name}</h2>
           {homes.length === 0 ? <p className="muted" style={{ margin: 0 }}>{agent.name} has no homes on Streetkey right now. <Link to="/search">Search all homes</Link></p> : (
             <>
-              <ul className="agent-grid">{homes.map((p, i) => <ListingCard key={p.id} p={p} n={i + 1} />)}</ul>
+              <div className="hgrid">{homes.map((p, i) => <PropertyCard key={p.id} p={p} eager={i < 3} />)}</div>
               {onMarket > homes.length && <p className="xs muted" style={{ margin: 0 }}>Showing the {homes.length} newest of {onMarket}. <Link to="/search">Search all homes</Link></p>}
             </>
           )}

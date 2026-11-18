@@ -285,10 +285,16 @@ describe('an agency’s valuation requests', () => {
     expect((await negotiator.c.get(list)).status).toBe(403);
     expect((await negotiator.c.patch(item, { status: 'closed' })).status).toBe(403);
     expect((await one<{ status: string }>('SELECT status FROM valuation_requests WHERE id = $1', [first.id]))!.status).toBe('new'); // nothing changed
-    // a site admin can see it, as with the agency's results
+    // Streetkey's own staff cannot read them either: the person was told the request goes only to the agent they chose
     const staff = await signUp();
     await makeAdmin(staff.email);
-    expect((await staff.c.get(list)).json.items).toHaveLength(2);
+    expect((await staff.c.get(list)).status).toBe(404);
+    expect((await staff.c.patch(item, { status: 'closed' })).status).toBe(404);
+    // and only an estate or letting agency takes valuation requests
+    const landlord = await signUp({ accountType: 'landlord' });
+    const estate = await landlord.c.post('/api/orgs', { name: 'Harbour Lettings Ltd', kind: 'landlord' });
+    expect(estate.status).toBe(201);
+    expect((await client().post(`/api/agents/${estate.json.id}/valuation-requests`, REQUEST)).status).toBe(404);
   });
 });
 
