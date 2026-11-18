@@ -76,6 +76,20 @@ export const mails = {
     text: `${title} (${ref}) was submitted and is waiting for review.\n\nReview it in the admin area:\n${link('/admin')}` }),
   listingRejected: (to: string, title: string, reason: string) => sendMail({ to, template: 'listing_rejected', subject: 'Your listing needs changes',
     text: `We couldn’t publish ${title} yet.\n\nReason: ${reason}\n\nYou can edit it and submit it again from ${link('/account/listings')}.` }),
+  /**
+   * To an agency's owners and admins: someone asked them for a valuation from their Streetkey page.
+   * The person's details are in the body only, never the subject.
+   */
+  valuationRequest: (to: string, agentName: string, r: { name: string; email: string; phone?: string | null; postcode: string; addressLine?: string | null; intent: 'sell' | 'let'; propertyType?: string | null; beds?: number | null; message?: string | null }) => {
+    const home = [r.beds != null ? `${r.beds} bed` : '', r.propertyType ?? ''].filter(Boolean).join(' ');
+    const lines = [
+      `Name: ${r.name}`, `Email: ${r.email}`, ...(r.phone ? [`Phone: ${r.phone}`] : []),
+      `They want to: ${r.intent === 'let' ? 'let the property' : 'sell the property'}`,
+      `Postcode: ${r.postcode}`, ...(r.addressLine ? [`Address: ${r.addressLine}`] : []), ...(home ? [`Property: ${home}`] : []),
+    ];
+    return sendMail({ to, template: 'valuation_request', subject: `New valuation request for ${agentName}`,
+      text: `${r.name} asked ${agentName} for a valuation on Streetkey.\n\n${lines.join('\n')}${r.message ? `\n\n“${r.message}”` : ''}\n\nPlease contact them to arrange a visit. You can see all your valuation requests and mark this one as contacted here:\n${link('/account/agency')}` });
+  },
   /** One wording for every saved-search alert, whether it goes out the moment a home is listed or with the hourly job. */
   searchAlert: (to: string, query: string, items: { title: string; ref: string; price: string }[], o: { timeoutMs?: number } = {}) => deliver({ to, template: 'search_alert',
     subject: `${items.length} new ${items.length === 1 ? 'home matches' : 'homes match'} “${query}”`,

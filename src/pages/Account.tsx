@@ -9,8 +9,9 @@ import { api, ApiError, mediaUrl, type MyListing } from '../lib/api';
 import { safeNextPath, signInPath, useAi, useAiAction, useSignInPath } from '../lib/ai/core';
 import { listingDraftAccountType } from '../lib/ai/listing';
 import { defaultIntent, inboxAi, isLive, REPLY_INTENTS, REPLY_TONES, ruleInsights, unfilled, type ListingInsights, type ReplyIntent, type ReplyTone, type SuggestedReply, type Triage, type TriageResponse } from '../lib/ai/inbox';
-import type { AiImageDTO, EnquirySummaryDTO, MessageDTO, OrgReportDTO, SavedSearchDTO } from '../lib/apiTypes';
+import type { AiImageDTO, EnquirySummaryDTO, MessageDTO, OrgReportDTO, SavedSearchDTO, ValuationRequestDTO, ValuationStatus } from '../lib/apiTypes';
 import { useServer } from '../lib/server';
+import '../styles/agent.css';
 
 /* ---------- shared bits ---------- */
 const asApiError = (e: unknown) => (e instanceof ApiError ? e : new ApiError(0, 'Something went wrong.'));
@@ -857,6 +858,65 @@ function PrivacyInner() {
 }
 
 /* ---------- agency & feeds ---------- */
+const VALUATION_STATUS: Record<ValuationStatus, string> = { new: 'New', contacted: 'Contacted', closed: 'Closed' };
+
+/**
+ * Valuations people asked the agency for from its public page (/agent/<id>), newest first. Each shows who
+ * asked, where the property is, whether they want to sell or let, and how to reach them; the agency marks
+ * it contacted or closed. Requests are deleted after 12 months.
+ */
+function ValuationRequests({ orgId }: { orgId: string }) {
+  const [items, setItems] = useState<ValuationRequestDTO[] | 'error' | null>(null);
+  const [busy, setBusy] = useState('');
+  const [failed, setFailed] = useState('');
+  const rows = useRef(new Map<string, HTMLLIElement>());
+  useEffect(() => {
+    let live = true;
+    api.orgs.valuationRequests(orgId).then((r) => { if (live) setItems(r.items); }, () => { if (live) setItems('error'); });
+    return () => { live = false; };
+  }, [orgId]);
+  const mark = async (id: string, status: ValuationStatus) => {
+    setBusy(id); setFailed('');
+    // The button pressed is about to be replaced: focus waits on the request itself, and its new status is read out when it changes.
+    focusQuietly(rows.current.get(id) ?? null);
+    try {
+      const { request } = await api.orgs.setValuationStatus(orgId, id, status);
+      setItems((now) => (Array.isArray(now) ? now.map((x) => (x.id === request.id ? request : x)) : now));
+    } catch { setFailed(id); } finally { setBusy(''); }
+  };
+  const fresh = Array.isArray(items) ? items.filter((r) => r.status === 'new').length : 0;
+  return (
+    <Section title="Valuation requests" kicker={fresh ? `${fresh} new` : 'From your agent page'} right={<Link className="btn ghost sm" to={`/agent/${orgId}`}>View your agent page</Link>}>
+      {items === null ? <Checking /> : items === 'error' ? <p className="small" role="alert">Couldn’t load your valuation requests. Please try again.</p>
+        : items.length === 0 ? <p className="small muted">When someone books a valuation from your agent page, it appears here and is emailed to you.</p>
+        : (
+          <ul className="vr-list">{items.map((r) => {
+            const home = [r.addressLine, [r.beds != null ? `${r.beds} bed` : '', r.propertyType ?? ''].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+            return (
+              <li key={r.id} className="vr-item" ref={(el) => { if (el) rows.current.set(r.id, el); else rows.current.delete(r.id); }}>
+                <div className="row between">
+                  <span className="small"><b>{r.name}</b> · {r.postcode} · {r.intent === 'let' ? 'Wants to let' : 'Wants to sell'}</span>
+                  <span className="row" style={{ gap: 8 }}><span className="xs muted">{new Date(r.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>{/* Read out when the status changes. */}<span aria-live="polite"><Tag kind={r.status === 'new' ? 'rec' : r.status === 'contacted' ? 'ok' : 'neutral'}>{VALUATION_STATUS[r.status]}</Tag></span></span>
+                </div>
+                {home && <div className="xs muted">{home}</div>}
+                {r.message && <p className="small vr-message">{r.message}</p>}
+                <div className="row between">
+                  <span className="small vr-contact"><a href={`mailto:${r.email}`}>{r.email}</a>{r.phone && <> · <a href={`tel:${r.phone.replace(/[^+\d]/g, '')}`}>{r.phone}</a></>}</span>
+                  <span className="row" style={{ gap: 6 }}>
+                    {r.status === 'new' && <button type="button" className="btn sm ghost" disabled={busy === r.id} aria-label={`Mark contacted: ${r.name}`} onClick={() => void mark(r.id, 'contacted')}>Mark contacted</button>}
+                    {r.status !== 'closed' && <button type="button" className="btn sm ghost" disabled={busy === r.id} aria-label={`Mark closed: ${r.name}`} onClick={() => void mark(r.id, 'closed')}>Mark closed</button>}
+                    {r.status === 'closed' && <button type="button" className="btn sm ghost" disabled={busy === r.id} aria-label={`Reopen: ${r.name}`} onClick={() => void mark(r.id, 'new')}>Reopen</button>}
+                  </span>
+                </div>
+                {failed === r.id && <p className="xs field-error" role="alert" style={{ margin: 0 }}>Couldn’t update this request. Please try again.</p>}
+              </li>
+            );
+          })}</ul>
+        )}
+    </Section>
+  );
+}
+
 export function Agency() { return <Gate what="Agency feeds"><AgencyInner /></Gate>; }
 function AgencyInner() {
   const [orgs, setOrgs] = useState<Awaited<ReturnType<typeof api.me.orgs>>['items'] | null>(null);
@@ -920,6 +980,7 @@ function AgencyInner() {
                 </>}
             </Section>
           </div>
+          <div style={{ gridColumn: '1 / -1' }}><ValuationRequests orgId={org.id} /></div>
         </div>
       )}
     </AccountShell>

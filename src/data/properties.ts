@@ -44,6 +44,8 @@ export interface Property {
   comparables: Comparable[];
   planningNearby: { ref: string; desc: string; decision: 'Approved' | 'Refused' | 'Pending'; distanceM: number }[];
   agent: string;
+  /** Real listings placed by an agency (or a landlord or developer company): its id, for the agent's page at /agent/<id>. */
+  agentId?: string;
   daysOnMarket: number;
   photoHue: number;         // used to render placeholder art
   serviceChargeAnnual?: number;

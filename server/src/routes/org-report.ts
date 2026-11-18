@@ -14,7 +14,12 @@ export interface OrgReportRow {
   views: number; visitors: number; saves: number; enquiries: number; viewings: number;
 }
 
-async function member(req: FastifyRequest, orgId: string) {
+/**
+ * Lets the request through only for someone who runs this organisation (its owners and admins) or a site
+ * admin. Anyone else is told the organisation can't be found, so its id reveals nothing; a member without
+ * that role is refused. Shared by everything an agency sees about itself (results, valuation requests).
+ */
+export async function member(req: FastifyRequest, orgId: string) {
   const u = requireUser(req);
   if (!/^[0-9a-f-]{36}$/i.test(orgId)) throw notFound('That organisation');
   if (u.role === 'admin') return;

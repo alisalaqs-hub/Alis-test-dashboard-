@@ -79,6 +79,8 @@ export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: stri
     serviceChargeAnnual: r.service_charge_annual, groundRentAnnual: r.ground_rent_annual, features: r.features ?? [], description: r.description,
     photos,
     source: { kind: r.source_kind, name, verified: r.source_kind === 'agent-feed' || r.source_kind === 'agent' ? !!r.organisation_verified : r.ownership_verified },
+    // The lister's organisation, so a listing can link to its agent's page (/agent/<id>). Private sellers and landlords have none.
+    organisationId: r.organisation_id ?? null, agentName: r.organisation_id ? r.organisation_name ?? null : null,
     ownershipVerified: r.ownership_verified,
     rejectionReason: mine || viewer.admin ? r.rejection_reason : undefined,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(), publishedAt: r.published_at?.toISOString() ?? null,

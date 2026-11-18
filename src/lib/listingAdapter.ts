@@ -39,6 +39,8 @@ export function dtoToProperty(d: ListingDTO): Property {
   for (const x of d.photos) if (!isFloorPlanCaption(x.alt)) for (const f of x.features ?? []) seen.set(f, (seen.get(f) ?? 0) + 1);
   if (seen.size) p.photoFeatures = [...seen].sort((a, b) => b[1] - a[1]).map(([f]) => f).slice(0, 12);
   p.createdAt = d.publishedAt ?? d.createdAt;
+  // Listed by an organisation: its public page is /agent/<id>. Private sellers and landlords have none.
+  if (d.organisationId) p.agentId = d.organisationId;
   // The server's record of the listing (days actually on the market, price changes) when it has one.
   if (d.history) p.history = d.history;
   p.daysOnMarket = d.history ? d.history.daysOnMarket : d.publishedAt ? Math.max(0, Math.floor((Date.now() - Date.parse(d.publishedAt)) / 86_400_000)) : 0;

@@ -32,6 +32,7 @@ const Landlord = lazy(() => import('./pages/Landlord'));
 const Developer = lazy(() => import('./pages/Developer'));
 const Marketplace = lazy(() => import('./pages/Marketplace'));
 const Agent = lazy(() => import('./pages/Agent'));
+const AgentProfile = lazy(() => import('./pages/AgentProfile'));
 const Automation = lazy(() => import('./pages/Automation'));
 const Enterprise = lazy(() => import('./pages/Developers'));
 const acct = (name: string) => lazy(() => import('./pages/Account').then((m) => ({ default: (m as unknown as Record<string, ComponentType>)[name] })));
@@ -197,6 +198,8 @@ export default function App() {
         <Route path="floor-plan" element={<FloorPlan />} />
         <Route path="owner" element={<Owner />} />
         <Route path="agents" element={<Agent />} />
+        {/* A real agent's public page, with their live listings and "Book a valuation". (/agents is the example dashboard.) */}
+        <Route path="agent/:id" element={<AgentProfile />} />
         <Route path="landlord" element={<Landlord />} />
         <Route path="developer" element={<Developer />} />
         <Route path="marketplace" element={<Marketplace />} />

@@ -52,6 +52,10 @@ export interface ListingDTO {
   description: string | null;
   photos: PhotoDTO[];
   source: { kind: SourceKindDTO; name: string; verified: boolean };
+  /** The agency (or landlord or developer company) that listed it, whose public page is /agent/<id>. Null for private sellers and landlords (absent on older servers). */
+  organisationId?: string | null;
+  /** That organisation's name; null when there is none. */
+  agentName?: string | null;
   ownershipVerified: boolean;
   rejectionReason?: string | null;
   createdAt: string;
@@ -147,4 +151,41 @@ export interface OrgReportDTO {
   totals: { listings: number; views: number; visitors: number; saves: number; enquiries: number; viewings: number };
   items: OrgReportRowDTO[];
   note: string;
+}
+
+/* ───────────── Agent pages and valuation requests ───────────── */
+
+/** An agent's public page: who they are, how much they have on the market, and their live listings (newest first, at most 60). */
+export interface AgentProfileDTO {
+  agent: {
+    id: string; name: string; kind: 'agency' | 'landlord' | 'developer' | 'contractor';
+    /** Checked by Streetkey (for example redress scheme membership). */
+    verified: boolean; redressScheme: string | null;
+    /** The day the agent joined Streetkey, as YYYY-MM-DD. */
+    since: string;
+    /** Homes on the market now (live or under offer), and those marked sold or let in the last 12 months. */
+    counts: { sale: number; rent: number; soldOrLet12m: number };
+  };
+  listings: ListingDTO[];
+}
+
+/**
+ * What someone sends to ask an agent to value their home. Nothing about the person's money is asked
+ * for or kept: no funds, mortgage or income.
+ */
+export interface ValuationRequestBody {
+  name: string; email: string; phone?: string | null;
+  postcode: string; addressLine?: string | null;
+  intent: 'sell' | 'let';
+  propertyType?: string | null; beds?: number | null; message?: string | null;
+  /** Honeypot: left empty by people. */
+  website?: string;
+}
+export type ValuationStatus = 'new' | 'contacted' | 'closed';
+/** A valuation request as the agency's members see it. */
+export interface ValuationRequestDTO {
+  id: string; name: string; email: string; phone: string | null;
+  postcode: string; addressLine: string | null;
+  intent: 'sell' | 'let'; propertyType: string | null; beds: number | null; message: string | null;
+  status: ValuationStatus; createdAt: string;
 }

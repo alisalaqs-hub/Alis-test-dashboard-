@@ -4,7 +4,8 @@
  * Every page has its own address (no "#"), title and description so search engines can list it and a
  * shared link reads well. What may be listed is decided per page:
  *   - listed:     the home page, sold prices (real HM Land Registry data), the tools, the legal pages,
- *                 real listings, and place pages that have real listings
+ *                 real listings, place pages that have real listings, and the pages of agents who
+ *                 have real listings
  *   - not listed: example listings and the example dashboards (they are illustrations, not homes for
  *                 sale), anything personal (account, saved, compare, admin) and thin or empty pages
  *
@@ -41,6 +42,7 @@ export const ROUTES: RouteMeta[] = [
   { path: '/to-rent/:place', title: 'Homes to rent', dynamic: true },
   { path: '/property/:id', title: 'Property', dynamic: true },
   { path: '/property/:id/intelligence', title: 'Property intelligence', index: false },
+  { path: '/agent/:id', title: 'Estate agent', dynamic: true },
   { path: '/prices', title: 'Sold house prices', dynamic: true },
   { path: '/sold-prices/:place', title: 'Sold house prices', dynamic: true },
   { path: '/list', title: 'List a property for sale or to rent', description: 'Sell or let your property on Streetkey. Your listing gets a price check against real sold prices, an AI-written description you can edit and a photo check.' },

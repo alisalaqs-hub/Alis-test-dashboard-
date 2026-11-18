@@ -38,7 +38,7 @@ export async function meRoutes(app: FastifyInstance) {
   /** UK GDPR right of access: everything we hold about you, as JSON. */
   app.get('/api/me/export', async (req, reply) => {
     const u = requireUser(req);
-    const [listings, saved, searches, sent, consents, images, sessions] = await Promise.all([
+    const [listings, saved, searches, sent, consents, images, sessions, valuations] = await Promise.all([
       q('SELECT ref, status, channel, title, address_line, town, postcode, price, created_at FROM listings WHERE owner_user_id = $1', [u.id]),
       q('SELECT listing_key, created_at FROM saved_listings WHERE user_id = $1', [u.id]),
       q('SELECT query, mode, alert_frequency, filters, created_at FROM saved_searches WHERE user_id = $1', [u.id]),
@@ -46,6 +46,9 @@ export async function meRoutes(app: FastifyInstance) {
       q('SELECT purpose, version, granted_at, withdrawn_at FROM consents WHERE user_id = $1', [u.id]),
       q('SELECT room, style, brief, status, result_url, created_at FROM ai_images WHERE user_id = $1', [u.id]),
       q('SELECT created_at, last_seen_at, expires_at, user_agent FROM sessions WHERE user_id = $1', [u.id]),
+      // Valuations you asked an agent for while signed in.
+      q(`SELECT o.name AS agent, v.intent, v.name, v.email, v.phone, v.postcode, v.address_line, v.property_type, v.beds, v.message, v.status, v.created_at
+           FROM valuation_requests v JOIN organisations o ON o.id = v.organisation_id WHERE v.user_id = $1 ORDER BY v.created_at`, [u.id]),
     ]);
     // Automated assessments about you or your listings (UK GDPR Articles 15 and 22).
     const aiAboutMe = {
@@ -55,12 +58,12 @@ export async function meRoutes(app: FastifyInstance) {
     };
     await audit(req, 'user.exported', `user:${u.id}`);
     reply.header('Content-Disposition', 'attachment; filename="streetkey-my-data.json"');
-    return { exportedAt: new Date().toISOString(), account: publicUser(u), listings, savedHomes: saved, savedSearches: searches, enquiriesSent: sent, consents, aiImages: images, aiAssessments: aiAboutMe, sessions };
+    return { exportedAt: new Date().toISOString(), account: publicUser(u), listings, savedHomes: saved, savedSearches: searches, enquiriesSent: sent, valuationRequests: valuations, consents, aiImages: images, aiAssessments: aiAboutMe, sessions };
   });
 
   /**
    * UK GDPR right to erasure: removes the account and personal details, design-studio photos and AI results,
-   * AI jobs, draft listings and their photos. Published listings are withdrawn (kept, without the owner's details,
+   * AI jobs, draft listings and their photos, and the valuation requests sent from the account. Published listings are withdrawn (kept, without the owner's details,
    * for the audit trail).
    */
   app.delete('/api/me', async (req, reply) => {
@@ -81,6 +84,8 @@ export async function meRoutes(app: FastifyInstance) {
       await q(`DELETE FROM listings WHERE owner_user_id = $1 AND status = 'draft'`, [u.id], c);
       await q(`DELETE FROM enquiry_ai WHERE enquiry_id IN (SELECT id FROM enquiries WHERE from_user_id = $1)`, [u.id], c);
       await q(`UPDATE enquiries SET name = 'Deleted user', email = 'deleted@invalid', phone = NULL WHERE from_user_id = $1`, [u.id], c);
+      // A valuation request is nothing but the person's own details, so it goes entirely (the agent was emailed it when it was sent).
+      await q('DELETE FROM valuation_requests WHERE user_id = $1', [u.id], c);
       await q(`UPDATE ai_usage SET user_id = NULL WHERE user_id = $1`, [u.id], c);
       await q('DELETE FROM saved_listings WHERE user_id = $1', [u.id], c);
       await q('DELETE FROM saved_searches WHERE user_id = $1', [u.id], c);

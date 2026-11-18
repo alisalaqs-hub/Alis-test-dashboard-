@@ -5,7 +5,8 @@
  *            jobs/alerts.ts, which holds the matching and sending both paths share). Each alert runs the
  *            filters the person saw when saving (older saves: their words, read by the built-in rules in
  *            the saved mode)
- *   cleanup  remove expired sessions and links, and raw analytics older than 13 months, run daily
+ *   cleanup  remove expired sessions and links, raw analytics older than 13 months and valuation requests
+ *            older than 12 months, run daily
  */
 import { ensureLiveRegistry } from '../ai/registry';
 import { knownPlaces } from '../ai/search/intent';
@@ -71,5 +72,7 @@ export async function runCleanup(o: { ifDue?: boolean } = {}) {
   const sessions = await q('DELETE FROM sessions WHERE expires_at < now() RETURNING 1');
   const tokens = await q(`DELETE FROM email_tokens WHERE expires_at < now() - interval '7 days' RETURNING 1`);
   const events = await q(`DELETE FROM engagement_events WHERE occurred_at < now() - interval '13 months' RETURNING 1`);
-  return { sessions: sessions.length, tokens: tokens.length, events: events.length, refurbPhotos: refurb.length, orphanDesigns: orphans.length };
+  // Valuation requests are kept for 12 months (the privacy notice says so), whatever their status.
+  const valuations = await q(`DELETE FROM valuation_requests WHERE created_at < now() - interval '12 months' RETURNING 1`);
+  return { sessions: sessions.length, tokens: tokens.length, events: events.length, refurbPhotos: refurb.length, orphanDesigns: orphans.length, valuationRequests: valuations.length };
 }

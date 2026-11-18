@@ -5,7 +5,7 @@
  * fast and the site stays in demo mode.
  */
 import type { EpcCertificate, EpcSummary, FloodResult } from '../engine/evidence';
-import type { AiImageDTO, CheckDTO, DataStatusDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, OfficialListingDTO, OrgReportDTO, SavedSearchDTO, SoldPricesDTO, UserDTO } from './apiTypes';
+import type { AgentProfileDTO, AiImageDTO, CheckDTO, DataStatusDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, OfficialListingDTO, OrgReportDTO, SavedSearchDTO, SoldPricesDTO, UserDTO, ValuationRequestBody, ValuationRequestDTO, ValuationStatus } from './apiTypes';
 
 export const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
@@ -117,6 +117,13 @@ export const api = {
     deletePhoto: (ref: string, id: string) => del<{ ok: true }>(`/api/listings/${ref}/photos/${id}`),
     enquire: (ref: string, b: { name: string; email: string; phone?: string; kind: 'viewing' | 'question' | 'offer'; message: string; preferredSlot?: string; website?: string }) => post<{ ok: true }>(`/api/listings/${ref}/enquiries`, b),
   },
+  /** Estate and letting agents' public pages. */
+  agents: {
+    /** Who the agent is, what they have on the market and their live listings (newest first, at most 60). */
+    get: (id: string) => get<AgentProfileDTO>(`/api/agents/${encodeURIComponent(id)}`),
+    /** "Book a valuation": goes to the agent by email and into their account. Nothing about the person's money is asked for or sent. */
+    requestValuation: (id: string, b: ValuationRequestBody) => post<{ ok: true }>(`/api/agents/${encodeURIComponent(id)}/valuation-requests`, b),
+  },
   enquiries: {
     /** role 'admin': a site admin who isn't part of the conversation (read-only). filtered/filterReason: lister and admins only. */
     get: (id: string) => get<{ role: 'lister' | 'enquirer' | 'admin'; status: string; kind: string; preferredSlot: string | null; filtered?: boolean; filterReason?: string | null; listing: { ref: string; title: string; price: number; channel: string }; contact: { name: string; email?: string; phone?: string | null }; messages: MessageDTO[] }>(`/api/enquiries/${id}`),
@@ -158,6 +165,9 @@ export const api = {
     /** What each of the agency's listings brought in over the last `days` days. */
     report: (id: string, days = 30) => get<OrgReportDTO>(`/api/orgs/${id}/report?days=${days}`),
     runs: (id: string) => get<{ items: { id: string; format: string; accepted: number; withdrawn: number; rejected: { ref: string; reason: string }[]; createdAt: string }[] }>(`/api/orgs/${id}/feed-runs`),
+    /** Valuations people asked this agency for from its public page, newest first (at most 200). */
+    valuationRequests: (id: string) => get<{ items: ValuationRequestDTO[] }>(`/api/orgs/${id}/valuation-requests`),
+    setValuationStatus: (id: string, rid: string, status: ValuationStatus) => patch<{ request: ValuationRequestDTO }>(`/api/orgs/${id}/valuation-requests/${rid}`, { status }),
   },
   event: (listing: string, name: string, session: string) => {
     try {

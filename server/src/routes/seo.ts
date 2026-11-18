@@ -2,8 +2,9 @@
  * For search engines: /robots.txt and /sitemap.xml.
  *
  * The sitemap lists what may be found on Google: the fixed pages, every live listing, a for-sale or
- * to-rent page for each town that has live listings, and sold-price pages for the larger towns and
- * cities of England and Wales plus every town with a listing. Example listings are never in it.
+ * to-rent page for each town that has live listings, the page of each agent that has live listings,
+ * and sold-price pages for the larger towns and cities of England and Wales plus every town with a
+ * listing. Example listings are never in it.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,16 +33,19 @@ export async function seoRoutes(app: FastifyInstance) {
   }
 
   app.get('/sitemap.xml', async (_req, reply) => {
-    const listings = await q<{ ref: string; channel: 'sale' | 'rent'; town: string; updated_at: Date }>(
-      `SELECT ref, channel, town, updated_at FROM listings WHERE status IN ('live', 'under_offer') ORDER BY updated_at DESC LIMIT $1`, [MAX_URLS]);
+    const listings = await q<{ ref: string; channel: 'sale' | 'rent'; town: string; updated_at: Date; organisation_id: string | null }>(
+      `SELECT ref, channel, town, updated_at, organisation_id FROM listings WHERE status IN ('live', 'under_offer') ORDER BY updated_at DESC LIMIT $1`, [MAX_URLS]);
     const urls: { loc: string; lastmod?: string }[] = PAGES.map((loc) => ({ loc }));
     const towns = { sale: new Map<string, Date>(), rent: new Map<string, Date>() };
+    const agents = new Map<string, Date>(); // agents with at least one live listing, and when their stock last changed
     for (const l of listings) {
+      if (l.organisation_id && !agents.has(l.organisation_id)) agents.set(l.organisation_id, l.updated_at);
       const town = slugPlace(l.town.split(',')[0]);
       if (town && !towns[l.channel].has(town)) towns[l.channel].set(town, l.updated_at); // newest first, so this is the latest change
     }
     for (const [town, at] of towns.sale) urls.push({ loc: `/for-sale/${town}`, lastmod: at.toISOString().slice(0, 10) });
     for (const [town, at] of towns.rent) urls.push({ loc: `/to-rent/${town}`, lastmod: at.toISOString().slice(0, 10) });
+    for (const [id, at] of agents) urls.push({ loc: `/agent/${id}`, lastmod: at.toISOString().slice(0, 10) });
     for (const place of new Set([...PLACES.map(slugPlace), ...towns.sale.keys(), ...towns.rent.keys()])) urls.push({ loc: `/sold-prices/${place}` });
     for (const l of listings) urls.push({ loc: `/property/${encodeURIComponent(l.ref)}`, lastmod: l.updated_at.toISOString().slice(0, 10) });
     const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.slice(0, MAX_URLS).map((u) =>

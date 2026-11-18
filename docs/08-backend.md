@@ -156,8 +156,8 @@ when the page opens.
   their functions. A test fails if a route has no rule.
 - **Node hosts** answer any page address with the site (`server/src/app.ts`).
 - **`/sitemap.xml`** (`server/src/routes/seo.ts`): the fixed pages, every live listing, a for-sale or to-rent
-  page for each town with live listings, and sold-price pages for the larger towns and cities of England and
-  Wales. **`/robots.txt`** keeps `/api/`, account, admin, saved and compare out and points at the sitemap. On
+  page for each town with live listings, the page of each agent with live listings (`/agent/<id>`), and
+  sold-price pages for the larger towns and cities of England and Wales. **`/robots.txt`** keeps `/api/`, account, admin, saved and compare out and points at the sitemap. On
   Netlify it is a plain file written at build time (`scripts/robots.mjs`), so search engines get it even when
   the back end is down; a Node host serves the same text. Set `PUBLIC_URL` to the site's real address (on
   Netlify the site's own `URL` is used if it isn't set).
@@ -202,6 +202,28 @@ requests over the period (7 to 90 days), days on the market, and totals. Enquiri
 out. `?format=csv` downloads the same as a spreadsheet; cells that begin with `=`, `+`, `-` or `@` are made
 safe so a listing title can never run as a formula. Shown under *Account → Agency & feeds → Results*.
 
+### Agent pages and valuation requests
+
+Every organisation has a public page at `/agent/<id>` (`src/pages/AgentProfile.tsx`, `server/src/routes/agents.ts`,
+migration 017): its name, a *Verified* tag once an admin has checked it, its redress scheme, how many homes it
+has for sale and to rent, a *Book a valuation* form and its live listings. Search engines are offered the page
+only while the agent has live listings. Listings say whose they are (`organisationId` and `agentName` on the
+listing, `agentId` on the website's `Property`), so a listing page can link to its agent.
+
+- `GET /api/agents/:id` (public): the agent, counts (`sale`, `rent`, `soldOrLet12m`) and up to 60 live or
+  under-offer listings, newest first, in the same shape as `GET /api/listings`.
+- `POST /api/agents/:id/valuation-requests` (public): name, email, optional phone, the property's postcode,
+  optional address line, `intent` (`sell` or `let`), optional property type, bedrooms and message. **Nothing
+  about the person's money is asked for or stored: no funds, mortgage or income. This is a product rule.** The
+  request is stored, then emailed to the agency's owners and admins. A filled-in honeypot (`website`) gets the
+  same answer and nothing is kept. Limits: 5 a minute per network, 30 a day per account (or network), 300 a
+  day per network, and 3 a day per email address per agent.
+- `GET /api/orgs/:id/valuation-requests` and `PATCH /api/orgs/:id/valuation-requests/:rid` with `{ status }`
+  (`new`, `contacted`, `closed`): the agency's owners and admins only, as for its results. Shown under
+  *Account → Agency & feeds → Valuation requests*.
+- Data protection: requests sent while signed in are in the person's data export and are deleted with their
+  account; the daily clean-up deletes every request after 12 months; the privacy notice says so.
+
 ## Security and privacy
 
 - Passwords hashed with scrypt; sessions are random tokens in `HttpOnly`, `Secure`, `SameSite=Lax` cookies (only hashes stored); password reset signs out every device.
@@ -211,7 +233,7 @@ safe so a listing title can never run as a formula. Shown under *Account → Age
 - Background workers only start for requests carrying the worker secret; stuck or abandoned AI jobs are closed out automatically and never retried forever.
 - Private sellers' house numbers and full postcodes are never shown publicly or given to the AI engines.
 - AI: untrusted text is fenced off from instructions; outputs are validated in code; no prompts, outputs or API keys are logged; OpenAI API data isn't used for training by default.
-- UK GDPR: data export (`/api/me/export`) includes automated assessments. Account deletion removes the person's details, sessions, saved homes and searches, design-studio photos and AI results (files included), AI jobs, enquiry AI summaries, and draft listings with their photos; published listings are withdrawn and kept without the owner's details. AI usage records are kept without the person's id.
+- UK GDPR: data export (`/api/me/export`) includes automated assessments. Account deletion removes the person's details, sessions, saved homes and searches, design-studio photos and AI results (files included), AI jobs, enquiry AI summaries, valuation requests sent from the account, and draft listings with their photos; published listings are withdrawn and kept without the owner's details. AI usage records are kept without the person's id.
 - Listings: compliance checks block submission (EPC, council tax, tenure, leasehold details, EPC E+ for lettings, discriminatory wording, rental bidding), plus admin review.
 
 ## Run it on your computer
