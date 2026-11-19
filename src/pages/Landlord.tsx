@@ -1,214 +1,55 @@
-import { useMemo, useState } from 'react';
-import { gbp, gbpK, Section, Spark, Stat, Tag } from '../components/ui';
-import { AssistantPanel } from '../components/Assistant';
-import { AiBriefing, BriefingFallback } from '../components/ai/AiBriefing';
-import { landlordSkills, maintenanceForecast, PORTFOLIO } from '../ai/landlordSkills';
-import type { BriefingSnapshot } from '../lib/ai/briefing';
+/**
+ * For landlords: what advertising a rental on Streetkey involves and what you get. Streetkey is where
+ * tenants find the property; the tenancy itself stays with the landlord or their agent.
+ */
+import { Link } from 'react-router-dom';
+import { Icon } from '../components/Icons';
 
-const TODAY = new Date('2026-11-08');
-const days = (d: string) => Math.round((new Date(d).getTime() - TODAY.getTime()) / 86_400_000);
-
-const UNITS = [
-  { id: 'U1', addr: '14 Arnside Terrace (fictional), L15', tenant: 'A. Okafor', rent: 1_050, paid: true, gas: '2027-02-11', eicr: '2029-06-01', epc: 'D', epcExp: '2031-03-01', deposit: 'DPS · protected', rtr: 'n/a (England check done 2024)', licence: '—', status: 'Let' },
-  { id: 'U2', addr: 'Flat 3, Lace Market Yard (fictional), NG1', tenant: 'J. Whitfield', rent: 1_250, paid: false, gas: 'n/a (electric)', eicr: '2026-11-30', epc: 'B', epcExp: '2033-01-01', deposit: 'TDS · protected', rtr: 'Done', licence: 'Selective · 2028', status: 'Arrears 9 days' },
-  { id: 'U3', addr: '22 Cranwell Street (fictional), M14 — 5-bed HMO', tenant: '5 sharers', rent: 3_625, paid: true, gas: '2026-11-19', eicr: '2027-09-14', epc: 'C', epcExp: '2030-05-01', deposit: 'mydeposits · 1 pending', rtr: '1 follow-up check due', licence: 'Mandatory HMO · 2029', status: 'Let (4/5)' },
-  { id: 'U4', addr: '9 Bramwell Mount (fictional), LS6', tenant: '— void —', rent: 1_250, paid: false, gas: '2027-05-02', eicr: '2030-01-10', epc: 'D', epcExp: '2027-01-15', deposit: '—', rtr: '—', licence: '—', status: 'Void · 18 days' },
+const GET: [icon: string, title: string, text: string][] = [
+  ['home', 'A full advert, free', 'Photos, a floor plan you can draw from your own measurements, the details tenants ask for (deposit, available date, furnishing, pets, bills) and a description you can write yourself or start with AI and edit.'],
+  ['bell', 'Enquiries in one place', 'Viewing requests and questions arrive by email with the person’s name, email and phone, and in your Streetkey inbox. Reply from either.'],
+  ['shield', 'Wording checked before it goes live', 'The advert is checked for things that cause landlords trouble: fees tenants cannot be charged, deposits above the legal limit, wording that discriminates, and rents that are not fixed.'],
+  ['spark', 'Shown to the right tenants', 'Your advert goes straight to everyone whose saved search it matches, and appears on the map and in searches for your area.'],
 ];
 
-const TASKS0 = [
-  { id: 'M-1042', unit: 'U3', title: 'Shower not draining, room 4', reported: '2026-11-06', stage: 'reported', triage: { trade: 'Plumbing', urgency: 'Routine (14 days)', confidence: 0.82 } },
-  { id: 'M-1039', unit: 'U2', title: 'Black mould on bedroom wall', reported: '2026-11-03', stage: 'triaged', triage: { trade: 'Damp & mould inspection', urgency: 'Urgent — investigate within 14 days, hazard assessment', confidence: 0.91 } },
-  { id: 'M-1031', unit: 'U1', title: 'Front door lock sticking', reported: '2026-10-28', stage: 'assigned', triage: { trade: 'Locksmith', urgency: 'Routine', confidence: 0.77 }, contractor: 'Mersey Locks (demo)' },
-  { id: 'M-1020', unit: 'U3', title: 'Boiler pressure dropping', reported: '2026-10-19', stage: 'done', triage: { trade: 'Gas Safe engineer', urgency: 'Priority (72h)', confidence: 0.88 }, contractor: 'Northern Heat (demo)' },
-];
-type Stage = 'reported' | 'triaged' | 'assigned' | 'done';
-const STAGES: { id: Stage; label: string }[] = [{ id: 'reported', label: 'Reported' }, { id: 'triaged', label: 'Triaged' }, { id: 'assigned', label: 'Contractor assigned' }, { id: 'done', label: 'Completed' }];
+const READY = ['The energy rating (EPC). A rental needs E or better, or a registered exemption.', 'The council tax band.', 'The monthly rent, the deposit and the date it is available.', 'Whether it is furnished, and whether you will consider pets.', 'Photos of every main room and the outside.'];
 
-const ARREARS = 1_250;
-const VOID_DAYS = 18;
-const VOID_COST = VOID_DAYS * (1_250 * 12) / 365 + VOID_DAYS * 6;
-const fictional = (s: string) => s.replace(' (fictional)', '');
-
-const APPS = [
-  { name: 'Applicant A (redacted)', unit: 'U4', income: 'Affordability: 2.9× rent (declared)', refs: 'Landlord ref received', rtr: 'Share code verified', flags: [] as string[] },
-  { name: 'Applicant B (redacted)', unit: 'U4', income: 'Affordability: 2.2× rent; guarantor offered', refs: 'Pending', rtr: 'Manual document check needed', flags: ['Below 2.5× guide — consider guarantor or rent in advance limits'] },
-];
-
-export default function Landlord() {
-  const [tasks, setTasks] = useState(TASKS0);
-  const [decisions, setDecisions] = useState<Record<string, string>>({});
-  const rentRoll = UNITS.reduce((s, u) => s + (u.status.startsWith('Void') ? 0 : u.rent), 0);
-  const compliance = useMemo(() => {
-    const items: { unit: string; item: string; due: string; d: number }[] = [];
-    for (const u of UNITS) {
-      if (/\d{4}/.test(u.gas)) items.push({ unit: u.id, item: 'Gas safety certificate (CP12) — annual', due: u.gas, d: days(u.gas) });
-      items.push({ unit: u.id, item: 'EICR — 5-yearly', due: u.eicr, d: days(u.eicr) });
-      items.push({ unit: u.id, item: `EPC expiry (current ${u.epc})`, due: u.epcExp, d: days(u.epcExp) });
-    }
-    items.push({ unit: 'U3', item: 'Deposit protection + prescribed information (within 30 days)', due: '2026-11-21', d: days('2026-11-21') });
-    items.push({ unit: 'U3', item: 'Right to rent follow-up check (time-limited permission)', due: '2026-12-01', d: days('2026-12-01') });
-    items.push({ unit: 'ALL', item: 'Smoke & CO alarms tested at start of each tenancy', due: '2026-11-15', d: days('2026-11-15') });
-    return items.sort((a, b) => a.d - b.d);
-  }, []);
-  const forecast = useMemo(() => maintenanceForecast(), []);
-
-  /** Portfolio and compliance snapshot for the AI briefing. Tenant names and applications are left out. */
-  const briefing = useMemo<BriefingSnapshot>(() => ({
-    title: 'Landlord portfolio · 4 fictional units',
-    scope: 'Demonstration portfolio in England under the Renters’ Rights Act regime. Tenant applications are left out: choosing a tenant stays a human decision.',
-    asOf: TODAY.toISOString().slice(0, 10),
-    metrics: [
-      { label: 'Monthly rent roll (let units)', value: gbp(rentRoll) },
-      { label: 'Arrears', value: `${gbp(ARREARS)} (1 tenancy, 9 days)` },
-      { label: 'Occupancy', value: '81% (9 of 11 lettable rooms or units)' },
-      { label: 'Compliance items due within 30 days', value: compliance.filter((c) => c.d <= 30).length },
-      { label: 'Compliance items overdue', value: compliance.filter((c) => c.d < 0).length },
-      { label: `Void cost so far (U4, ${VOID_DAYS} days)`, value: gbpK(VOID_COST) },
-      { label: 'Maintenance forecast, next 24 months', value: gbp(forecast.reduce((s, m) => s + m.cost, 0)) },
-    ],
-    items: [
-      ...UNITS.map((u) => {
-        const rec = PORTFOLIO.find((x) => x.id === u.id);
-        return {
-          id: u.id, label: fictional(u.addr), group: 'unit',
-          fields: {
-            rentPcm: u.rent, rentPaidThisMonth: u.paid, status: u.status, gasSafetyDue: u.gas, eicrDue: u.eicr, epcRating: u.epc, epcExpires: u.epcExp,
-            deposit: u.deposit, rightToRent: u.rtr, licence: u.licence,
-            marketRentPcm: rec?.marketRent ?? null, marketRentComparableCount: rec?.marketEvidence ?? null, voidDays12m: rec?.voidDays12m ?? null, maintenanceSpend12m: rec?.maintenance12m ?? null,
-          },
-        };
-      }),
-      ...compliance.map((c, i) => ({ id: `C${i + 1}`, label: c.item, group: 'compliance', fields: { unit: c.unit, due: c.due, daysUntilDue: c.d, overdue: c.d < 0 } })),
-      ...tasks.map((t) => ({
-        id: t.id, label: t.title, group: 'maintenance request',
-        fields: { unit: t.unit, reported: t.reported, stage: STAGES.find((x) => x.id === t.stage)?.label ?? t.stage, suggestedTrade: t.triage.trade, urgency: t.triage.urgency, contractor: 'contractor' in t ? t.contractor ?? null : null },
-      })),
-      ...forecast.map((m, i) => ({ id: `F${i + 1}`, label: `${m.item} (${m.unit})`, group: 'maintenance forecast', fields: { unit: m.unit, expected: m.due, budget: m.cost } })),
-    ],
-    notes: [
-      'Section 13 rent review for U1: current £1,050 pcm; market evidence £1,095 pcm from 4 demo let comparables.',
-      'U4 void: 6 enquiries and 3 viewings booked so far.',
-      'Damp and mould reports are escalated for prompt investigation and hazard assessment (HHSRS).',
-    ],
-  }), [compliance, tasks, rentRoll, forecast]);
-  const briefingFallback = (
-    <BriefingFallback title="Coming up" items={[
-      ...compliance.slice(0, 3).map((c) => <><b>{c.unit}</b> {c.item}: {c.d < 0 ? 'overdue' : `due in ${c.d} days`} ({c.due})</>),
-      <>Arrears of {gbp(ARREARS)} on U2 (9 days): talk to the tenant early and keep a record.</>,
-    ]} />
-  );
-
-  const move = (id: string, dir: 1 | -1) => setTasks((ts) => ts.map((t) => {
-    if (t.id !== id) return t;
-    const k = STAGES.findIndex((s) => s.id === t.stage);
-    return { ...t, stage: STAGES[Math.max(0, Math.min(3, k + dir))].id };
-  }));
-
+export default function LandlordPage() {
   return (
-    <div className="stack" style={{ gap: 18 }}>
-      <div className="page-head">
-        <div><div className="eyebrow">Lettings & property management</div><h2 style={{ marginTop: 6 }}>Landlord dashboard</h2>
-          <p className="muted" style={{ marginTop: 6 }}>Portfolio of 4 fictional units. Built around England’s Renters’ Rights Act regime: periodic assured tenancies, no section 21, annual section 13 rent increases.</p></div>
-        <div className="row"><Tag kind="demo">Example data</Tag></div>
-      </div>
-
-      <div className="grid g4 keep2">
-        <div className="card"><Stat label="Monthly rent roll" value={gbp(rentRoll)} sub="Let units, contracted" /><Spark data={[8.1, 8.2, 8.2, 8.4, 8.3, 8.6, 8.7, 8.6, 8.9, 9.0, 8.9, 8.9]} height={36} color="var(--sage)" /></div>
-        <div className="card"><Stat label="Arrears" value={gbp(ARREARS)} tone="neg" sub="1 tenancy · 9 days" /></div>
-        <div className="card"><Stat label="Occupancy" value="81%" sub="9 of 11 lettable rooms/units" /></div>
-        <div className="card"><Stat label="Compliance due ≤ 30 days" value={compliance.filter((c) => c.d <= 30).length} tone={compliance.some((c) => c.d < 14) ? 'neg' : undefined} sub="Auto-reminders to you & contractor" /></div>
-      </div>
-
-      <AiBriefing kind="landlord" title="Portfolio briefing" snapshot={briefing} fallback={briefingFallback}
-        intro="What needs doing first across compliance, arrears, voids and maintenance, with the reason and the next step." />
-
-      <div className="split-r">
-        <div className="stack" style={{ gap: 16 }}>
-          <AssistantPanel title="Ask about your portfolio" kicker="AI landlord intelligence" skills={landlordSkills} ctx={PORTFOLIO} />
-          <Section title="Predictive maintenance & budget" kicker="Next 24 months" right={<Tag kind="est">From component ages</Tag>}>
-            <div className="table-wrap" tabIndex={0}><table className="t"><thead><tr><th>Unit</th><th>Item</th><th>Expected</th><th className="r">Budget</th></tr></thead>
-              <tbody>{forecast.map((m, i) => <tr key={i}><td className="mono small">{m.unit}</td><td className="small">{m.item}</td><td className="small">{m.due}</td><td className="r num">{gbp(m.cost)}</td></tr>)}</tbody>
-              <tfoot><tr><td colSpan={3}>Total forecast</td><td className="r num">{gbp(forecast.reduce((s, m) => s + m.cost, 0))}</td></tr></tfoot></table></div>
-            <p className="xs muted" style={{ marginTop: 8 }}>Based on verified installation dates and typical component lives; improves as maintenance records and invoices accumulate.</p>
-          </Section>
-          <Section title="Portfolio" kicker="Units">
-            <div className="table-wrap" tabIndex={0}><table className="t">
-              <thead><tr><th>Unit</th><th>Tenant</th><th className="r">Rent</th><th>Gas / EICR / EPC</th><th>Deposit · RTR · Licence</th><th>Status</th></tr></thead>
-              <tbody>{UNITS.map((u) => (
-                <tr key={u.id}>
-                  <td><b>{u.id}</b> <span className="small">{u.addr}</span></td>
-                  <td className="small">{u.tenant}</td>
-                  <td className="r num">{gbp(u.rent)}</td>
-                  <td className="xs">{u.gas}<br />{u.eicr}<br />EPC {u.epc}</td>
-                  <td className="xs">{u.deposit}<br />{u.rtr}<br />{u.licence}</td>
-                  <td><Tag kind={u.status.startsWith('Let') ? 'ok' : 'warn'}>{u.status}</Tag></td>
-                </tr>
-              ))}</tbody>
-            </table></div>
-          </Section>
-
-          <Section title="Maintenance" kicker="Tenant-reported · AI triage, human-assigned" right={<Tag kind="ai">Triage suggestions</Tag>}>
-            <div className="kanban">
-              {STAGES.map((s) => (
-                <div key={s.id} className="kcol">
-                  <div className="row between"><b className="small">{s.label}</b><span className="xs muted">{tasks.filter((t) => t.stage === s.id).length}</span></div>
-                  {tasks.filter((t) => t.stage === s.id).map((t) => (
-                    <div key={t.id} className="kcard">
-                      <div className="row between"><span className="mono xs muted">{t.id} · {t.unit}</span><span className="xs muted">{t.reported.slice(5)}</span></div>
-                      <div style={{ fontWeight: 600, margin: '4px 0' }}>{t.title}</div>
-                      <div className="xs"><Tag kind="ai">{t.triage.trade}</Tag> <span className="muted">{Math.round(t.triage.confidence * 100)}%</span></div>
-                      <div className="xs muted" style={{ marginTop: 4 }}>{t.triage.urgency}</div>
-                      {'contractor' in t && t.contractor && <div className="xs" style={{ marginTop: 4 }}>→ {t.contractor}</div>}
-                      <div className="row" style={{ marginTop: 8, gap: 6 }}>
-                        {s.id !== 'reported' && <button className="btn ghost sm" onClick={() => move(t.id, -1)}>←</button>}
-                        {s.id !== 'done' && <button className="btn sm" onClick={() => move(t.id, 1)}>{s.id === 'reported' ? 'Confirm triage' : s.id === 'triaged' ? 'Assign' : 'Complete'} →</button>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-            <p className="xs muted" style={{ marginTop: 8 }}>Damp & mould reports are always escalated for prompt investigation and hazard assessment (HHSRS). Streetkey suggests trade and urgency; the landlord or agent confirms.</p>
-          </Section>
-
-          <Section title="Applications for U4" kicker="Human decision required" right={<Tag kind="neutral">No automated refusals</Tag>}>
-            <div className="stack">
-              {APPS.map((a) => (
-                <div key={a.name} className="card flat" style={{ padding: 12 }}>
-                  <div className="row between"><b>{a.name}</b>{decisions[a.name] && <Tag kind={decisions[a.name] === 'Proceed to offer' ? 'ok' : 'neutral'}>{decisions[a.name]}</Tag>}</div>
-                  <div className="small muted" style={{ marginTop: 4 }}>{a.income} · {a.refs} · Right to rent: {a.rtr}</div>
-                  {a.flags.map((f) => <div key={f} className="xs" style={{ color: 'var(--gold)', marginTop: 4 }}>ⓘ {f}</div>)}
-                  <div className="row" style={{ marginTop: 8 }}>
-                    <button className="btn sm" onClick={() => setDecisions((d) => ({ ...d, [a.name]: 'Proceed to offer' }))}>Proceed</button>
-                    <button className="btn ghost sm" onClick={() => setDecisions((d) => ({ ...d, [a.name]: 'More information requested' }))}>Request info</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <p className="xs muted" style={{ marginTop: 8 }}>Screening shows facts, not scores. Protected characteristics and benefit status are never used (blanket “No DSS”/children/pet bans are unlawful under the Renters’ Rights Act regime). Every decision is logged with reason and the human who made it (UK GDPR Art. 22).</p>
-          </Section>
+    <div className="stack join" style={{ gap: 34 }}>
+      <header className="join-hero">
+        <div className="eyebrow">For landlords</div>
+        <h2>Advertise your rental on Streetkey, free</h2>
+        <p>Put your property in front of people looking to rent, with the facts they want up front. It takes about five minutes.</p>
+        <div className="row" style={{ gap: 10 }}>
+          <Link to="/list" className="btn accent">List a property to let <Icon name="arrow" size={18} /></Link>
+          <Link to="/floor-plan" className="btn ghost">Make a floor plan</Link>
         </div>
+      </header>
 
-        <div className="stack" style={{ gap: 16 }}>
-          <Section title="Compliance calendar" kicker="Next 12 months">
-            <ul className="clean">{compliance.slice(0, 9).map((c, k) => (
-              <li key={k} className="row between" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
-                <div className="small"><b className="mono xs">{c.unit}</b> {c.item}<div className="xs muted">{c.due}</div></div>
-                <Tag kind={c.d < 0 ? 'warn' : c.d <= 30 ? 'warn' : c.d <= 90 ? 'demo' : 'ok'}>{c.d < 0 ? 'Overdue' : `${c.d}d`}</Tag>
-              </li>
-            ))}</ul>
-          </Section>
-          <Section title="Rent review (section 13)" kicker="U1 · Arnside Terrace">
-            <div className="row between"><Stat label="Current" value={gbp(1_050)} /><Stat label="Market evidence" value={gbp(1_095)} sub="4 demo let comps" /></div>
-            <p className="xs muted" style={{ marginTop: 8 }}>Increases limited to once per year via section 13 notice (2 months), challengeable at the First-tier Tribunal. Streetkey drafts the notice with comparable evidence for you to review.</p>
-          </Section>
-          <Section title="Void cost" kicker="U4 · 18 days">
-            <div className="num" style={{ fontSize: 24 }}>{gbpK(VOID_COST)}</div>
-            <div className="xs muted">Lost rent + council tax & utilities so far. Listing syndicated to Streetkey Discover; 6 enquiries, 3 viewings booked.</div>
-          </Section>
-          <div className="callout info xs">Regulatory content reflects England as configured Nov 2026 (Renters’ Rights Act 2025 tenancy reforms from 1 May 2026; PRS Database & Ombudsman to follow). Wales (Renting Homes Act) and Scotland (PRT) rule-sets are separate modules. Not legal advice — verify current commencement status.</div>
-        </div>
+      <section aria-labelledby="ll-get">
+        <h3 id="ll-get" className="join-h">What you get</h3>
+        <ul className="join-grid two">
+          {GET.map(([icon, title, text]) => <li key={title} className="join-card"><span className="trust-ic"><Icon name={icon} size={20} /></span><b>{title}</b><p>{text}</p></li>)}
+        </ul>
+      </section>
+
+      <div className="grid g2" style={{ gap: 18, alignItems: 'start' }}>
+        <section className="card" aria-labelledby="ll-ready">
+          <h3 id="ll-ready" className="join-h">Have these ready</h3>
+          <ul className="ticks">{READY.map((r) => <li key={r}>{r}</li>)}</ul>
+        </section>
+        <section className="card" aria-labelledby="ll-how">
+          <h3 id="ll-how" className="join-h">How it works</h3>
+          <ol className="join-steps compact">
+            <li><span className="join-n" aria-hidden="true">1</span><div><b>List your property</b><p>Fill in the form and add your photos.</p></div></li>
+            <li><span className="join-n" aria-hidden="true">2</span><div><b>Streetkey checks it</b><p>Each new advert is looked at before it goes live.</p></div></li>
+            <li><span className="join-n" aria-hidden="true">3</span><div><b>Reply and arrange viewings</b><p>Answer enquiries by email or in your inbox, and mark the property let when it is.</p></div></li>
+          </ol>
+        </section>
       </div>
+
+      <p className="small muted" style={{ maxWidth: 720 }}>Streetkey is where tenants find your property. Referencing, the tenancy agreement, the deposit and the rent stay with you or your letting agent.</p>
     </div>
   );
 }

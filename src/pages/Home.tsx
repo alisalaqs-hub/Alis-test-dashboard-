@@ -176,12 +176,11 @@ export default function Home() {
 
         <section className="pro-band" aria-labelledby="home-pro">
           <div>
-            <h2 id="home-pro">Estate and letting agents</h2>
-            <p>Put your listings on Streetkey free. Send them automatically from your software and see the views and enquiries each one gets.</p>
+            <h2 id="home-pro">Agents and landlords</h2>
+            <p>Put your listings on Streetkey free: a page for your agency, valuation requests, leads by email and results for every listing.</p>
           </div>
           <div className="row" style={{ gap: 10 }}>
-            <Link to="/sources" className="btn">Connect your listings</Link>
-            <Link to="/agents" className="btn ghost">For agents</Link>
+            <Link to="/agents" className="btn">For agents</Link>
             <Link to="/landlord" className="btn ghost">For landlords</Link>
           </div>
         </section>

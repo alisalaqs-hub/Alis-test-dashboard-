@@ -14,8 +14,9 @@ describe('page titles and search-engine rules', () => {
     expect(ROUTES.every((r) => r.path === '/' || r.title.length > 0)).toBe(true);
   });
   it('keeps personal pages and example dashboards out of search engines', () => {
-    for (const p of ['/account', '/account/inbox/abc', '/admin', '/saved', '/compare', '/agents', '/landlord', '/developer', '/owner', '/property/x/intelligence']) expect(metaFor(p).index, p).toBe(false);
-    for (const p of ['/', '/list', '/estimate', '/privacy', '/data-sources']) expect(metaFor(p).index, p).not.toBe(false);
+    for (const p of ['/account', '/account/inbox/abc', '/admin', '/saved', '/compare', '/developer', '/owner', '/marketplace', '/sources', '/property/x/intelligence']) expect(metaFor(p).index, p).toBe(false);
+    // The pages that tell agents and landlords how to join are real pages now, and may be listed.
+    for (const p of ['/', '/list', '/estimate', '/privacy', '/data-sources', '/agents', '/landlord']) expect(metaFor(p).index, p).not.toBe(false);
     expect(metaFor('/no-such-page').index).toBe(false);
   });
   it('titles a listing, and only offers real listings to search engines', () => {

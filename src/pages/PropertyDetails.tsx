@@ -16,8 +16,10 @@ import { useStore } from '../store';
 import { api, ApiError } from '../lib/api';
 import { isServerRef } from '../lib/listingAdapter';
 import { listingMeta, usePageMeta } from '../lib/meta';
-import { EpcValue, FloodValue, OfficialListingPanel, PriceCheckStat, useOfficialListing } from '../components/official/ListingData';
+import { EpcValue, FloodValue, OfficialListingPanel, useOfficialListing } from '../components/official/ListingData';
 import { useServer } from '../lib/server';
+import { useAi } from '../lib/ai/core';
+import { slugPlace } from '../lib/meta';
 import '../components/floorplan.css';
 
 /** The next few viewing slots: Saturday mornings and weekday evenings. */
@@ -32,8 +34,22 @@ function nextSlots(n = 4) {
   return out.slice(0, n);
 }
 
+/** True on phone-width screens, where the contact box moves up the page and a contact bar stays in reach. */
+function useNarrow(query = '(max-width: 900px)') {
+  const [is, setIs] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return;
+    const on = () => setIs(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, [query]);
+  return is;
+}
+
 /** Viewing request / question for a live Streetkey listing: goes to the lister by email and into both inboxes. */
-function EnquiryBox({ listingRef, rental, slots, lister }: { listingRef: string; rental: boolean; slots: string[]; lister: string }) {
+function EnquiryBox({ listingRef, rental, lister }: { listingRef: string; rental: boolean; lister: string }) {
   const { user } = useServer();
   const [kind, setKind] = useState<'viewing' | 'question'>('viewing');
   const [f, setF] = useState({ name: user?.name ?? '', email: user?.email ?? '', phone: user?.phone ?? '', message: '', slot: '', website: '' });
@@ -56,13 +72,14 @@ function EnquiryBox({ listingRef, rental, slots, lister }: { listingRef: string;
         <button type="button" className={kind === 'question' ? 'on' : ''} aria-pressed={kind === 'question'} onClick={() => setKind('question')}>Ask a question</button>
       </div>
       {err && <div className="callout small" role="alert">{err.message}{Object.values(err.fields).filter((m): m is string => typeof m === 'string').map((m) => <div key={m}>• {m}</div>)}</div>}
-      {kind === 'viewing' && <fieldset className="stack" style={{ gap: 4, border: 0, padding: 0, margin: 0 }}><legend className="xs muted">Preferred time (the lister confirms)</legend>{slots.map((s) => <label key={s} className="check"><input type="radio" name="slot" checked={f.slot === s} onChange={() => setF({ ...f, slot: s })} />{s}</label>)}</fieldset>}
+      {/* The lister hasn't published viewing times, so none are offered: the person says what suits them. */}
+      {kind === 'viewing' && <label className="field">Which days and times suit you?<input className="input" maxLength={80} value={f.slot} onChange={(e) => setF({ ...f, slot: e.target.value })} placeholder="For example weekday evenings, or Saturday morning" /></label>}
       <label className="field">Your name<input className="input" autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></label>
       <label className="field">Email<input className="input" type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required /></label>
       <label className="field">Phone (optional)<input className="input" type="tel" autoComplete="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
-      <label className="field">Message<textarea className="input" rows={3} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} placeholder={kind === 'viewing' ? 'Anything the seller should know?' : 'What would you like to know?'} required={kind === 'question'} /></label>
+      <label className="field">Message<textarea className="input" rows={3} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} placeholder={kind === 'viewing' ? (rental ? 'For example when you would like to move in and who will live there' : 'Anything they should know before the viewing?') : 'What would you like to know?'} required={kind === 'question'} /></label>
       <input className="hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} name="website" />
-      <button className="btn accent" disabled={busy || !f.name || !f.email || (kind === 'question' && !f.message.trim())}>{busy ? 'Sending…' : kind === 'viewing' ? 'Request viewing' : 'Send question'}</button>
+      <button className="btn accent" disabled={busy || !f.name || !f.email || (kind === 'question' && !f.message.trim())}>{busy ? 'Sending…' : kind === 'viewing' ? 'Request a viewing' : 'Send question'}</button>
       <p className="xs muted">Your details go only to {lister}. See our <Link to="/privacy">privacy notice</Link>.</p>
     </form>
   );
@@ -168,16 +185,59 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
   const val = useMemo(() => valuationScenario(p), [p]);
   const rent = useMemo(() => rentalScenario(p), [p]);
   const rental = p.listing === 'rent';
+  /*
+   * A real listing is shown with its lister's facts and official records only. Streetkey's own models (price
+   * verdicts, deal scores, rent and refurbishment figures) run on example data, so they are kept to example
+   * listings; on a real home the visitor is offered the tools to work things out for themselves.
+   */
+  const real = isServerRef(p.id);
+  const needsWork = p.condition === 'poor' || p.condition === 'derelict';
+  const ai = useAi();
+  const narrow = useNarrow();
   // Real listings carry Streetkey's record of the listing (first listed, days on the market, price changes); example listings keep their own figures.
-  const history = isServerRef(p.id) ? p.history : undefined;
+  const history = real ? p.history : undefined;
   const offMarket = p.status === 'withdrawn'; // sold, let or withdrawn
   const priceLabel = rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price';
   useEffect(() => { track('listing_view', p.id); }, [p.id, consent]);
   const slots = useMemo(() => nextSlots(), []);
   const myViewing = viewings.find((v) => v.propertyId === p.id);
 
+  /** Scrolls to the contact box and puts the cursor in its first field. */
+  const toContact = () => {
+    const box = document.getElementById('enquire');
+    box?.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    box?.querySelector<HTMLElement>('input:not(.hp), textarea, button')?.focus({ preventScroll: true });
+  };
+  const contact = (
+    <div id="enquire" className="stack" style={{ gap: 16 }}>
+      {live ? (
+        <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}>
+          <EnquiryBox listingRef={p.id} rental={rental} lister={p.agent} />
+          {p.agentId && <p className="small" style={{ marginTop: 10 }}><Link to={`/agent/${p.agentId}`}>More homes from {p.agent}</Link></p>}
+        </Section>
+      ) : real ? (
+        <Section title="Get in touch"><p className="small muted">Enquiries can’t be sent right now. Please try again in a little while.</p></Section>
+      ) : (
+        <>
+          <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}>
+            {myViewing ? <div className="callout ok small" role="status">Viewing requested for <b>{myViewing.slot}</b>. This is an example listing, so nothing has been sent.</div> : <>
+              <div className="stack" style={{ gap: 6 }}>{slots.map((sl) => <label key={sl} className="check"><input type="radio" name="slot" checked={slot === sl} onChange={() => setSlot(sl)} />{sl}</label>)}</div>
+              <button className="btn" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }} disabled={!slot} onClick={() => { requestViewing(p.id, slot); track('viewing_request', p.id); }}>Request viewing</button>
+            </>}
+          </Section>
+          <Section title="Contact the agent">
+            {sent ? <div className="callout ok small" role="status">This is an example listing, so no message has been sent.</div> : <>
+              <textarea className="input" rows={3} aria-label="Your message" placeholder="I'd like to know about…" value={msg} onChange={(e) => setMsg(e.target.value)} />
+              <button className="btn ghost" style={{ marginTop: 8 }} disabled={!msg.trim()} onClick={() => { setSent(true); track('enquiry', p.id); }}>Send enquiry</button>
+            </>}
+          </Section>
+        </>
+      )}
+    </div>
+  );
+
   return (
-    <div className="stack" style={{ gap: 18 }}>
+    <div className="stack lp" style={{ gap: 18 }}>
       <div className="row small muted"><Link to="/search">← Search</Link><span>/</span><span>{p.town}</span></div>
       <div className={`gallery g${Math.min(5, photos.length)}`}>
         {photos.slice(0, 5).map((ph, i) => (
@@ -206,14 +266,21 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
       <div className="split-r">
         <div className="stack" style={{ gap: 16 }}>
           <div className="stack" style={{ gap: 8 }}>
-            <div className="row">{p.source ? <Tag kind={p.source.kind === 'agent-feed' ? 'ok' : 'neutral'}>{p.source.name}</Tag> : <Tag kind="demo">Example listing</Tag>}{p.source && !p.source.verified && p.source.kind !== 'external-link' && <Tag kind="demo">Verification pending</Tag>}{p.visibility === 'private' && <Tag kind="neutral">Private to you</Tag>}{p.listing === 'auction' && <Tag kind="warn">Auction</Tag>}{p.type === 'commercial' && <Tag kind="neutral">Commercial</Tag>}<Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag></div>
+            <div className="row">
+              {p.source ? <Tag kind={p.source.kind === 'agent-feed' ? 'ok' : 'neutral'}>{p.source.name}</Tag> : <Tag kind="demo">Example listing</Tag>}
+              {p.visibility === 'private' && <Tag kind="neutral">Private to you</Tag>}
+              {p.status === 'under offer' && <Tag kind="warn">{rental ? 'Let agreed' : 'Under offer'}</Tag>}
+              {p.listing === 'auction' && <Tag kind="warn">Auction</Tag>}
+              {p.type === 'commercial' && <Tag kind="neutral">Commercial</Tag>}
+              {!rental && <Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag>}
+            </div>
             <h2>{p.title}</h2>
             <div className="muted">{streetName(p.street)}, {p.town} · {p.postcode}</div>
             {p.source?.url && <a href={p.source.url} target="_blank" rel="noopener noreferrer" className="small">View the original listing ↗</a>}
             {p.alsoListedBy?.length ? <div className="xs muted">Also listed by {p.alsoListedBy.join(', ')}</div> : null}
             <div className="row" style={{ alignItems: 'flex-end', gap: 22 }}>
               <Stat big label={history ? <>{priceLabel} <ReducedTag history={history} rental={rental} /></> : priceLabel} value={rental ? `${gbp(p.price)} pcm` : gbp(p.price)}
-                sub={<>Listed by {p.agentId ? <Link to={`/agent/${p.agentId}`}>{p.agent}</Link> : p.agent} · {history ? onMarketLine(history.daysOnMarket, offMarket) : `${p.daysOnMarket} days`}</>} />
+                sub={<>{rental ? 'To let by' : 'Listed by'} {p.agentId ? <Link to={`/agent/${p.agentId}`}>{p.agent}</Link> : p.agent} · {history ? onMarketLine(history.daysOnMarket, offMarket) : `${p.daysOnMarket} days`}</>} />
               <div className="row">
                 <button className={`save-btn${saved.includes(p.id) ? ' on' : ''}`} onClick={() => { toggleSaved(p.id); track('save', p.id); }}>{saved.includes(p.id) ? '♥ Saved' : '♡ Save'}</button>
                 <button className={`save-btn${compare.includes(p.id) ? ' on' : ''}`} onClick={() => { toggleCompare(p.id); track('compare_add', p.id); }}>{compare.includes(p.id) ? '✓ Comparing' : '+ Compare'}</button>
@@ -223,18 +290,27 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           </div>
 
           <div className="grid g4 keep2">
-            {([['bed', 'Bedrooms', p.beds || '—'], ['bath', 'Bathrooms', p.baths], ['area', 'Floor area', `${p.floorArea} m²`], ['bolt', 'Energy rating', `${p.epc.current} (${p.epc.score})`]] as const).map(([ic, a, b]) => <div key={a} className="fact-tile"><span className="trust-ic"><Icon name={ic} size={20} /></span><span><span className="xs muted">{a}</span><span className="num">{b}</span></span></div>)}
+            {/* A real listing's energy rating is the letter its lister gave; only example homes carry a score. */}
+            {([['bed', 'Bedrooms', p.beds || 'Studio'], ['bath', 'Bathrooms', p.baths], ['area', 'Floor area', `${p.floorArea} m²`], ['bolt', 'Energy rating', real ? (p.epc.current || 'Not given') : `${p.epc.current} (${p.epc.score})`]] as const).map(([ic, a, b]) => <div key={a} className="fact-tile"><span className="trust-ic"><Icon name={ic} size={20} /></span><span><span className="xs muted">{a}</span><span className="num">{b}</span></span></div>)}
           </div>
 
-          {!rental && <section className="card ai-card">
-            <div className="card-head"><div><div className="eyebrow">Streetkey intelligence</div><h3>See beyond this property</h3></div><Link className="btn sm" to={`/property/${p.id}/intelligence`}>Full intelligence profile →</Link></div>
+          {!real && !rental && <section className="card ai-card">
+            <div className="card-head"><div><div className="eyebrow">Streetkey intelligence · example figures</div><h3>See beyond this property</h3></div><Link className="btn sm" to={`/property/${p.id}/intelligence`}>Full intelligence profile →</Link></div>
             <div className="grid g4 keep2">
-              {live
-                ? <Link to={`/property/${p.id}/intelligence`} style={{ textDecoration: 'none' }}><PriceCheckStat official={official} /></Link>
-                : <Link to={`/property/${p.id}/intelligence`} style={{ textDecoration: 'none' }}><Stat label={<>Price check <Tag kind="est" /></>} value={val.verdict} sub={`As-is ${gbpK(val.asIs.low)}–${gbpK(val.asIs.high)}`} /></Link>}
+              <Link to={`/property/${p.id}/intelligence`} style={{ textDecoration: 'none' }}><Stat label={<>Price check <Tag kind="est" /></>} value={val.verdict} sub={`As-is ${gbpK(val.asIs.low)}–${gbpK(val.asIs.high)}`} /></Link>
               <Link to={`/estimate?property=${p.id}`} style={{ textDecoration: 'none' }} onClick={() => track('refurb_sim', p.id)}><Stat label="Refurb estimate" value={gbpK(est.total)} sub={`${gbpK(est.low)}–${gbpK(est.high)}`} /></Link>
-              <Link to={`/invest?property=${p.id}`} style={{ textDecoration: 'none' }}><Stat label={live ? <>Rent potential <Tag kind="est" /></> : 'Rent potential'} value={p.type === 'commercial' ? '—' : `${gbp(rent.mid)} pcm`} sub={p.type === 'commercial' ? 'See development' : live ? 'Streetkey model, not local lettings' : `${rent.evidence} let comp(s)`} /></Link>
+              <Link to={`/invest?property=${p.id}`} style={{ textDecoration: 'none' }}><Stat label="Rent potential" value={p.type === 'commercial' ? '—' : `${gbp(rent.mid)} pcm`} sub={p.type === 'commercial' ? 'See development' : `${rent.evidence} let comp(s)`} /></Link>
               <Link to={`/studio?property=${p.id}`} style={{ textDecoration: 'none' }}><Stat label="Deal score" value={`${ds.total} · ${ds.grade}`} sub="Visualise improvements →" /></Link>
+            </div>
+          </section>}
+
+          {/* A real home for sale: no verdicts from Streetkey, only the tools to work things out. */}
+          {real && !rental && <section className="card" aria-labelledby="lp-tools-h">
+            <h3 id="lp-tools-h" style={{ marginBottom: 12 }}>Work it out for this home</h3>
+            <div className="tool-links">
+              <Link to={`/sold-prices/${slugPlace(p.district || p.postcode)}`} className="tool-link"><span className="trust-ic"><Icon name="pound" size={20} /></span><span><b>Sold prices nearby</b><small>Every sale registered with HM Land Registry in {p.district || p.postcode}.</small></span></Link>
+              <Link to={`/estimate?property=${p.id}`} className="tool-link" onClick={() => track('refurb_sim', p.id)}><span className="trust-ic"><Icon name="tools" size={20} /></span><span><b>Cost the works</b><small>{needsWork ? `The lister says this home needs work. A starting estimate is ${gbpK(est.low)} to ${gbpK(est.high)}: change the rooms and finish to suit.` : 'Planning a new kitchen, a loft room or a refurbishment? Price it room by room.'}</small></span></Link>
+              <Link to={`/invest?property=${p.id}`} className="tool-link"><span className="trust-ic"><Icon name="chart" size={20} /></span><span><b>Work out the returns</b><small>Enter the rent you expect to see the yield, cash flow and stamp duty.</small></span></Link>
             </div>
           </section>}
 
@@ -248,26 +324,28 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
                 <p className="xs muted">Spotted by Streetkey AI in this listing’s photos, so check them yourself before relying on them.</p>
               </div>
             ) : null}
-            {p.commute.minutes > 0 && p.station.walkMins > 0 && <p className="small muted" style={{ marginTop: 10 }}>{p.commute.minutes} minutes to {p.commute.to} ({p.commute.mode}); {p.station.name} is a {p.station.walkMins}-minute walk.</p>}
+            {!real && p.commute.minutes > 0 && p.station.walkMins > 0 && <p className="small muted" style={{ marginTop: 10 }}>{p.station.name} is a {p.station.walkMins}-minute walk.</p>}
           </Section>
+
+          {/* On a phone the contact box comes straight after the description, not at the foot of the page. */}
+          {narrow && contact}
 
           <div className="grid g2">
             <Section title="Floor plan" right={p.floorPlan ? <button className="btn ghost sm" onClick={() => { track('floorplan_open', p.id); setPlanOpen(true); }}>Open full size</button> : undefined}>
-              {/* The lister's own plan when they added one; otherwise the indicative layout. */}
               {p.floorPlan ? <img className="fp-shown" src={p.floorPlan.url} alt={p.floorPlan.alt} />
                 // A real home is never given a made-up layout: until its lister adds a plan, the page says so.
-                : isServerRef(p.id) ? <p className="muted small">{p.agent} hasn’t added a floor plan yet. Ask for one when you get in touch.</p>
+                : real ? <p className="muted small">{p.agent} hasn’t added a floor plan yet. Ask for one when you get in touch.</p>
                   : <FloorPlan beds={p.beds} type={p.type} area={p.floorArea} />}
             </Section>
-            <Section title="Key facts" kicker="Material information">
+            <Section title="Key facts">
               <dl className="kv">
-                <dt>Tenure</dt><dd>{p.tenure}{p.leaseYears ? ` (${p.leaseYears} yrs)` : ''}</dd>
-                <dt>Council tax</dt><dd>{p.councilTax}</dd>
-                {p.serviceChargeAnnual != null && <><dt>Service charge</dt><dd>{gbp(p.serviceChargeAnnual)} p.a.</dd></>}
-                {p.groundRentAnnual != null && <><dt>Ground rent</dt><dd>{gbp(p.groundRentAnnual)} p.a.</dd></>}
+                {!rental && <><dt>Tenure</dt><dd>{p.tenure}{p.leaseYears ? ` (${p.leaseYears} yrs)` : ''}</dd></>}
+                <dt>Council tax</dt><dd>{p.councilTax ? `Band ${p.councilTax}` : 'Ask the lister'}</dd>
+                {!rental && p.serviceChargeAnnual != null && <><dt>Service charge</dt><dd>{gbp(p.serviceChargeAnnual)} p.a.</dd></>}
+                {!rental && p.groundRentAnnual != null && <><dt>Ground rent</dt><dd>{gbp(p.groundRentAnnual)} p.a.</dd></>}
                 <dt>Flood risk</dt><dd>{live ? <FloodValue official={official} /> : p.risks.flood}</dd>
-                {!live && <><dt>Conservation area</dt><dd>{p.risks.conservationArea ? 'Yes' : 'No'}</dd></>}
-                <dt>EPC</dt><dd>{live ? <EpcValue entered={p.epc.current} official={official} /> : <>{p.epc.current} → potential {p.epc.potential}</>}</dd>
+                {!real && <><dt>Conservation area</dt><dd>{p.risks.conservationArea ? 'Yes' : 'No'}</dd></>}
+                <dt>Energy rating</dt><dd>{live ? <EpcValue entered={p.epc.current} official={official} /> : real ? (p.epc.current || 'Not given') : <>{p.epc.current} → potential {p.epc.potential}</>}</dd>
               </dl>
             </Section>
           </div>
@@ -276,12 +354,13 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
 
           <OfficialListingPanel official={official} price={p.price} rental={rental} where={p.postcode || p.district} />
 
-          <Section title="Documents">
+          {!real && <Section title="Documents">
             <ul className="clean">{(p.documents ?? ['EPC', 'Floor plan']).map((d) => <li key={d} className="row between"><span className="small">{d}</span>{/requested/.test(d) ? <Tag kind="neutral">Requested</Tag> : <button className="btn ghost sm" onClick={() => { track('document_open', p.id, { doc: d }); if (d === 'Floor plan' && p.floorPlan) setPlanOpen(true); }}>View</button>}</li>)}</ul>
-            <p className="xs muted" style={{ marginTop: 8 }}>Documents are provided by the seller or their agent. Example listings have no files to open.</p>
-          </Section>
+            <p className="xs muted" style={{ marginTop: 8 }}>Example listings have no files to open.</p>
+          </Section>}
 
-          <AssistantPanel title="Ask about this property" kicker="Property AI" skills={propertySkills} ctx={p} onAnswer={(skill) => track('ai_question', p.id, { topic: skill })} />
+          {/* Questions about a real home are answered by AI from its listing, or not offered at all: never from example figures. */}
+          {(!real || (ai.available && !rental)) && <AssistantPanel title="Ask about this property" kicker="Property AI" skills={propertySkills} ctx={p} onAnswer={(skill) => track('ai_question', p.id, { topic: skill })} />}
 
           <SimilarHomes property={p} />
 
@@ -294,25 +373,13 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
           </div>
         </div>
 
-        <div className="stack sticky" style={{ gap: 16 }}>
-          {live ? <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}>
-            <EnquiryBox listingRef={p.id} rental={rental} slots={slots} lister={p.agent} />
-            {p.agentId && <p className="small" style={{ marginTop: 10 }}><Link to={`/agent/${p.agentId}`}>More homes from {p.agent}</Link></p>}
-          </Section> : <>
-          <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}>
-            {myViewing ? <div className="callout ok small" role="status">Viewing requested for <b>{myViewing.slot}</b>. This is an example listing, so nothing has been sent.</div> : <>
-              <div className="stack" style={{ gap: 6 }}>{slots.map((s) => <label key={s} className="check"><input type="radio" name="slot" checked={slot === s} onChange={() => setSlot(s)} />{s}</label>)}</div>
-              <button className="btn" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }} disabled={!slot} onClick={() => { requestViewing(p.id, slot); track('viewing_request', p.id); }}>Request viewing</button>
-            </>}
-          </Section>
-          <Section title={p.source?.kind === 'owner' || p.source?.kind === 'landlord' ? 'Message the owner' : p.source?.kind === 'external-link' ? 'Contact via the original listing' : 'Contact the agent'}>
-            {sent ? <div className="callout ok small" role="status">This is an example listing, so no message has been sent.</div> : <>
-              <textarea className="input" rows={3} placeholder="I'd like to know about…" value={msg} onChange={(e) => setMsg(e.target.value)} />
-              <button className="btn ghost" style={{ marginTop: 8 }} disabled={!msg.trim()} onClick={() => { setSent(true); track('enquiry', p.id); }}>Send enquiry</button>
-            </>}
-          </Section>
-          </>}
-        </div>
+        {!narrow && <div className="stack sticky" style={{ gap: 16 }}>{contact}</div>}
+      </div>
+
+      {/* Phones: the way to get in touch stays in reach while reading. */}
+      <div className="lp-actions" role="group" aria-label="Get in touch">
+        <button type="button" className={`icon-btn${saved.includes(p.id) ? ' saved' : ''}`} aria-pressed={saved.includes(p.id)} aria-label={saved.includes(p.id) ? 'Saved' : 'Save this home'} onClick={() => { toggleSaved(p.id); track('save', p.id); }}><Icon name="heart" /></button>
+        <button type="button" className="btn accent" onClick={toContact}>{live ? 'Request a viewing' : 'Arrange a viewing'}</button>
       </div>
     </div>
   );

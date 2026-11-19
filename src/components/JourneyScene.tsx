@@ -135,7 +135,7 @@ export function JourneyScene() {
     + `Completion: keys collected; the buyers walk up the path and in through their front door. `
     + `Inside: the view moves into the home, shows its plans (${s.inside.beds}, ${s.inside.area}), then the rooms renovated (about ${gbpK(s.heroWorks)})${s.loft ? `, the loft converted (${s.loft.area} m² more)` : ''} `
     + `and the family moved in; estimated value after works ${after}, EPC ${s.hero.epc.current} to ${s.epcTarget}. `
-    + `Live: back on the street, ${s.school ? `${s.school.rating} school ${s.school.distanceKm} km away, ` : ''}${s.hero.commute.minutes} min to ${s.hero.commute.to}.`;
+    + `Live: back on the street, ${s.school ? `${s.school.rating} school ${s.school.distanceKm} km away, ` : ''}flood risk ${s.hero.risks.flood}.`;
   const running = playing && visible;
   const st = stage % STORY.length;
   const ch = STORY[st];
@@ -199,7 +199,7 @@ export function JourneyScene() {
   notes.push({ id: 'offer', on: ch === 'buy', at: [ridge(HERO)], title: 'Offer accepted', value: gbp(s.hero.price), rows: compact ? undefined : [['Stamp duty · first-time buyer', gbp(s.ftbTax)]], accent: true, dot: true });
   notes.push({ id: 'keys', on: ch === 'keys', at: [ridge(HERO)], title: 'Completion', value: 'Keys collected', accent: true, dot: true });
   if (s.school) notes.push({ id: 'school', on: ch === 'live', at: [SCHOOL], title: `${s.school.rating} school`, value: `${s.school.distanceKm} km`, d: 1 });
-  notes.push({ id: 'travel', on: ch === 'live', at: [LINE], title: `To ${s.hero.commute.to}`, value: `${s.hero.commute.minutes} min`, accent: true });
+  notes.push({ id: 'flood', on: ch === 'live', at: [LINE], title: 'Flood risk', value: s.hero.risks.flood.replace(/^./, (c) => c.toUpperCase()), accent: true });
   // Inside the home one label sits beside it, level with the first floor, and arrives as the rooms are finished.
   notes.push({ id: 'home', on: inside, at: [camPt([bayX(HERO) + BAY, 630])], title: 'After the works', value: after, d: 28, accent: true,
     rows: compact ? undefined : [['Renovation', `≈ ${gbpK(s.heroWorks)}`], ...(s.loft ? [['Loft conversion', `+${s.loft.area} m²`] as [string, string]] : []), ['Energy rating', `EPC ${s.hero.epc.current} → ${s.epcTarget}`]] });

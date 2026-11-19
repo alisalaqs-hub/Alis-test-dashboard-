@@ -1,6 +1,7 @@
-import { Fragment, useMemo } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { getProperty, PROPERTIES, type Property } from '../data/properties';
+import { getProperty, type Property } from '../data/properties';
+import { useStore } from '../store';
 import { dealScore, epcPathway, loftScenario, ownershipForecast, refurbInputFor } from '../engine/insights';
 import { estimateRefurb } from '../engine/refurb';
 import { transactionTax } from '../engine/tax';
@@ -10,7 +11,6 @@ import { developmentOptions } from '../engine/development';
 import { engagementFor, insightsFor, totals, benchmark } from '../engine/engagement';
 import { AssistantPanel } from '../components/Assistant';
 import { propertySkills } from '../ai/skills';
-import { KnowledgeGraph } from '../components/KnowledgeGraph';
 import { OfficialListingPanel, useOfficialListing } from '../components/official/ListingData';
 import { isServerRef } from '../lib/listingAdapter';
 import { useServer } from '../lib/server';
@@ -41,9 +41,72 @@ function useCtx(p: Property) {
   }, [p]);
 }
 
+/**
+ * The "full picture" page for a listing. An example home shows every Streetkey model (labelled as examples).
+ * A real home shows official records and calculators only: Streetkey does not publish its own opinion of a
+ * real listing's price, potential or performance.
+ */
 export default function PropertyPage() {
-  const { id = 'wal-001' } = useParams();
-  const p = getProperty(id) ?? PROPERTIES[0];
+  const { id = '' } = useParams();
+  const { online, status, loadListing } = useServer();
+  useStore(); // re-render when listings arrive
+  const [fetched, setFetched] = useState<{ id: string; p: Property | null } | null>(null);
+  const registered = getProperty(id);
+  const needsFetch = !registered && isServerRef(id) && online;
+  useEffect(() => {
+    if (!needsFetch) return;
+    let live = true;
+    void loadListing(id).then((r) => { if (live) setFetched({ id, p: r }); }, () => { if (live) setFetched({ id, p: null }); });
+    return () => { live = false; };
+  }, [id, needsFetch, loadListing]);
+  const p = registered ?? (fetched?.id === id ? fetched.p : null) ?? undefined;
+  if (!p) {
+    if (isServerRef(id) && (status === 'checking' || (needsFetch && fetched?.id !== id))) return <p className="muted small" role="status" style={{ padding: 20 }}>Loading listing…</p>;
+    return (
+      <div className="card stack" style={{ maxWidth: 560 }}>
+        <h2>Listing not found</h2>
+        <p className="muted">It may have been sold, let or withdrawn.</p>
+        <Link className="btn" to="/search">Search homes</Link>
+      </div>
+    );
+  }
+  return isServerRef(p.id) ? <RealProfile key={p.id} p={p} /> : <ExampleProfile key={p.id} p={p} />;
+}
+
+/** A real listing: what its lister said, official records, stamp duty and the calculators. No Streetkey verdicts. */
+function RealProfile({ p }: { p: Property }) {
+  const { online } = useServer();
+  const official = useOfficialListing(p.id, online);
+  const rental = p.listing === 'rent';
+  const where = p.district || p.postcode;
+  return (
+    <div className="stack" style={{ gap: 18 }}>
+      <div className="row small muted"><Link to="/search">← Search</Link><span>/</span><Link to={`/property/${p.id}`}>Listing</Link><span>/</span><span>Records and calculators</span></div>
+      <div className="stack" style={{ gap: 6 }}>
+        <h2>{p.title}</h2>
+        <div className="muted">{streetName(p.street)}, {p.town} · {p.postcode}</div>
+        <div className="num" style={{ fontSize: 26, fontWeight: 800 }}>{rental ? `${gbp(p.price)} pcm` : gbp(p.price)}</div>
+        <p className="small muted" style={{ maxWidth: 640 }}>For a real home, Streetkey shows official records and gives you calculators. It does not publish its own opinion of the price.</p>
+      </div>
+      <OfficialListingPanel official={official} price={p.price} rental={rental} where={where} />
+      {!rental && <Section title="Stamp duty on this price" kicker="Transaction tax">
+        <dl className="kv">
+          <dt>Moving home</dt><dd className="num">{gbp(transactionTax(p.price, p.nation, 'home-mover').total)}</dd>
+          <dt>First-time buyer</dt><dd className="num">{gbp(transactionTax(p.price, p.nation, 'first-time').total)}</dd>
+          <dt>Additional property</dt><dd className="num">{gbp(transactionTax(p.price, p.nation, 'additional').total)}</dd>
+        </dl>
+        <p className="xs muted" style={{ marginTop: 8 }}>Worked out from the asking price. The tax you pay depends on the price you agree and your circumstances.</p>
+      </Section>}
+      {!rental && <div className="row">
+        <Link className="btn" to={`/estimate?property=${p.id}`}>Cost the works</Link>
+        <Link className="btn ghost" to={`/invest?property=${p.id}`}>Work out the returns</Link>
+        <Link className="btn ghost" to={`/property/${p.id}`}>Back to the listing</Link>
+      </div>}
+    </div>
+  );
+}
+
+function ExampleProfile({ p }: { p: Property }) {
   const ctx = useCtx(p);
   const val = useMemo(() => valuationScenario(p), [p]);
   const rent = useMemo(() => rentalScenario(p), [p]);
@@ -51,10 +114,6 @@ export default function PropertyPage() {
   const eng = useMemo(() => ({ t: totals(engagementFor(p)), bm: benchmark(p), ins: insightsFor(p) }), [p]);
   const tax = transactionTax(p.price, p.nation, 'additional');
   const rental = p.listing === 'rent';
-  // Real listings get official data (sold prices, flood risk); demo homes keep their demo comparables and constraint values.
-  const { online } = useServer();
-  const live = online && isServerRef(p.id);
-  const official = useOfficialListing(p.id, live);
   const { est, ds } = ctx;
   const plays = [
     { name: 'Refurbish & resell / refinance', cost: est.total, uplift: p.estGdv - p.price, net: ds.uplift },
@@ -74,7 +133,7 @@ export default function PropertyPage() {
       <div className="grid g2" style={{ gap: 20 }}>
         <div className="card" style={{ padding: 0, overflow: 'hidden', minHeight: 260 }}><HouseArt hue={p.photoHue} type={p.type} /></div>
         <div className="stack" style={{ gap: 12 }}>
-          <div className="row">{p.source ? <Tag kind={p.source.kind === 'agent-feed' ? 'ok' : 'neutral'}>{p.source.name}</Tag> : <Tag kind="demo">Example listing</Tag>}{p.source && !p.source.verified && !imported && <Tag kind="demo">Verification pending</Tag>}{p.visibility === 'private' && <Tag kind="neutral">Private to you</Tag>}{p.listing === 'auction' && <Tag kind="warn">Auction · guide price</Tag>}<Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag><Tag kind="neutral">Council tax {p.councilTax}</Tag></div>
+          <div className="row">{p.source ? <Tag kind={p.source.kind === 'agent-feed' ? 'ok' : 'neutral'}>{p.source.name}</Tag> : <Tag kind="demo">Example listing</Tag>}{p.visibility === 'private' && <Tag kind="neutral">Private to you</Tag>}{p.listing === 'auction' && <Tag kind="warn">Auction · guide price</Tag>}<Tag kind="neutral">{p.tenure}{p.leaseYears ? ` · ${p.leaseYears} yrs` : ''}</Tag><Tag kind="neutral">Council tax {p.councilTax}</Tag></div>
           <h2>{p.title}</h2>
           <div className="muted">{streetName(p.street)}, {p.town} · {p.postcode}</div>
           {originalUrl && <a href={originalUrl} target="_blank" rel="noopener noreferrer" className="small">View the original listing ↗<span className="sr-only"> (opens in a new tab)</span></a>}
@@ -112,7 +171,7 @@ export default function PropertyPage() {
               <thead><tr><th>Play</th><th className="r">Cost (incl. VAT)</th><th className="r">Value uplift</th><th className="r">Net</th></tr></thead>
               <tbody>{plays.map((pl) => <tr key={pl.name}><td>{pl.name}</td><td className="r num">{gbpK(pl.cost)}</td><td className="r num">{gbpK(pl.uplift)}</td><td className={`r num ${pl.net >= 0 ? 'pos' : 'neg'}`}>{gbpK(pl.net)}</td></tr>)}</tbody>
             </table></div>
-            <p className="xs muted" style={{ marginTop: 10 }}>Value uplift for lofts/extensions uses a demo heuristic (share of GDV) pending a calibrated hedonic model from Land Registry + EPC floor-area data. Costs from {est.basis.version}.</p>
+            <p className="xs muted" style={{ marginTop: 10 }}>Example figures: the value added by a loft or extension is a simple share of the finished value, and costs are Streetkey’s regional rates.</p>
           </Section>}
 
           {!rental && p.type !== 'commercial' && <Section title="Valuation scenarios" kicker="Is it overpriced?" right={<Tag kind="est">Indicative · not RICS</Tag>}>
@@ -140,10 +199,10 @@ export default function PropertyPage() {
                 <td><Tag kind={o.status === 'likely under PD' || o.status === 'prior approval route' ? 'ok' : o.status === 'needs planning permission' ? 'demo' : o.status === 'constrained' ? 'warn' : 'neutral'}>{o.status}</Tag></td>
                 <td className="r num">{o.cost != null ? gbpK(o.cost) : '—'}</td><td className={`r num ${(o.valueUplift ?? 0) - (o.cost ?? 0) >= 0 ? 'pos' : 'neg'}`}>{o.valueUplift != null ? gbpK(o.valueUplift) : '—'}</td></tr>)}</tbody>
             </table></div>
-            <p className="xs muted" style={{ marginTop: 8 }}>England permitted-development rules (GPDO) simplified as configured Nov 2026; planning layers are demo data. Structural, legal and planning matters need professional verification.</p>
+            <p className="xs muted" style={{ marginTop: 8 }}>A simplified reading of England’s permitted-development rules on example data. Structural, legal and planning matters need professional advice.</p>
           </section>
 
-          {showEngagement && <Section title="Market response" kicker="Example figures" right={<Link className="btn ghost sm" to="/owner">Owner dashboard →</Link>}>
+          {showEngagement && <Section title="Market response" kicker="Example figures" >
             <div className="grid g4 keep2">
               <Stat label="Views (28d)" value={eng.t.views.toLocaleString('en-GB')} />
               <Stat label="Unique visitors" value={eng.t.unique.toLocaleString('en-GB')} />
@@ -153,11 +212,7 @@ export default function PropertyPage() {
             <ul className="clean small" style={{ marginTop: 12 }}>{eng.ins.slice(0, 4).map((i) => <li key={i.id}><Tag kind={i.kind === 'observed' ? 'obs' : i.kind === 'inferred' ? 'inf' : 'rec'} /> {i.title}</li>)}</ul>
           </Section>}
 
-          <Section title="Property knowledge graph" kicker="What Streetkey connects for this property" right={<Tag kind="neutral">Access-controlled</Tag>}>
-            <KnowledgeGraph p={p} />
-          </Section>
-
-          {!rental && <Section title="Why this score?" kicker="Explainable deal scoring">
+                    {!rental && <Section title="Why this score?" kicker="Explainable deal scoring">
             {ds.components.map((c) => (
               <div key={c.label} style={{ marginBottom: 8 }}>
                 <Meter label={`${c.label} · ${Math.round(c.weight * 100)}%`} value={c.score} max={100} display={Math.round(c.score)} color={c.score >= 65 ? 'var(--sage)' : c.score >= 45 ? 'var(--gold)' : 'var(--accent)'} />
@@ -166,12 +221,6 @@ export default function PropertyPage() {
             ))}
           </Section>}
 
-          {live ? (
-            <>
-              <OfficialListingPanel official={official} price={p.price} rental={rental} where={p.postcode || p.district} />
-              <div className="callout info small">Subsidence, radon, conservation areas, listed status and nearby planning applications aren’t connected for real listings yet, so they aren’t shown. Your conveyancer’s searches cover them.</div>
-            </>
-          ) : (
             <div className="grid g2">
               <Section title="Comparables" kicker="Evidence" right={<Tag kind="demo" />}>
                 <div className="table-wrap" tabIndex={0}><table className="t">
@@ -182,7 +231,6 @@ export default function PropertyPage() {
                 <div className="hr" />
                 <div className="row between small"><span className="muted">Area price index, 24m</span><span className="num">{(p.areaIndex[23] - 100).toFixed(1)}%</span></div>
                 <Spark data={p.areaIndex} />
-                <div className="xs muted">Production source: HM Land Registry Price Paid + UK HPI (OGL).</div>
               </Section>
               <Section title="Constraints & risk" kicker="Planning · environment">
                 <dl className="kv">
@@ -196,10 +244,9 @@ export default function PropertyPage() {
                 <div className="hr" />
                 <div className="eyebrow" style={{ marginBottom: 6 }}>Nearby planning</div>
                 <ul className="clean small">{p.planningNearby.map((a) => <li key={a.ref}><span className="mono xs">{a.ref}</span> · {a.desc} · <b className={a.decision === 'Approved' ? 'pos' : a.decision === 'Refused' ? 'neg' : ''}>{a.decision}</b> <span className="muted">({a.distanceM}m)</span></li>)}{!p.planningNearby.length && <li className="muted">None in demo data.</li>}</ul>
-                <div className="callout" style={{ marginTop: 10 }}>Not a planning opinion. Constraint layers are demo values; production uses EA flood maps, BGS GeoSure, Historic England, planning.data.gov.uk and LPA feeds. Seek a planning consultant / architect before relying on development potential.</div>
+                <div className="callout" style={{ marginTop: 10 }}>Not a planning opinion. These are example values. Ask a planning consultant or architect before relying on development potential.</div>
               </Section>
             </div>
-          )}
 
           <div className="grid g2">
             <Section title="EPC upgrade pathway" kicker="Energy" right={<Tag kind="est" />}>

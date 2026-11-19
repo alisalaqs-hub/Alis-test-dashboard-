@@ -200,8 +200,9 @@ export function AiUnavailable({ reason, signedOut, feature = 'This AI feature', 
   const signIn = useSignInPath();
   if (reason === 'checking') return null;
   const instead = (rules: string) => (fallback ? <> {fallback}</> : noFallback ? null : <> {rules}</>);
-  if (reason === 'offline') return <p className="ai-unavailable small">{feature} isn’t available right now.{instead('Streetkey’s standard calculations are used instead.')}</p>;
-  if (reason === 'disabled') return <p className="ai-unavailable small">{feature} isn’t switched on yet.{instead('Streetkey’s standard calculations are used instead.')}</p>;
+  // AI not set up, or no back end at all: the page works without it and says nothing (a note on every page
+  // that AI "isn't switched on yet" reads as a fault). A caller with something to say instead still says it.
+  if (reason === 'offline' || reason === 'disabled') return fallback ? <p className="ai-unavailable small">{fallback}</p> : null;
   if (reason === 'paused') return <p className="ai-unavailable small">{feature} is temporarily unavailable.{instead('Streetkey’s standard calculations are used instead.')}</p>;
   if (signedOut) {
     const cta = 'Sign in or create a free account';

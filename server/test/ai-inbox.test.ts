@@ -711,13 +711,13 @@ describe('listing insights', () => {
       expect(r.status).toBe(200);
       const s = r.json.stats;
       expect(s).toMatchObject({ views30d: 25, visitors30d: 20, saves: 1, enquiries30d: 1, enquiriesTotal: 1, viewingRequests30d: 1, photoOpens30d: 1, photoCount: 1, enquiryRatePct: 4, daysOnMarket: 0 });
-      expect(s.priceEvidence).toMatchObject({ position: expect.stringMatching(/below|within|above/) });
-      expect(s.priceEvidence.low).toBeLessThan(s.priceEvidence.high);
+      // No price evidence: Streetkey's area figures come from example homes, so a real price is never judged against them.
+      expect(s.priceEvidence).toBeNull();
       if (quality!.n) expect(s.photoQuality).toMatchObject({ analysed: 1, averageScore: 4, weak: 1, issues: ['dark'] });
       expect(r.json.headline).toBe('25 views and 1 saves in the last 30 days.');
       expect(r.json.whatsWorking).toEqual(['1 people saved it.', 'Clear material information.']);
       expect(r.json.whatToImprove).toEqual([{ action: 'Add more photos', why: 'Only 1 photo so far.', impact: 'high' }]); // the invented £20,000 / 40% item is dropped
-      expect(r.json.priceNote).toMatch(/indicative range/);
+      expect(r.json.priceNote).toBeNull(); // the model offered one; with no evidence nothing about the price is said
       expect(prompt).toContain('<<<listing');
       expect(prompt).not.toContain(seller.email);
       expect(ai.named('listing_insights')).toHaveLength(1);
@@ -788,8 +788,7 @@ describe('listing insights', () => {
       expect(r.whatsWorking.join(' ')).not.toMatch(/300%|3 weeks/);
       expect(r.whatToImprove.map((x: { why: string }) => x.why).join(' ')).not.toMatch(/faster|9 days/);
       expect(r.whatToImprove.map((x: { action: string }) => x.action)).toContain('Add more photos, covering every main room and the outside');
-      expect(r.priceNote).toMatch(/not a valuation/);
-      expect(r.priceNote).not.toMatch(/600,000/);
+      expect(r.priceNote).toBeNull(); // "It is worth £600,000." never reaches the lister
     } finally { ai.restore(); }
   });
 

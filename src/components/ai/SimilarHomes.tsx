@@ -68,8 +68,13 @@ export function SimilarHomes({ property }: { property: Property }) {
   const answer = ai?.id === property.id ? ai.r : null;
   const waiting = wantAi && !answer && failed !== property.id;
   const fromAi = !!answer && answer.items.length > 0;
-  const items = fromAi ? answer!.items : fallback;
+  // A real home is only ever shown next to other real homes, and without Streetkey's price comparisons
+  // ("£40k cheaper"): its lister did not ask for their listing to be compared.
+  const real = !!property.source;
+  const all = fromAi ? answer!.items : fallback;
+  const items = real ? all.filter((it) => isLiveRef(it.id)) : all;
   const semantic = fromAi && answer!.semantic;
+  if (real && !waiting && items.length === 0) return <div ref={boxRef} />;
 
   return (
     <div className="aisr-similar" ref={boxRef}>
@@ -87,16 +92,16 @@ export function SimilarHomes({ property }: { property: Property }) {
                   <Link to={`/property/${it.id}`} className="pcard-body">
                     <span className="num" style={{ fontSize: 19 }}>{price(it)}</span>
                     <span className="small" style={{ fontWeight: 600 }}>{it.beds ? `${it.beds} bed ` : ''}{TYPE[it.type] ?? it.type} · {placeLabel(property, it)}</span>
-                    <span className="aisr-reason">{it.reason}</span>
+                    {!real && <span className="aisr-reason">{it.reason}</span>}
                   </Link>
                 </li>
               ))}
             </ul>
-            <p className="xs muted" style={{ marginTop: 6 }}>
+            {!real && <p className="xs muted" style={{ marginTop: 6 }}>
               {semantic
                 ? 'Matched by Streetkey AI on each listing’s description and features, within 35% of the price and one bedroom either way.'
                 : 'Matched on location, price (within 35%) and bedrooms (one either way). Homes in other cities are shown only when there are few nearby.'}
-            </p>
+            </p>}
           </>
         )}
       </Section>

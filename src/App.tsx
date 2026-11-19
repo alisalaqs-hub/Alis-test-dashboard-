@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react';
-import { Link, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import Layout from './components/Layout';
 import { getProperty, publicListings, type Property } from './data/properties';
 import { dedupe } from './engine/listings';
@@ -18,7 +18,6 @@ const MyHome = lazy(() => import('./pages/MyHome'));
 const Prices = lazy(() => import('./pages/Prices'));
 const ListProperty = lazy(() => import('./pages/ListProperty'));
 const ImportListing = lazy(() => import('./pages/ImportListing'));
-const Sources = lazy(() => import('./pages/Sources'));
 const Privacy = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Privacy })));
 const Terms = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Terms })));
 const AccessibilityPage = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Accessibility })));
@@ -186,7 +185,8 @@ export default function App() {
         <Route path="sold-prices/:place" element={<Prices />} />
         <Route path="list" element={<ListRoute />} />
         <Route path="import" element={<ImportListing />} />
-        <Route path="sources" element={<Sources />} />
+        {/* The old "listing feeds" address: everything an agent needs is on the agents page now. */}
+        <Route path="sources" element={<Navigate to="/agents" replace />} />
         <Route path="privacy" element={<Privacy />} />
         <Route path="terms" element={<Terms />} />
         <Route path="accessibility" element={<AccessibilityPage />} />

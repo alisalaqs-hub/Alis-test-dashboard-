@@ -4,7 +4,6 @@
  * switched off, the site is a static preview, or a request fails.
  */
 import { apiCall, type MyListing } from '../api';
-import { areaEvidence, POSTCODE_RE } from '../../engine/listings';
 import { aiGet, aiPost } from './core';
 
 /* ───────── shapes (mirror server/src/ai/inbox) ───────── */
@@ -73,18 +72,12 @@ const LIVE = ['live', 'under_offer'];
 export const isLive = (status: string) => LIVE.includes(status);
 const money = (n: number, rent: boolean) => `£${Math.round(n).toLocaleString('en-GB')}${rent ? ' pcm' : ''}`;
 
-/** The indicative range the listing form shows ("Price guide"), from Streetkey's area evidence. */
-export function priceEvidence(l: Pick<MyListing, 'postcode' | 'channel' | 'floorArea' | 'condition' | 'price' | 'type'>): PriceEvidence | null {
-  if (l.type === 'commercial' || !POSTCODE_RE.test(l.postcode)) return null;
-  const ev = areaEvidence(l.postcode);
-  if (!ev) return null;
-  const condAdj = ({ good: 0.97, fair: 0.9, poor: 0.8, derelict: 0.68 } as Record<string, number>)[l.condition ?? 'fair'] ?? 0.9;
-  const [low, high] = l.channel === 'rent'
-    ? [Math.round((ev.rentPerM2 * l.floorArea * 0.92) / 25) * 25, Math.round((ev.rentPerM2 * l.floorArea * 1.08) / 25) * 25]
-    : [Math.round((ev.refurbishedPerM2 * l.floorArea * condAdj * 0.92) / 1000) * 1000, Math.round((ev.refurbishedPerM2 * l.floorArea * condAdj * 1.08) / 1000) * 1000];
-  if (!(low > 0 && high > low)) return null;
-  const mid = (low + high) / 2;
-  return { low, high, position: l.price > high ? 'above' : l.price < low ? 'below' : 'within', diffPct: Math.round(((l.price - mid) / mid) * 1000) / 10, scope: ev.scope, comparables: ev.n };
+/**
+ * Price evidence for a lister's own listing. There is none yet (see priceEvidenceFor on the server): Streetkey's
+ * area figures come from example homes, so they are never used to judge a real price or rent.
+ */
+export function priceEvidence(_l: Pick<MyListing, 'postcode' | 'channel' | 'floorArea' | 'condition' | 'price' | 'type'>): PriceEvidence | null {
+  return null;
 }
 
 /** Streetkey's built-in reading of a listing's figures: used when AI isn't available. */
@@ -99,16 +92,16 @@ export function ruleInsights(l: MyListing): ListingInsights {
 
   const improve: Improvement[] = [];
   if (missing.length) improve.push({ action: 'Add the missing material information', why: missing[0].message, impact: 'high' });
-  if (photos < 3) improve.push({ action: 'Add more photos, covering every main room and the outside', why: `The listing has ${photos} photo${photos === 1 ? '' : 's'}. Buyers want to see every main room and the outside before they enquire.`, impact: 'high' });
-  else if (photos < 8) improve.push({ action: 'Add a few more photos', why: `The listing has ${photos} photos. Buyers like to see every room before they enquire.`, impact: 'medium' });
+  if (photos < 3) improve.push({ action: 'Add more photos, covering every main room and the outside', why: `The listing has ${photos} photo${photos === 1 ? '' : 's'}. ${rent ? 'Tenants' : 'Buyers'} want to see every main room and the outside before they enquire.`, impact: 'high' });
+  else if (photos < 8) improve.push({ action: 'Add a few more photos', why: `The listing has ${photos} photos. ${rent ? 'Tenants' : 'Buyers'} like to see every room before they enquire.`, impact: 'medium' });
   if (words < 80) improve.push({ action: 'Write a fuller description', why: `It has ${words} words. Describe the layout, light, storage, outside space and transport links.`, impact: words < 30 ? 'high' : 'medium' });
   if (ev?.position === 'above') improve.push({ action: 'Compare your price with similar homes nearby', why: `It is above the indicative ${money(ev.low, rent)}–${money(ev.high, rent)} range from ${ev.scope} evidence.`, impact: 'high' });
   if (views >= 50 && enquiries === 0) improve.push({ action: 'Look at why viewers aren’t enquiring', why: `${views} views in 30 days but no enquiries yet: the price, photos or missing details may be putting people off.`, impact: 'high' });
   if (views < 20 && (days ?? 0) >= 14) improve.push({ action: 'Share the listing link', why: `${views} views in the last 30 days. Sharing it on social media and with local groups helps.`, impact: 'medium' });
-  if (l.features.length < 4) improve.push({ action: 'List more key features', why: 'Buyers filter by features such as parking, a garden or a new kitchen.', impact: 'low' });
+  if (l.features.length < 4) improve.push({ action: 'List more key features', why: `${rent ? 'Tenants' : 'Buyers'} filter by features such as parking, a garden or a new kitchen.`, impact: 'low' });
 
   const enquiriesSoFar = `${enquiries} enquir${enquiries === 1 ? 'y' : 'ies'} so far.`;
-  const headline = missing.length ? 'Some required details are missing, which can hold buyers back.'
+  const headline = missing.length ? `Some required details are missing, which can hold ${rent ? 'tenants' : 'buyers'} back.`
     : views >= 50 && enquiries === 0 ? 'Plenty of people are looking, but nobody has enquired yet.'
     : enquiries > 0 ? enquiriesSoFar
     : views === 0 ? 'No tracked views yet in the last 30 days.' : `${views} views in the last 30 days.`;

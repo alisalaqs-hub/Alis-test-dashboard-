@@ -8,7 +8,8 @@ import { useStore } from '../store';
 import { pointInPolygon, type LngLat } from '../engine/geo';
 import { latestPriceMove } from '../engine/history';
 import { ApiError } from '../lib/api';
-import { aiPost, useAi } from '../lib/ai/core';
+import { aiPost, useAi, useSignInPath } from '../lib/ai/core';
+import { useServer } from '../lib/server';
 import {
   applyExtras, fromRules, MAX_QUERY_CHARS, modeOfQuery, mustHavesIn, rankText, SEARCH_MODES, savedFilters, withoutChips,
   type IntentResult, type RankResult, type SearchChip, type SearchMode,
@@ -55,8 +56,12 @@ const orList = (items: string[]) => {
 type Channel = 'any' | 'buy' | 'rent' | 'commercial';
 type Sort = 'fit' | 'price' | 'price-desc' | 'new' | 'ai';
 const CHANNELS: readonly Channel[] = ['any', 'buy', 'rent', 'commercial'];
-const PRICE_OPTIONS = [250_000, 350_000, 500_000, 750_000, 1_000_000, 2_000_000];
+const SALE_PRICES = [100_000, 150_000, 200_000, 250_000, 300_000, 350_000, 400_000, 500_000, 600_000, 750_000, 1_000_000, 1_500_000, 2_000_000];
+/** Monthly rents. A search for homes to rent is never offered sale prices to choose from. */
+const RENT_PRICES = [500, 750, 1_000, 1_250, 1_500, 1_750, 2_000, 2_500, 3_000, 4_000, 5_000];
 const BED_OPTIONS = [1, 2, 3, 4, 5];
+const TYPE_OPTIONS: [value: string, label: string][] = [['detached', 'Detached'], ['semi-detached', 'Semi-detached'], ['terraced', 'Terraced'], ['flat', 'Flat'], ['bungalow', 'Bungalow']];
+const ADDED_OPTIONS: [days: number, label: string][] = [[1, 'Last 24 hours'], [3, 'Last 3 days'], [7, 'Last 7 days'], [14, 'Last 14 days']];
 /** Removed chips kept in the URL: at most this many, each a short key. */
 const MAX_REMOVED = 20;
 
@@ -102,8 +107,11 @@ export default function Search() {
   const defaultChannel: Channel = mode === 'rent' ? 'rent' : mode === 'commercial' ? 'commercial' : 'any';
   const marketParam = params.get('market');
   const channel: Channel = (CHANNELS as readonly string[]).includes(marketParam ?? '') ? (marketParam as Channel) : defaultChannel;
-  const maxPrice = choice(params.get('max'), PRICE_OPTIONS);
   const minBeds = choice(params.get('beds'), BED_OPTIONS);
+  const typeParam = params.get('type');
+  const type = TYPE_OPTIONS.some(([v]) => v === typeParam) ? (typeParam as string) : '';
+  const added = choice(params.get('added'), ADDED_OPTIONS.map(([d]) => d));
+  const available = params.get('available') === '1';
   const withoutKey = params.getAll('without').join('\n');
   const removed = useMemo(() => [...new Set(withoutKey ? withoutKey.split('\n') : [])].filter((k) => k && k.length <= 80).slice(0, MAX_REMOVED), [withoutKey]);
 
@@ -132,6 +140,8 @@ export default function Search() {
   const [view, setView] = useState<'list' | 'map'>('list');
   const searchSaved = savedSearches.some((s) => s.q === submitted);
   const ai = useAi();
+  const { online, user } = useServer();
+  const signIn = useSignInPath();
   // Arriving with a search the person just made (from the header, Home or the Ask sheet) counts as
   // asking for it, so "reading your search" is announced; a reload, Back or Forward stays quiet.
   const arrivedBySearch = useNavigationType() === 'PUSH';
@@ -175,10 +185,19 @@ export default function Search() {
   const restoreAll = () => { update({ without: null }); refocus(); };
   const state = useMemo(() => withoutChips(reading, removed), [reading, removed]);
 
-  const q = useMemo(() => withPageFilters(state.query, channel, maxPrice, minBeds), [state, channel, maxPrice, minBeds]);
-  const fitHits = useMemo(() => applyExtras(runSearch(q), state.extras),
+  // Prices to choose from follow what is being searched: monthly rents for homes to rent, sale prices otherwise.
+  const rentView = channel === 'rent' || (channel === 'any' && state.query.intent === 'rent');
+  const PRICE_OPTIONS = rentView ? RENT_PRICES : SALE_PRICES;
+  const maxPrice = choice(params.get('max'), PRICE_OPTIONS);
+  const minPrice = choice(params.get('min'), PRICE_OPTIONS);
+  const q = useMemo(() => {
+    const base = withPageFilters(state.query, channel, maxPrice, minBeds);
+    return type ? { ...base, types: [type as SearchQuery['types'][number]] } : base;
+  }, [state, channel, maxPrice, minBeds, type]);
+  const extras = useMemo(() => (minPrice !== '' ? { ...state.extras, minPrice } : state.extras), [state.extras, minPrice]);
+  const fitHits = useMemo(() => applyExtras(runSearch(q), extras),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [q, state.extras, myListings.length, feedListings.length, serverListings.length]);
+  [q, extras, myListings.length, feedListings.length, serverListings.length]);
 
   // Filters on the page override the matching chips, so those chips are hidden while a filter is set.
   const overridden = new Set([...(maxPrice !== '' ? ['maxPrice'] : []), ...(minBeds !== '' ? ['minBeds'] : []), ...(channel !== 'any' ? ['intent'] : [])]);
@@ -226,8 +245,10 @@ export default function Search() {
     ? { title: `Homes ${toRent ? 'to rent' : 'for sale'} in ${placeName}`, description: `${realHits || 'Search'} homes ${toRent ? 'to rent' : 'for sale'} in ${placeName} on Streetkey, each with sold prices nearby, flood risk, its energy rating and the cost of works.`, index: realHits > 0 && !params.get('q'), canonical: `/${toRent ? 'to-rent' : 'for-sale'}/${slugPlace(placeName)}` }
     : { title: 'Search homes for sale and to rent', index: false });
   const matched = hits.filter((h) => src === 'all' || (src === 'agents' ? h.property.source?.kind === 'agent-feed' || !h.property.source : h.property.source?.kind === 'owner' || h.property.source?.kind === 'landlord'));
+  // Added lately, and still available: narrowed here because they are about the listing, not the home.
+  const recent = matched.filter((h) => (added === '' || h.property.daysOnMarket <= added) && (!available || h.property.status !== 'under offer'));
   // An area drawn on the map narrows the results to the homes inside it.
-  const shown = area ? matched.filter((h) => pointInPolygon([h.property.lng, h.property.lat], area)) : matched;
+  const shown = area ? recent.filter((h) => pointInPolygon([h.property.lng, h.property.lat], area)) : recent;
   const narrative = useMemo(() => narrate(q, hits), [q, hits]);
 
   /** A new search: its own history entry, keeping the box mode and page filters (removed chips belong to the old words). */
@@ -256,13 +277,13 @@ export default function Search() {
    * Saves the words with the filters shown (so alerts run exactly this search), in the mode they mean.
    * The account sync (src/lib/server.tsx) sends both to the account when signed in, or at the next sign-in.
    */
-  const toggleSave = () => toggleSavedSearch(submitted, modeOfQuery(q), savedFilters(q, state.extras));
+  const toggleSave = () => toggleSavedSearch(submitted, modeOfQuery(q), savedFilters(q, extras));
 
   const sortValue: Sort = sort === 'ai' && !canRank ? 'fit' : sort;
   const heading = placeName ? `Homes ${toRent ? 'to rent' : 'for sale'} in ${placeName}` : q.commercial ? 'Commercial property' : q.intent === 'rent' ? 'Homes to rent' : 'Homes for sale';
   /** Match reasons are written for a results list; a comma reads better than a dash on a card. */
   const plain = (r: string) => r.replace(/\s+—\s+/g, ', ');
-  const extrasShown = state.extras.minPrice != null || state.extras.maxBeds != null || state.extras.mustHaves.length > 0;
+  const extrasShown = extras.minPrice != null || extras.maxBeds != null || extras.mustHaves.length > 0;
   const nearLimit = text.length >= MAX_QUERY_CHARS - 40;
 
   return (
@@ -328,10 +349,14 @@ export default function Search() {
 
             <div className="filter-bar">
               <div className="field"><span id="search-market">Show</span><Seg aria-labelledby="search-market" value={channel} onChange={(v) => update({ market: v === defaultChannel ? null : v })} options={[{ value: 'any', label: 'All' }, { value: 'buy', label: 'Buy' }, { value: 'rent', label: 'Rent' }, ...(channel === 'commercial' || q.commercial ? [{ value: 'commercial' as const, label: 'Commercial' }] : [])]} /></div>
-              <label className="field">Max price<select className="input" value={maxPrice} onChange={(e) => update({ max: e.target.value || null })}><option value="">Any price</option>{PRICE_OPTIONS.map((v) => <option key={v} value={v}>{gbpK(v)}</option>)}</select></label>
+              <label className="field">{rentView ? 'Min rent' : 'Min price'}<select className="input" value={minPrice} onChange={(e) => update({ min: e.target.value || null })}><option value="">No min</option>{PRICE_OPTIONS.map((v) => <option key={v} value={v}>{rentView ? `${gbp(v)} pcm` : gbpK(v)}</option>)}</select></label>
+              <label className="field">{rentView ? 'Max rent' : 'Max price'}<select className="input" value={maxPrice} onChange={(e) => update({ max: e.target.value || null })}><option value="">No max</option>{PRICE_OPTIONS.map((v) => <option key={v} value={v}>{rentView ? `${gbp(v)} pcm` : gbpK(v)}</option>)}</select></label>
               <label className="field">Bedrooms<select className="input" value={minBeds} onChange={(e) => update({ beds: e.target.value || null })}><option value="">Any</option>{BED_OPTIONS.map((v) => <option key={v} value={v}>{v}+</option>)}</select></label>
+              <label className="field">Type<select className="input" value={type} onChange={(e) => update({ type: e.target.value || null })}><option value="">Any</option>{TYPE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+              <label className="field">Added<select className="input" value={added} onChange={(e) => update({ added: e.target.value || null })}><option value="">Any time</option>{ADDED_OPTIONS.map(([d, l]) => <option key={d} value={d}>{l}</option>)}</select></label>
               <label className="field">Listed by<select className="input" value={src} onChange={(e) => setSrc(e.target.value as typeof src)}><option value="all">Everyone</option><option value="agents">Estate agents</option><option value="private">Owners and landlords</option></select></label>
               <label className="field">Sort by<select className="input" value={sortValue} onChange={(e) => setSort(e.target.value as Sort)}><option value="fit">Best match</option>{canRank && <option value="ai">Best match with AI</option>}<option value="new">Newest</option><option value="price">Lowest price</option><option value="price-desc">Highest price</option></select></label>
+              <label className="check filter-check"><input type="checkbox" checked={available} onChange={(e) => update({ available: e.target.checked ? '1' : null })} />Hide {rentView ? 'let agreed' : 'under offer'}</label>
             </div>
           </div>
 
@@ -339,6 +364,8 @@ export default function Search() {
             <b className="aisr-count-n" ref={countRef} tabIndex={-1} aria-live="polite">{shown.length} home{shown.length === 1 ? '' : 's'}{area ? ' in your area' : ''}</b>
             <button className={`save-btn${searchSaved ? ' on' : ''}`} onClick={toggleSave}><Icon name="bell" size={16} /> {searchSaved ? 'Search saved' : 'Save search and get alerts'}</button>
           </div>
+
+          {searchSaved && online && !user && <p className="callout info small" role="status" style={{ margin: 0 }}>Saved on this device. <Link to={signIn}>Sign in or create a free account</Link> and Streetkey will email you when new homes match.</p>}
 
           {sortValue === 'ai' && (rankBusy ? <AiThinking label="Ranking by relevance" />
             : rankReady ? <p className="xs aisr-sortnote"><AiLabel /> Sorted by how closely each listing matches what you’re searching for, blended with Streetkey’s best-match score.</p>
@@ -402,7 +429,7 @@ export default function Search() {
             <div className="parsed" style={{ marginTop: 10 }}>{describeQuery(q).map((d) => <span key={d}>{d}</span>)}</div>
             <p className="xs muted" style={{ marginTop: 8 }}>{usingAi ? 'Streetkey AI turned your words into these filters; the listings, prices and this summary come from Streetkey’s own data.' : 'Streetkey turned your words into these filters; the listings, prices and this summary come from Streetkey’s own data.'}</p>
             <button className="btn ghost sm" style={{ marginTop: 10 }} aria-expanded={showJson} onClick={() => setShowJson(!showJson)}>{showJson ? 'Hide' : 'Show'} the search as data</button>
-            {showJson && <pre tabIndex={0} className="code" style={{ marginTop: 10 }}>{`${usingAi ? '// Built by Streetkey AI from your words (JSON-schema validated, numbers checked against what you typed).' : '// Built by Streetkey’s rule-based parser.'}\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})${extrasShown ? `\n// Also applied: ${JSON.stringify(state.extras)}` : ''}`}</pre>}
+            {showJson && <pre tabIndex={0} className="code" style={{ marginTop: 10 }}>{`${usingAi ? '// Built by Streetkey AI from your words (JSON-schema validated, numbers checked against what you typed).' : '// Built by Streetkey’s rule-based parser.'}\n// Filtering, costing and ranking are deterministic.\nsearch_properties(${JSON.stringify(q, null, 2)})${extrasShown ? `\n// Also applied: ${JSON.stringify(extras)}` : ''}`}</pre>}
           </details>
         </div>
         <div className="sticky stack map-col">

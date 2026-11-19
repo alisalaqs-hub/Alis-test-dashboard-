@@ -5,7 +5,6 @@
  * number not in the stats, predicts results, or talks about who should live there (protected
  * characteristics, "young families") is dropped (and replaced by the rule-based version where needed).
  */
-import { areaEvidence } from '../../../../src/engine/listings';
 import { chatJSON, HOUSE_RULES, modelFor, untrusted } from '../core';
 import { S, type Infer } from '../schema';
 import { one, q } from '../../db';
@@ -66,19 +65,15 @@ export function summarisePhotoQuality(values: unknown[]): PhotoQuality | null {
   };
 }
 
-/** The same indicative range the listing form shows ("Price guide"), from Streetkey's area evidence. */
-export function priceEvidenceFor(r: Pick<ListingRow, 'postcode' | 'channel' | 'floor_area' | 'condition' | 'price' | 'property_type'>): PriceEvidence | null {
-  if (r.property_type === 'commercial') return null;
-  const ev = areaEvidence(r.postcode);
-  if (!ev) return null;
-  const condAdj = ({ good: 0.97, fair: 0.9, poor: 0.8, derelict: 0.68 } as Record<string, number>)[r.condition ?? 'fair'] ?? 0.9;
-  const [low, high] = r.channel === 'rent'
-    ? [Math.round((ev.rentPerM2 * r.floor_area * 0.92) / 25) * 25, Math.round((ev.rentPerM2 * r.floor_area * 1.08) / 25) * 25]
-    : [Math.round((ev.refurbishedPerM2 * r.floor_area * condAdj * 0.92) / 1000) * 1000, Math.round((ev.refurbishedPerM2 * r.floor_area * condAdj * 1.08) / 1000) * 1000];
-  if (!(low > 0 && high > low)) return null;
-  const mid = (low + high) / 2;
-  const position = r.price > high ? 'above' : r.price < low ? 'below' : 'within';
-  return { low, high, position, diffPct: Math.round(((r.price - mid) / mid) * 1000) / 10, scope: ev.scope, comparables: ev.n };
+/**
+ * Price evidence for a lister's own listing. There is none yet: Streetkey's area figures come from its example
+ * homes, and judging a real asking price or rent against them told listers their price was "above the range"
+ * on the strength of fictional comparables. Until a real source is joined up (HM Land Registry sales for a
+ * sale; nothing yet for rents), the insights say nothing about price. Kept as a function so the callers and
+ * the insight wording are ready for real evidence.
+ */
+export function priceEvidenceFor(_r: Pick<ListingRow, 'postcode' | 'channel' | 'floor_area' | 'condition' | 'price' | 'property_type'>): PriceEvidence | null {
+  return null;
 }
 
 export async function computeStats(row: ListingRow): Promise<InsightStats> {

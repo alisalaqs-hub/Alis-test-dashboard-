@@ -213,6 +213,22 @@ export function runSearch(q: SearchQuery, pool = PROPERTIES): SearchHit[] {
     if (q.districts.length && !q.districts.includes(p.district.toUpperCase())) continue;
     if (!q.maxCommuteMins && !q.districts.length && q.locations.length && !q.locations.some((l) => p.town.includes(l))) continue;
 
+    /*
+     * A real listing is matched on the facts its lister gave, and nothing else. Streetkey's deal score, value-add
+     * and potential figures are models built on example data: they neither rank a real home nor describe it.
+     */
+    if (p.source) {
+      const has = (re: RegExp) => p.features.some((f) => re.test(f)) || re.test(p.description ?? '');
+      if (q.minBeds) reasons.push(`${p.beds} bedrooms`);
+      if (q.maxPrice) reasons.push(`£${(q.maxPrice - p.price).toLocaleString('en-GB')} under your budget`);
+      if (q.wantsGarden && has(/garden/i)) reasons.push('Garden');
+      if (q.chainFree && has(/chain[- ]?free|no (onward )?chain/i)) reasons.push('Chain free');
+      if (q.lowServiceCharge && p.serviceChargeAnnual != null) reasons.push(`Service charge £${p.serviceChargeAnnual.toLocaleString('en-GB')} a year`);
+      if (q.needsRefurb && (p.condition === 'poor' || p.condition === 'derelict')) reasons.push('Needs work, says the lister');
+      // Homes that match more of what was asked come first; among equals, the newest.
+      hits.push({ property: p, score: 50 + reasons.length * 5 - Math.min(20, p.daysOnMarket / 30), reasons, cautions, dealGrade: 'C', estProfit: 0 });
+      continue;
+    }
     const ds = dealScore(p);
     let score = ds.total;
     if (c.note) reasons.push(c.note);

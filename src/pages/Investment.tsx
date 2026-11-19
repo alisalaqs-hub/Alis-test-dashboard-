@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom';
 import { getProperty, type Property } from '../data/properties';
 import { refurbInputFor } from '../engine/insights';
+import { isServerRef } from '../lib/listingAdapter';
 import { analyse, breakEven, DEFAULT_INVESTMENT, scenario, sensitivity, type InvestmentInput, type ScenarioName, type Strategy } from '../engine/investment';
 import { estimateRefurb } from '../engine/refurb';
 import type { BuyerType, Nation } from '../engine/tax';
@@ -145,6 +146,16 @@ function importedRefurb(params: URLSearchParams): Imported | null {
 /** The starting assumptions: from the listing (if any), with an imported refurbishment cost used exactly as quoted. */
 function startingInputs(prop: Property | null, imported: number | null): InvestmentInput {
   if (!prop || prop.listing === 'rent') return imported ? { ...DEFAULT_INVESTMENT, refurbCost: imported } : DEFAULT_INVESTMENT;
+  /*
+   * A real listing: Streetkey has no rent or after-works value for it (its models run on example homes), so the
+   * calculator opens as a plain buy-to-let with the rent left for the person to enter, the value at the asking
+   * price, and works at £0 unless the lister said the home needs work.
+   */
+  if (isServerRef(prop.id)) {
+    const needsWork = prop.condition === 'poor' || prop.condition === 'derelict';
+    const works = imported ?? (needsWork ? Math.round(estimateRefurb(refurbInputFor(prop)).total / 500) * 500 : 0);
+    return { ...DEFAULT_INVESTMENT, strategy: 'btl', price: prop.price, nation: prop.nation, refurbCost: works, refurbMonths: works ? DEFAULT_INVESTMENT.refurbMonths : 0, monthlyRent: 0, gdv: prop.price, serviceChargeAnnual: prop.serviceChargeAnnual ?? 0 };
+  }
   // Only the engine's own estimate is rounded (to £500); an imported figure matches the banner to the pound.
   const refurb = imported ?? Math.round(estimateRefurb(refurbInputFor(prop)).total / 500) * 500;
   if (prop.type === 'commercial') return { ...DEFAULT_INVESTMENT, strategy: 'commercial', buyer: 'additional', price: prop.price, nation: prop.nation, refurbCost: refurb, monthlyRent: Math.round((prop.floorArea * 10.764 * 19) / 12), voidPct: 0.1, managementPct: 0.03, maintenancePct: 0.02, gdv: prop.price, depositPct: 0.35, mortgageRate: 0.065 };
@@ -212,10 +223,19 @@ function InvestmentPage({ restarted }: { restarted: boolean }) {
   const { bad, track } = useFieldValidity();
   const headRef = useRef<HTMLHeadingElement>(null);
   const set = <K extends keyof InvestmentInput>(k: K, v: InvestmentInput[K]) => setI((s) => ({ ...s, [k]: v }));
-  const setStrategy = (s: Strategy) => setI((x) => ({
-    ...x, strategy: s,
-    ...(s === 'hmo' ? { monthlyRent: Math.max(x.monthlyRent, 5 * 725), hmoBillsMonthly: 640, licensingAnnual: 260, managementPct: 0.14, voidPct: 0.06 } : { hmoBillsMonthly: 0, licensingAnnual: 0, managementPct: 0.1 }),
-  }));
+  // The whole-home rent is remembered while HMO room rents are in the box, and put back on leaving HMO.
+  const wholeRent = useRef<number | null>(null);
+  const setStrategy = (s: Strategy) => setI((x) => {
+    if (s === x.strategy) return x;
+    if (s === 'hmo') {
+      wholeRent.current = x.monthlyRent;
+      // An example home gets a starting figure for five rooms; a real one keeps what the person entered (or blank).
+      const rooms = prop && isServerRef(prop.id) ? x.monthlyRent : Math.max(x.monthlyRent, 5 * 725);
+      return { ...x, strategy: s, monthlyRent: rooms, hmoBillsMonthly: 640, licensingAnnual: 260, managementPct: 0.14, voidPct: 0.06 };
+    }
+    const back = x.strategy === 'hmo' && wholeRent.current != null ? { monthlyRent: wholeRent.current, voidPct: DEFAULT_INVESTMENT.voidPct } : {};
+    return { ...x, strategy: s, ...back, hmoBillsMonthly: 0, licensingAnnual: 0, managementPct: 0.1 };
+  });
 
   // Kept once the assumptions differ from the starting ones (nothing to keep otherwise).
   useEffect(() => {
@@ -272,7 +292,9 @@ function InvestmentPage({ restarted }: { restarted: boolean }) {
           {imported && <div className="callout ok small" style={{ marginTop: 8 }}>
             Refurbishment of {gbp(imported.amount)} imported from {imported.from === 'estimate' ? <>your whole-house estimate</> : <>your <b>{imported.label || 'design'}</b> design concept</>}. <Link to={backTo.to}>{backTo.text}</Link>
           </div>}
-          <p className="muted" style={{ marginTop: 6 }}>Every figure below comes from deterministic, unit-tested calculators. Edit any assumption. {prop && <>Prefilled from <Link to={`/property/${prop.id}`}>{prop.title}</Link>{imported ? '' : ' with the engine’s refurb estimate'}.</>}</p>
+          <p className="muted" style={{ marginTop: 6 }}>Every figure below comes from deterministic, unit-tested calculators. Edit any assumption. {prop && (isServerRef(prop.id)
+            ? <>The price is from <Link to={`/property/${prop.id}`}>{prop.title}</Link>. Enter the rent you expect: Streetkey does not estimate rent for a real listing.</>
+            : <>Prefilled from <Link to={`/property/${prop.id}`}>{prop.title}</Link>{imported ? '' : ' with the engine’s refurb estimate'}.</>)}</p>
           {demoEstimates && <p className="xs muted" style={{ marginTop: 4 }}>The rent and post-works value are Streetkey estimates from demonstration evidence, not from this listing: check them against local lettings and sold prices.</p>}
           {restored && <p className="callout info small" style={{ marginTop: 8 }}>We’ve kept the assumptions you entered earlier in this visit. <button type="button" className="linkish" onClick={startAgain}>Start again{prop ? ' from the listing' : ''}</button></p>}
         </div>

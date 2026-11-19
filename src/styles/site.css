@@ -178,3 +178,47 @@ details.srch-why > summary { cursor: pointer; font-weight: 600; font-size: 14px;
 .gallery.g3 { grid-template-columns: 2fr 1fr; }
 .gallery.g4 button:last-child { grid-column: span 2; }
 @media (max-width: 720px) { .gallery.g1 button:first-child { grid-column: auto; } .gallery.g1 { grid-template-columns: minmax(0, 1fr); } .gallery.g4 button:last-child { grid-column: auto; } }
+
+/* Tools offered on a real listing (no verdicts, only ways to work things out). */
+.tool-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tool-link { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px solid var(--line); border-radius: 14px; text-decoration: none; background: var(--surface); }
+.tool-link:hover { border-color: var(--ink); }
+.tool-link b { display: block; font-size: 15px; }
+.tool-link small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+@media (max-width: 900px) { .tool-links { grid-template-columns: minmax(0, 1fr); } }
+
+/* Phones: a contact bar on listing pages (the app's tab bar steps aside there). */
+.lp-actions { display: none; }
+@media (max-width: 900px) {
+  .lp-actions { display: flex; gap: 10px; align-items: center; position: fixed; left: 0; right: 0; bottom: 0; z-index: 72; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter: blur(14px); border-top: 1px solid var(--line); }
+  .lp-actions .btn { flex: 1; justify-content: center; min-height: 48px; font-size: 15px; }
+  .lp-actions .icon-btn { flex: none; width: 48px; height: 48px; }
+  .tabbar.on-listing { display: none; }
+  #enquire { scroll-margin-top: 76px; }
+}
+
+/* ───── Joining pages (for agents, for landlords) ───── */
+.join-hero { display: flex; flex-direction: column; gap: 12px; padding: 34px; border-radius: 22px; background: var(--surface); border: 1px solid var(--line); }
+.join-hero h2 { font-size: clamp(1.7rem, 3.6vw, 2.5rem); }
+.join-hero p { font-size: 16px; color: var(--ink-2); max-width: 62ch; }
+.join-h { font-size: 1.3rem; margin-bottom: 14px; }
+.join-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.join-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.join-card { display: flex; flex-direction: column; gap: 8px; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.join-card b { font-size: 16px; }
+.join-card p { color: var(--muted); font-size: 14px; }
+.join-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.join-steps.compact { grid-template-columns: minmax(0, 1fr); }
+.join-steps li { display: flex; gap: 12px; align-items: flex-start; }
+.join-steps p { color: var(--muted); font-size: 14px; margin-top: 2px; }
+.join-n { width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--paper); display: grid; place-items: center; font-weight: 800; flex: none; }
+.join-dl { display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); gap: 12px 20px; margin: 0 0 14px; }
+.join-dl dt { font-weight: 700; }
+.join-dl dd { margin: 0; color: var(--ink-2); }
+@media (max-width: 860px) { .join-hero { padding: 22px; } .join-grid, .join-grid.two, .join-steps { grid-template-columns: minmax(0, 1fr); } .join-dl { grid-template-columns: minmax(0, 1fr); gap: 4px; } .join-dl dd { margin-bottom: 10px; } }
+
+/* The search launcher sits in the header on wide screens (it used to float over the page and cover forms). */
+.topbar .ask-launch { position: static; min-height: 40px; padding: 0 14px 0 12px; box-shadow: none; font-size: 14px; border-radius: 999px; }
+/* With the launcher in the header there is nothing floating to keep clear of. */
+@media (min-width: 901px) { html { scroll-padding-bottom: 0; } }
+.filter-bar .filter-check { align-self: center; margin-top: 16px; font-size: 13.5px; font-weight: 600; white-space: nowrap; }

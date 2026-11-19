@@ -8,9 +8,10 @@ import { applyMeta, metaFor } from '../lib/meta';
 import { useAi } from '../lib/ai/core';
 import { useServer } from '../lib/server';
 
-/** The header: what people come to a property site to do. Everything else is in the menu. */
+/** The two searches most people start from. */
 const BUY = '/search?q=homes%20for%20sale&mode=buy';
 const RENT = '/search?q=homes%20to%20rent&mode=rent';
+/** The header: what people come to a property site to do. Everything else is in the menu. */
 const PRIMARY = [[BUY, 'Buy', 'buy'], [RENT, 'Rent', 'rent'], ['/prices', 'Sold prices', 'sold'], ['/list', 'Sell or let', 'list'], ['/my-home', 'My home', 'mine']] as const;
 /** Which header link the current page belongs to. */
 function section(pathname: string, search: string): string {
@@ -25,13 +26,13 @@ const FOOTER: { title: string; links: [to: string, label: string][] }[] = [
   { title: 'Find a home', links: [[BUY, 'Homes for sale'], [RENT, 'Homes to rent'], ['/prices', 'Sold prices'], ['/saved', 'Saved homes'], ['/compare', 'Compare homes']] },
   { title: 'Sell or let', links: [['/list', 'List your property'], ['/floor-plan', 'Floor plan maker'], ['/my-home', 'What is my home worth?'], ['/account/listings', 'My listings']] },
   { title: 'Tools', links: [['/import', 'Check any listing'], ['/estimate', 'Renovation costs'], ['/studio', 'Room design'], ['/invest', 'Investment calculator']] },
-  { title: 'For professionals', links: [['/sources', 'Connect your listings'], ['/agents', 'Estate agents'], ['/landlord', 'Landlords'], ['/developer', 'Developers']] },
+  { title: 'For professionals', links: [['/agents', 'Estate and letting agents'], ['/landlord', 'Landlords'], ['/account/agency', 'Your agency']] },
 ];
 const MORE = [
-  { title: 'Explore', items: [['/search', 'search', 'Search homes', 'Buy, rent, commercial'], ['/prices', 'pound', 'Sold prices', 'What things really sold for'], ['/import', 'spark', 'Check any listing', 'From any website, privately'], ['/compare', 'chart', 'Compare', 'Side-by-side intelligence'], ['/saved', 'heart', 'Saved', 'Homes, searches & designs']] },
-  { title: 'Sell & let', items: [['/list', 'tag', 'List your property', 'Sell or let it yourself'], ['/floor-plan', 'home', 'Floor plan maker', 'Draw a plan from your measurements'],['/account/listings', 'key', 'My listings & inbox', 'Manage listings, reply to buyers'], ['/owner', 'chart', 'Owner dashboard', 'How your listing performs']] },
-  { title: 'Plan & improve', items: [['/my-home', 'home', 'My Home', 'Value, ideas & costs for your home'], ['/studio', 'palette', 'Design studio', 'Redesign a room, see the cost'], ['/estimate', 'tools', 'Refurb costs', 'Regional estimate & BoQ'], ['/invest', 'chart', 'Investment', 'Yields, BRRR, flips, HMOs']] },
-  { title: 'For professionals', items: [['/sources', 'building', 'Listing feeds', 'Connect your CRM to Streetkey'], ['/agents', 'briefcase', 'Agent command centre', 'Portfolio analytics & AI'], ['/landlord', 'key', 'Landlords', 'Lettings & compliance'], ['/developer', 'crane', 'Developers', 'Demand & appraisals'], ['/marketplace', 'tools', 'Contractors', 'Scoped, benchmarked quotes'], ['/automation', 'spark', 'AI agents', 'Automations & approvals'], ['/enterprise', 'building', 'API & Enterprise', 'White-label & widgets']] },
+  { title: 'Find a home', items: [[BUY, 'search', 'Homes for sale', 'Search, map and alerts'], [RENT, 'key', 'Homes to rent', 'Search, map and alerts'], ['/prices', 'pound', 'Sold prices', 'What homes really sold for'], ['/saved', 'heart', 'Saved', 'Homes and searches'], ['/compare', 'chart', 'Compare', 'Homes side by side']] },
+  { title: 'Sell or let', items: [['/list', 'tag', 'List your property', 'For sale or to let'], ['/floor-plan', 'plan', 'Floor plan maker', 'Draw a plan from your measurements'], ['/my-home', 'home', 'What is my home worth?', 'A value range and ideas'], ['/account/listings', 'key', 'My listings and inbox', 'Manage listings, reply to enquiries']] },
+  { title: 'Tools', items: [['/import', 'spark', 'Check any listing', 'From any website, privately'], ['/estimate', 'tools', 'Renovation costs', 'Room by room, for your area'], ['/studio', 'palette', 'Room design', 'Restyle a room, see the cost'], ['/invest', 'chart', 'Investment calculator', 'Yield, cash flow and stamp duty']] },
+  { title: 'For professionals', items: [['/agents', 'building', 'Estate and letting agents', 'List free, with leads and results'], ['/landlord', 'key', 'Landlords', 'Advertise a rental'], ['/account/agency', 'briefcase', 'Your agency', 'Profile, feeds, valuation requests']] },
 ] as const;
 
 export default function Layout() {
@@ -96,6 +97,7 @@ export default function Layout() {
             {PRIMARY.map(([to, label, id]) => <Link key={id} to={to} className={here === id ? 'active' : ''} aria-current={here === id ? 'page' : undefined}>{label}</Link>)}
           </nav>
           <div className="row" style={{ gap: 8, marginLeft: 'auto', flexWrap: 'nowrap' }}>
+            <AskLauncher onOpen={() => openSheet('ask')} />
             <Link to="/saved" className="icon-btn desktop-only" aria-label={`Saved (${saved.length})`}><Icon name="heart" />{saved.length > 0 && <span className="dot-badge">{saved.length}</span>}</Link>
             {online && (user
               ? (() => { const ini = user.name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase(); return <Link to="/account" className="icon-btn acct-btn" aria-label={`${ini}: your account`} title={`${user.name}: your account`}>{ini}</Link>; })()
@@ -126,7 +128,7 @@ export default function Layout() {
         </div>
       </footer>
 
-      <nav className="tabbar" aria-label="App">
+      <nav className={`tabbar${/^\/property\/[^/]+\/?$/.test(pathname) ? ' on-listing' : ''}`} aria-label="App">
         <NavLink to="/" end className={({ isActive }) => (isActive || pathname.startsWith('/search') || pathname.startsWith('/property') ? 'on' : '')}><Icon name="search" /><span>Search</span></NavLink>
         <NavLink to="/saved" className={({ isActive }) => (isActive ? 'on' : '')}><span className="tab-ic"><Icon name="heart" />{saved.length > 0 && <span className="dot-badge">{saved.length}</span>}</span><span>Saved</span></NavLink>
         {/* Says "AI" only when AI can answer; without it the sheet is Streetkey's search. */}
@@ -136,7 +138,6 @@ export default function Layout() {
       </nav>
 
       {sheet && <div className="scrim" onClick={() => setSheet(null)} />}
-      <AskLauncher onOpen={() => openSheet('ask')} />
       {sheet === 'ask' && (
         <div ref={sheetRef} className="sheet" role="dialog" aria-modal="true" aria-labelledby="ask-sheet-title">
           <div className="sheet-grab" />
