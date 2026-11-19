@@ -24,13 +24,13 @@ function section(pathname: string, search: string): string {
 }
 const FOOTER: { title: string; links: [to: string, label: string][] }[] = [
   { title: 'Find a home', links: [[BUY, 'Homes for sale'], [RENT, 'Homes to rent'], ['/prices', 'Sold prices'], ['/saved', 'Saved homes'], ['/compare', 'Compare homes']] },
-  { title: 'Sell or let', links: [['/list', 'List your property'], ['/floor-plan', 'Floor plan maker'], ['/my-home', 'What is my home worth?'], ['/account/listings', 'My listings']] },
+  { title: 'Sell or let', links: [['/list', 'List your property'], ['/floor-plan', 'Floor plan maker'], ['/my-home', 'What homes like mine sold for'], ['/account/listings', 'My listings']] },
   { title: 'Tools', links: [['/import', 'Check any listing'], ['/estimate', 'Renovation costs'], ['/studio', 'Room design'], ['/invest', 'Investment calculator']] },
   { title: 'For professionals', links: [['/agents', 'Estate and letting agents'], ['/landlord', 'Landlords'], ['/account/agency', 'Your agency']] },
 ];
 const MORE = [
   { title: 'Find a home', items: [[BUY, 'search', 'Homes for sale', 'Search, map and alerts'], [RENT, 'key', 'Homes to rent', 'Search, map and alerts'], ['/prices', 'pound', 'Sold prices', 'What homes really sold for'], ['/saved', 'heart', 'Saved', 'Homes and searches'], ['/compare', 'chart', 'Compare', 'Homes side by side']] },
-  { title: 'Sell or let', items: [['/list', 'tag', 'List your property', 'For sale or to let'], ['/floor-plan', 'plan', 'Floor plan maker', 'Draw a plan from your measurements'], ['/my-home', 'home', 'What is my home worth?', 'A value range and ideas'], ['/account/listings', 'key', 'My listings and inbox', 'Manage listings, reply to enquiries']] },
+  { title: 'Sell or let', items: [['/list', 'tag', 'List your property', 'For sale or to let'], ['/floor-plan', 'plan', 'Floor plan maker', 'Draw a plan from your measurements'], ['/my-home', 'home', 'My home', 'What sold nearby, and ideas for yours'], ['/account/listings', 'key', 'My listings and inbox', 'Manage listings, reply to enquiries']] },
   { title: 'Tools', items: [['/import', 'spark', 'Check any listing', 'From any website, privately'], ['/estimate', 'tools', 'Renovation costs', 'Room by room, for your area'], ['/studio', 'palette', 'Room design', 'Restyle a room, see the cost'], ['/invest', 'chart', 'Investment calculator', 'Yield, cash flow and stamp duty']] },
   { title: 'For professionals', items: [['/agents', 'building', 'Estate and letting agents', 'List free, with leads and results'], ['/landlord', 'key', 'Landlords', 'Advertise a rental'], ['/account/agency', 'briefcase', 'Your agency', 'Profile, feeds, valuation requests']] },
 ] as const;

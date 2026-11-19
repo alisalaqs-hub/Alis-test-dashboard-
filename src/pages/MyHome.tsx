@@ -4,7 +4,10 @@ import type { Condition, Era } from '../engine/refurb';
 import { gbp, gbpK, NumberField, Section, Seg, Stat, Tag } from '../components/ui';
 import { AiButton, AiCard, AiDisclaimer, AiErrorNote, AiLabel, AiText, AiThinking, AiUnavailable } from '../components/ai/Ai';
 import { aiPost, useAi, useAiAction } from '../lib/ai/core';
-import { ACCOUNT_CHANGED_EVENT } from '../lib/server';
+import { ACCOUNT_CHANGED_EVENT, useServer } from '../lib/server';
+import { useRealRange, useSoldNear } from '../components/official/ListingForm';
+import { normalisePostcode, POSTCODE_RE } from '../engine/listings';
+import { slugPlace } from '../lib/meta';
 import { useStore } from '../store';
 import {
   EPC_BANDS, ERAS, HOME_GOALS, HOME_LIMITS, homeFactsProblems, homeModel, planOptions, postcodeProblem, readNumber,
@@ -32,7 +35,7 @@ function AiList({ title, items }: { title: string; items: string[] }) {
   return <div><h5 className="ai-prop-h">{title}</h5><ul className="ai-prop-list">{items.map((t) => <li key={t}>{t}</li>)}</ul></div>;
 }
 
-function OptionsList({ options, evidence }: { options: PlanOption[]; evidence: string }) {
+function OptionsList({ options, evidence, trusted }: { options: PlanOption[]; evidence: string; trusted: boolean }) {
   if (!options.length) return <p className="small muted" style={{ marginTop: 12 }}>Streetkey has no costed options for these goals for this home (flats, for example, have no loft or extension options). Try another goal.</p>;
   return (
     <div style={{ marginTop: 14 }}>
@@ -40,10 +43,10 @@ function OptionsList({ options, evidence }: { options: PlanOption[]; evidence: s
       <ul className="ph-opts">{options.slice(0, 6).map((o) => (
         <li key={o.id}>
           <div className="small" style={{ flex: '1 1 260px' }}><b>{o.title}</b><div className="xs muted">{o.detail}</div></div>
-          <Figures cost={o.cost} valueImpact={o.valueImpact} billsSaving={o.billsSaving} rentPcm={o.rentPcm} effort={o.effort} withinBudget={o.withinBudget} />
+          <Figures cost={o.cost} valueImpact={trusted ? o.valueImpact : null} billsSaving={o.billsSaving} rentPcm={trusted ? o.rentPcm : null} effort={o.effort} withinBudget={o.withinBudget} />
         </li>
       ))}</ul>
-      <p className="xs muted" style={{ marginTop: 8 }}>Streetkey’s rule-based options, best match first. Costs and values are indicative engine figures from {evidence}.</p>
+      <p className="xs muted" style={{ marginTop: 8 }}>{trusted ? `Best match first. Costs are Streetkey’s estimates for your region; values come from ${evidence}.` : 'Best match first. Costs are Streetkey’s estimates for your region. Streetkey doesn’t put a value on each option yet.'}</p>
     </div>
   );
 }
@@ -82,8 +85,8 @@ function PlanView({ x, stale, onUpdate, updateBlocked }: { x: HomePlanResult; st
 const BUDGET_PROBLEM = 'Enter £500 or more, or leave it blank for any budget.';
 
 /** "Your AI plan": goals and budget in, an ordered plan out. Without AI, the costed options still show. */
-function HomePlan({ f, m, goals, setGoals, budgetText, setBudgetText, detailsProblem, evidence }: {
-  f: HomeFacts; m: HomeModel; goals: HomeGoal[]; setGoals: (g: HomeGoal[]) => void; budgetText: string; setBudgetText: (s: string) => void; detailsProblem: string | null; evidence: string;
+function HomePlan({ f, m, goals, setGoals, budgetText, setBudgetText, detailsProblem, evidence, trusted }: {
+  f: HomeFacts; m: HomeModel; goals: HomeGoal[]; setGoals: (g: HomeGoal[]) => void; budgetText: string; setBudgetText: (s: string) => void; detailsProblem: string | null; evidence: string; trusted: boolean;
 }) {
   const { available, reason } = useAi();
   const [asked, setAsked] = useState<string | null>(null);
@@ -126,7 +129,7 @@ function HomePlan({ f, m, goals, setGoals, budgetText, setBudgetText, detailsPro
       {!available && <AiUnavailable reason={reason} feature="Your AI plan" />}
       {plan.busy && <AiThinking label="Making your plan" />}
       <AiErrorNote error={plan.error} onRetry={blocked ? undefined : run} />
-      {x && !plan.busy ? <PlanView x={x} stale={asked !== key} onUpdate={run} updateBlocked={blocked} /> : !plan.busy && goals.length > 0 && <OptionsList options={options} evidence={evidence} />}
+      {x && !plan.busy ? <PlanView x={x} stale={asked !== key} onUpdate={run} updateBlocked={blocked} /> : !plan.busy && goals.length > 0 && <OptionsList options={options} evidence={evidence} trusted={trusted} />}
     </Section>
   );
 }
@@ -187,8 +190,18 @@ function MyHomePage({ restarted }: { restarted: boolean }) {
   // recompute when it changes, so this page and the AI plan work from the same listings.
   const { serverListings, myListings, feedListings, tracked } = useStore();
   const m = useMemo(() => homeModel(f), [f, serverListings, myListings, feedListings, tracked]); // eslint-disable-line react-hooks/exhaustive-deps
-  const { ev, value, light, full, dev, epc } = m;
-  const evidence = !ev ? 'Streetkey’s demo data' : ev.allDemo ? 'demo listings' : 'listings on Streetkey';
+  const { ev, light, full, dev, epc } = m;
+  const evidence = 'homes listed on Streetkey nearby';
+  /*
+   * A figure for someone's own home is only shown when it rests on something real: HM Land Registry sales
+   * nearby for the headline, and real listings for the value of each idea. Example listings are never used
+   * to put a value on a real home.
+   */
+  const trusted = !!ev && !ev.allDemo;
+  const { online } = useServer();
+  const postcodeOk = POSTCODE_RE.test(f.postcode);
+  const near = useSoldNear(normalisePostcode(f.postcode), online && postcodeOk);
+  const sold = useRealRange(near, f.type as Parameters<typeof useRealRange>[1], 0);
 
   // Kept once it differs from the starting details (nothing to keep otherwise).
   useEffect(() => {
@@ -214,11 +227,10 @@ function MyHomePage({ restarted }: { restarted: boolean }) {
   return (
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
-        <div><div className="eyebrow">My Home</div><h2 ref={headRef} tabIndex={-1} style={{ marginTop: 6 }}>Your home — what it’s worth and what it could become</h2>
+        <div><div className="eyebrow">My Home</div><h2 ref={headRef} tabIndex={-1} style={{ marginTop: 6 }}>Your home: what has sold nearby and what it could become</h2>
           <p className="muted" style={{ marginTop: 6 }}>Tell us a few things. No sign-up needed to see the result.</p>
           {restored && <p className="callout info small" style={{ marginTop: 8 }}>We’ve kept the details you entered earlier in this visit. <button type="button" className="linkish" onClick={startAgain}>Start again</button></p>}
         </div>
-        <Tag kind="demo">{ev && !ev.allDemo ? 'Indicative · listing evidence' : 'Indicative · example evidence'}</Tag>
       </div>
       <div className="split">
         <Section title="About your home" kicker="Step 1 of 1">
@@ -237,33 +249,32 @@ function MyHomePage({ restarted }: { restarted: boolean }) {
             <div className="field"><span id={typeId}>Type</span><Seg aria-labelledby={typeId} value={f.type} onChange={(v) => set('type', v)} options={TYPES.map((t) => (t.value === 'semi-detached' ? { ...t, ariaLabel: 'Semi-detached' } : t))} /></div>
             <div className="field"><span id={conditionId}>Condition</span><Seg aria-labelledby={conditionId} value={f.condition} onChange={(v) => set('condition', v)} options={CONDITION_OPTIONS} /></div>
           </div>
-          <p className="xs muted" style={{ marginTop: 10 }}>Production looks up your address (UPRN) and pre-fills floor area, EPC and construction age from the EPC register, plus flood, conservation and planning constraints.</p>
         </Section>
 
         <div className="stack" style={{ gap: 16 }}>
           <section className="card ink" aria-labelledby="mh-value">
-            <div className="eyebrow" id="mh-value" style={{ color: 'inherit', opacity: 0.6 }}>Indicative value today</div>
-            {ev && value ? <>
-              <div className="num" style={{ fontSize: 'clamp(2rem, 7vw, 3rem)', marginTop: 6 }}>{gbpK(value.low)} – {gbpK(value.high)}</div>
-              <div className="muted small">From {ev.n} {ev.allDemo ? 'demo ' : ''}listing{ev.n === 1 ? '' : 's'} in {ev.scope}, adjusted for condition. Not a valuation.</div>
-            </> : <div className="small" style={{ marginTop: 6 }}>{postcodeError ? 'Enter a valid postcode to see an indicative value.' : 'Streetkey has no listings near this postcode yet, so there’s no value range. The live version will use HM Land Registry sold prices.'}</div>}
-            <div className="row" style={{ marginTop: 14 }}><Link to="/prices" className="btn ghost sm" style={{ color: 'inherit', borderColor: 'rgba(255,255,255,.3)' }}>See sold prices nearby</Link><Link to="/owner" className="btn accent sm">Thinking of selling?</Link></div>
+            <div className="eyebrow" id="mh-value" style={{ color: 'inherit', opacity: 0.6 }}>What homes like yours sold for nearby</div>
+            {sold && sold.low != null && sold.high != null ? <>
+              <div className="num" style={{ fontSize: 'clamp(2rem, 7vw, 3rem)', marginTop: 6 }}>{gbpK(sold.low)} – {gbpK(sold.high)}</div>
+              <div className="muted small">From {sold.count} sale{sold.count === 1 ? '' : 's'}{sold.basis === 'same-type' ? ' of the same type of home' : ' of all types of home'} near {normalisePostcode(f.postcode)} in the last {Math.round(sold.months / 12)} years, registered with HM Land Registry. Sold prices don’t record size or condition, so this is a guide to the area, not a valuation of your home.</div>
+            </> : <div className="small" style={{ marginTop: 6 }}>{postcodeError || !postcodeOk ? 'Enter your postcode to see what has sold nearby.' : near.status === 'loading' ? 'Getting sold prices from HM Land Registry…' : 'There aren’t enough recent sales near this postcode to give a range. You can still look through every sale in the area.'}</div>}
+            <div className="row" style={{ marginTop: 14 }}><Link to={postcodeOk ? `/sold-prices/${slugPlace(normalisePostcode(f.postcode))}` : '/prices'} className="btn ghost sm" style={{ color: 'inherit', borderColor: 'rgba(255,255,255,.3)' }}>See every sale nearby</Link><Link to="/list" className="btn accent sm">Thinking of selling? List it free</Link></div>
           </section>
           <div className="grid g2">
             <div className="card"><Stat label={<>Refresh (decorate, floors, insulation) <Tag kind="est" /></>} value={gbpK(light.total)} sub={`${light.programmeWeeks} weeks · ${light.confidence} confidence`} /><Link to="/estimate" className="xs">Adjust scope →</Link></div>
             <div className="card"><Stat label={<>Full renovation <Tag kind="est" /></>} value={gbpK(full.total)} sub={`${gbpK(full.low)}–${gbpK(full.high)} · ${full.programmeWeeks} weeks`} /><Link to="/studio" className="xs">Design rooms first →</Link></div>
           </div>
-          <HomePlan f={f} m={m} goals={goals} setGoals={setGoals} budgetText={budgetText} setBudgetText={setBudgetText} detailsProblem={detailsProblem} evidence={evidence} />
-          <Section title="Ways to add space & value" kicker="Screening — not a planning opinion" right={<Tag kind="warn">Verify with a professional</Tag>}>
+          <HomePlan f={f} m={m} goals={goals} setGoals={setGoals} budgetText={budgetText} setBudgetText={setBudgetText} detailsProblem={detailsProblem} evidence={evidence} trusted={trusted} />
+          <Section title="Ways to add space" kicker="A first look, not a planning opinion" right={<Tag kind="warn">Check with a professional</Tag>}>
             {dev.length === 0 ? <p className="small muted">Flats have no permitted-development rights for extensions or lofts.</p> :
-              <ul className="clean">{dev.map((o) => <li key={o.id} className="row between" style={{ flexWrap: 'nowrap', gap: 10 }}><div className="small"><b>{o.name}</b><div className="xs muted">{o.status}{o.cost ? ` · cost ≈ ${gbpK(o.cost)}` : ''}</div></div>{o.valueUplift && o.valueUplift > 0 && o.status !== 'constrained' ? <span className="num small">{gbpK(o.valueUplift)} added</span> : null}</li>)}</ul>}
-            <p className="xs muted" style={{ marginTop: 8 }}>Value added is Streetkey’s screening estimate from the local refurbished value ({evidence}). Constraints (conservation area, Article 4, listing) are not checked without your address.</p>
+              <ul className="clean">{dev.map((o) => <li key={o.id} className="row between" style={{ flexWrap: 'nowrap', gap: 10 }}><div className="small"><b>{o.name}</b><div className="xs muted">{o.status}{o.cost ? ` · cost ≈ ${gbpK(o.cost)}` : ''}</div></div>{trusted && o.valueUplift && o.valueUplift > 0 && o.status !== 'constrained' ? <span className="num small">{gbpK(o.valueUplift)} added</span> : null}</li>)}</ul>}
+            <p className="xs muted" style={{ marginTop: 8 }}>{trusted ? `Value added is Streetkey’s estimate from ${evidence}. ` : ''}Whether you need planning permission depends on your home and area: conservation areas, Article 4 directions and listed status are not checked here.</p>
           </Section>
           <Section title="Energy upgrade plan" kicker={`EPC ${f.epc} today`}>
             <ul className="clean small">{epc.steps.slice(0, 4).map((s) => <li key={s.measure} className="row between"><span>{s.measure}</span><span className="num">{gbpK(s.cost)} → {s.band}</span></li>)}</ul>
           </Section>
           <p className="xs muted">Streetkey is not a RICS valuer. For lending, probate or tax purposes you need a formal valuation.</p>
-          <div className="small"><Link to="/estimate">Cost works</Link> · <Link to="/studio">Redesign a room</Link> · <Link to="/invest">Investment view</Link>{ev ? <> · <span className="muted">Values update as you edit — {gbp(Math.round(ev.refurbishedPerM2))}/m² refurbished benchmark</span></> : null}</div>
+          <div className="small"><Link to="/estimate">Cost works</Link> · <Link to="/studio">Redesign a room</Link> · <Link to="/invest">Investment view</Link></div>
         </div>
       </div>
     </div>

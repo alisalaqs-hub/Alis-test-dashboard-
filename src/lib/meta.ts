@@ -48,7 +48,7 @@ export const ROUTES: RouteMeta[] = [
   { path: '/list', title: 'List a property for sale or to rent', description: 'Sell or let your property on Streetkey. Your listing gets a price check against real sold prices, an AI-written description you can edit and a photo check.' },
   { path: '/floor-plan', title: 'Floor plan maker', description: 'Turn room measurements or a photo of a sketch into a clean floor plan with each room’s dimensions and the total area in square metres.' },
   { path: '/import', title: 'Check any property listing', description: 'Paste a listing from any property website for a price check, renovation cost and investment view.' },
-  { path: '/my-home', title: 'What is my home worth?', description: 'A value range for your home from real sold prices nearby, with ideas for adding value and what they would cost.' },
+  { path: '/my-home', title: 'What have homes like mine sold for?', description: 'What homes like yours sold for nearby, from HM Land Registry, with ideas for adding space and what they would cost.' },
   { path: '/estimate', title: 'Renovation cost calculator', description: 'A trade-by-trade estimate of what a refurbishment will cost in your area, including VAT, fees and contingency.' },
   { path: '/studio', title: 'Room design studio', description: 'Restyle a room, see how it could look and get the cost of the works.' },
   { path: '/invest', title: 'Property investment calculator', description: 'Yield, cash flow, stamp duty and a stress test for a buy-to-let or a refurbishment project.' },

@@ -161,8 +161,8 @@ export default function Home() {
             </div>
           </div>
           <div className="duo-card">
-            <h2>Own a home? See what it is worth.</h2>
-            <p>A value range from real sales nearby, ideas for adding value and what they would cost, in under a minute.</p>
+            <h2>Own a home? See what has sold nearby.</h2>
+            <p>What homes like yours sold for, from HM Land Registry, with ideas for adding space and what they would cost.</p>
             <div className="row"><Link to="/my-home" className="btn">Check my home <Icon name="arrow" size={18} /></Link></div>
           </div>
         </section>
