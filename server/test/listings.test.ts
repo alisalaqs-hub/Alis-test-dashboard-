@@ -82,6 +82,11 @@ describe('listings', () => {
     const enq = await buyer.c.post(`/api/listings/${ref}/enquiries`, { name: 'Sam Buyer', email: buyer.email, phone: '07700 900123', kind: 'viewing', message: 'Could I view on Saturday?', preferredSlot: 'Sat 10:00' });
     expect(enq.status).toBe(201);
     expect(lastMail(seller.email)!.template).toBe('enquiry_received');
+    // the seller's email says how to reach the buyer, and answering it goes to them; the buyer gets a confirmation
+    expect(lastMail(seller.email)!.replyTo).toBe(buyer.email);
+    expect(lastMail(seller.email)!.text).toContain('Phone: 07700 900123');
+    expect(lastMail(buyer.email)!.template).toBe('enquiry_confirmation');
+    expect(lastMail(buyer.email)!.text).toContain('Never pay a deposit or holding fee before you have viewed the property.');
     const inbox = await seller.c.get('/api/me/inbox');
     expect(inbox.json.unread).toBe(1);
     expect(inbox.json.items[0]).toMatchObject({ role: 'lister', name: 'Sam Buyer', phone: '07700 900123', kind: 'viewing' });

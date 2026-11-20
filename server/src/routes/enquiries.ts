@@ -6,6 +6,14 @@
  * lister, and later messages in it are held too, until the lister chooses "Not spam". The enquirer
  * is never told: their message is accepted the same way either way.
  *
+ * Emails (services/leads.ts, services/email.ts). A message that was let through goes to the lister with
+ * the enquirer's name, email and phone, what kind of enquiry it is, the preferred time, the message and
+ * the listing's reference, title and address; Reply-To is the enquirer, so the lister can answer from
+ * their own mail, and the link to the inbox is there too. An agency with a leads email gets it there
+ * instead of to its members. The enquirer gets a short confirmation of what they sent and to whom.
+ * Nothing the screen holds back is emailed to anyone: no lead and no confirmation (which would quote
+ * the held message to whatever address was typed). On "Not spam" the lister gets the same full email.
+ *
  * Limits: 5 enquiries a minute per network; 30 a day per account (per network for visitors who aren't
  * signed in) and 300 a day per network; 3 an hour per email address per listing.
  * Admins can read any conversation (for safety reviews) but can't post in it.
@@ -17,7 +25,8 @@ import type { EnquirySummaryDTO, MessageDTO } from '../../../src/lib/apiTypes';
 import { one, q, tx } from '../db';
 import { mails } from '../services/email';
 import { audit, HttpError, notFound, parse, requireUser } from '../services/http';
-import { PUBLIC_STATUSES, streetOnly } from '../services/listings';
+import { confirmToEnquirer, emailLister, titleOf } from '../services/leads';
+import { PUBLIC_STATUSES } from '../services/listings';
 import { orgIdsFor } from './listings';
 import { anonId, enforce, limit } from '../services/ratelimit';
 import { emit, screenEnquiry } from '../ai/hooks';
@@ -48,13 +57,6 @@ const dailyEnquiryCap = async (req: FastifyRequest) => {
   await enforce(req, 'enquiry.create.net', ENQUIRIES_PER_NETWORK_DAY, 86_400, 'ip', 'A lot of messages have been sent from your network today. Please try again tomorrow.');
 };
 
-/** Who receives enquiries for a listing: the lister, or the agency's members. */
-async function listerEmails(listing: { owner_user_id: string | null; organisation_id: string | null }) {
-  return (await q<{ email: string }>(
-    `SELECT DISTINCT u.email FROM users u WHERE u.deleted_at IS NULL AND (u.id = $1 OR u.id IN (SELECT user_id FROM memberships WHERE organisation_id = $2 AND role IN ('owner', 'admin')))`,
-    [listing.owner_user_id, listing.organisation_id])).map((r) => r.email);
-}
-
 /**
  * Emails go out after the enquiry or message is stored. A failure here must not turn a stored
  * message into an error (the sender would retry and send it twice): it is logged, without content.
@@ -83,8 +85,6 @@ async function access(req: FastifyRequest, id: string) {
   return { e, role: (lister ? 'lister' : enquirer ? 'enquirer' : 'admin') as 'lister' | 'enquirer' | 'admin' };
 }
 
-/** How a conversation refers to the home: never with the house number (the enquirer may not have it). */
-const titleOf = (e: Pick<Row, 'title' | 'address_line' | 'town'>) => e.title || `${streetOnly(e.address_line)}, ${e.town}`;
 const reasonOf = (reason: string | undefined) => (reason ?? 'Held back as likely spam.').slice(0, 300);
 
 export async function enquiryRoutes(app: FastifyInstance) {
@@ -109,8 +109,12 @@ export async function enquiryRoutes(app: FastifyInstance) {
         [id, l.id, req.user?.id ?? null, b.name, b.email, b.phone || null, b.kind, b.preferredSlot || null, verdict.filter, verdict.filter ? reasonOf(verdict.reason) : null], c);
       await q(`INSERT INTO enquiry_messages (enquiry_id, author, author_user_id, body, held) VALUES ($1, 'enquirer', $2, $3, $4)`, [id, req.user?.id ?? null, b.message, verdict.filter], c);
     });
-    // Held-back enquiries are kept (the lister sees them under "Filtered") but not emailed.
-    if (!verdict.filter) await notify(req, 'enquiry_received', async () => { for (const to of await listerEmails(l)) await mails.enquiryToLister(to, titleOf(l), l.ref, b.name, b.kind, b.message, b.preferredSlot); });
+    // Held-back enquiries are kept (the lister sees them under "Filtered") but nothing is emailed: not the lead,
+    // and not the enquirer's confirmation, which would quote the held message to whatever address was typed.
+    if (!verdict.filter) {
+      await notify(req, 'enquiry_received', () => emailLister(id, b.message));
+      await notify(req, 'enquiry_confirmation', () => confirmToEnquirer(id, b.message));
+    }
     await audit(req, 'enquiry.created', `listing:${ref}`, { kind: b.kind, enquiry: id });
     await emit('enquiryCreated', { enquiryId: id, listingId: l.id, senderKey });
     return reply.code(201).send({ ok: true, id });
@@ -188,7 +192,7 @@ export async function enquiryRoutes(app: FastifyInstance) {
     if (out.holds) await audit(req, 'enquiry.filtered', `listing:${e.ref}`, { enquiry: e.id, followUp: true });
     await emit('enquiryMessage', { enquiryId: e.id, author: role, senderKey });
     if (role === 'lister') await notify(req, 'enquiry_reply', () => mails.replyToEnquirer(e.email, titleOf(e), body));
-    else if (!out.held) await notify(req, 'enquiry_followup', async () => { for (const to of await listerEmails(e)) await mails.replyToLister(to, titleOf(e), body); });
+    else if (!out.held) await notify(req, 'enquiry_followup', () => emailLister(e.id, body, { followUp: true }));
     return reply.code(201).send({ ok: true });
   });
 

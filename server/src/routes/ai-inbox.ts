@@ -25,10 +25,10 @@ import { enquiryScreener } from '../ai/inbox/screen';
 import { runTriage, TRIAGE_SELECT, triageDTO, type TriageRow } from '../ai/inbox/triage';
 import { REPLY_INTENTS, REPLY_TONES, suggestReply } from '../ai/inbox/reply';
 import { computeStats, explainInsights, type ListingInsights } from '../ai/inbox/insights';
-import { listerAccess, listerEmails, senderAiAllowed, titleOf } from '../ai/inbox/shared';
+import { listerAccess, senderAiAllowed } from '../ai/inbox/shared';
 import { one, q, tx } from '../db';
-import { mails } from '../services/email';
 import { audit, HttpError, parse, requireUser } from '../services/http';
+import { emailLister } from '../services/leads';
 import { enforce, hit } from '../services/ratelimit';
 import { editable, orgIdsFor } from './listings';
 
@@ -246,14 +246,11 @@ export async function aiInboxRoutes(app: FastifyInstance) {
     const opening = !!out.first && held.some((m) => m.id === out.first!.id);
     const shown = held.slice(0, HELD_IN_EMAIL);
     const text = [shown.map((m) => m.body).join('\n\n'), held.length > shown.length ? `(${held.length - shown.length} more message${held.length - shown.length === 1 ? '' : 's'} in your inbox.)` : ''].filter(Boolean).join('\n\n');
-    const to = await listerEmails(e);
-    for (const addr of to) {
-      if (opening) await mails.enquiryToLister(addr, titleOf(e), e.ref, e.name, e.kind, text, e.preferred_slot);
-      else await mails.replyToLister(addr, titleOf(e), text);
-    }
+    // The same email a message gets when it is let through at once: the full lead (or a follow-up), to the listing's lead recipients.
+    const emailed = await emailLister(e.id, text, { followUp: !opening });
     await audit(req, 'enquiry.unfiltered', `listing:${e.ref}`, { enquiry: e.id });
     await queueTriage(e.id);
-    return { ok: true, filtered: false, emailed: to.length };
+    return { ok: true, filtered: false, emailed };
   });
 
   /* ───────── listing performance ───────── */

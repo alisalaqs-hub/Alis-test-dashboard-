@@ -8,6 +8,7 @@ import { config } from '../config';
 import { one, q, tx } from '../db';
 import { recordHistory } from '../services/history';
 import { audit, HttpError, notFound, parse, requireUser } from '../services/http';
+import { ORG_SELECT, toOrg, type OrgRow } from '../services/orgs';
 import { deleteFile } from '../services/storage';
 import { SavedFiltersSchema, savedMode, storedFilters } from '../ai/search/saved';
 
@@ -165,9 +166,10 @@ export async function meRoutes(app: FastifyInstance) {
   });
 
   /* ---------- organisations (agencies, landlord companies) ---------- */
+  /** The organisations the person belongs to, each with its profile (and its leads email, which only members see). */
   app.get('/api/me/orgs', async (req) => {
     const u = requireUser(req);
-    return { items: await q(`SELECT o.id, o.name, o.kind, o.verified, o.redress_scheme AS "redressScheme", m.role FROM memberships m JOIN organisations o ON o.id = m.organisation_id WHERE m.user_id = $1`, [u.id]) };
+    return { items: (await q<OrgRow>(`${ORG_SELECT} WHERE m.user_id = $1 ORDER BY m.created_at`, [u.id])).map(toOrg) };
   });
   app.post('/api/orgs', async (req, reply) => {
     const u = requireUser(req);

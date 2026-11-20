@@ -9,7 +9,7 @@ import { api, ApiError, mediaUrl, type MyListing } from '../lib/api';
 import { safeNextPath, signInPath, useAi, useAiAction, useSignInPath } from '../lib/ai/core';
 import { listingDraftAccountType } from '../lib/ai/listing';
 import { defaultIntent, inboxAi, isLive, REPLY_INTENTS, REPLY_TONES, ruleInsights, unfilled, type ListingInsights, type ReplyIntent, type ReplyTone, type SuggestedReply, type Triage, type TriageResponse } from '../lib/ai/inbox';
-import type { AiImageDTO, EnquirySummaryDTO, MessageDTO, OrgReportDTO, SavedSearchDTO, ValuationRequestDTO, ValuationStatus } from '../lib/apiTypes';
+import type { AiImageDTO, EnquirySummaryDTO, MessageDTO, OrgDTO, OrgReportDTO, SavedSearchDTO, ValuationRequestDTO, ValuationStatus } from '../lib/apiTypes';
 import { useServer } from '../lib/server';
 import '../styles/agent.css';
 
@@ -917,6 +917,93 @@ function ValuationRequests({ orgId }: { orgId: string }) {
   );
 }
 
+/* The agency's profile: what its public page (/agent/<id>) says about it, and where its leads are emailed. */
+const PROFILE_BOXES = ['phone', 'leadsEmail', 'website', 'address', 'about', 'redressNumber', 'clientMoneyScheme', 'feesUrl'] as const;
+type ProfileBox = (typeof PROFILE_BOXES)[number];
+const profileOf = (o: OrgDTO) => Object.fromEntries(PROFILE_BOXES.map((k) => [k, o[k] ?? ''])) as Record<ProfileBox, string>;
+/** People type "www.example.co.uk": it is saved as https://www.example.co.uk. An address that names another scheme (http://) is left for the server to refuse. */
+const withHttps = (v: string) => { const t = v.trim(); return t && !/^[a-z][a-z0-9+.-]*:/i.test(t) ? `https://${t}` : t; };
+/** The client money protection schemes approved for letting agents in England, offered as suggestions (any name can be typed). */
+const CLIENT_MONEY_SCHEMES = ['Client Money Protect', 'Money Shield', 'Propertymark', 'RICS', 'Safeagent', 'UKALA'];
+
+/**
+ * The form an agency's owners and admins fill in: phone, where enquiries are emailed, website, address, a
+ * few words about the agency, and the redress, client money protection and fees details letting agents
+ * must show wherever they advertise. Other members see it but can't change it.
+ */
+function AgencyProfile({ org, onSaved }: { org: OrgDTO; onSaved: (o: OrgDTO) => void }) {
+  const [f, setF] = useState(() => profileOf(org));
+  const [saved, setSaved] = useState(false);
+  const form = useForm();
+  const canEdit = org.role === 'owner' || org.role === 'admin';
+  const set = (k: ProfileBox) => (e: { target: { value: string } }) => { const v = e.target.value; setF((x) => ({ ...x, [k]: v })); setSaved(false); };
+  const bad = (k: ProfileBox) => (form.fieldError(k) ? true : undefined);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (form.busy || !canEdit) return;
+    setSaved(false);
+    void form.run(async () => {
+      const { org: now } = await api.orgs.update(org.id, { ...f, website: withHttps(f.website), feesUrl: withHttps(f.feesUrl) });
+      setF(profileOf(now)); onSaved(now); setSaved(true);
+    });
+  };
+  return (
+    <Section title="Agency profile" kicker="Shown on your agent page" right={<Link className="btn ghost sm" to={`/agent/${org.id}`}>View your agent page</Link>}>
+      <form className="stack agency-profile" onSubmit={submit} noValidate>
+        {form.error && <div className="callout small" role="alert"><b>{form.error.message}</b></div>}
+        {!canEdit && <p className="small muted" style={{ margin: 0 }}>Only the agency’s owners and admins can change the profile.</p>}
+        <fieldset className="agency-set" disabled={!canEdit}>
+          <legend className="sr-only">Contact details</legend>
+          <div className="agency-fields">
+          <Field label="Phone number" error={form.fieldError('phone')} hint="Shown on your agent page and your listings.">
+            <input className="input" name="phone" type="tel" autoComplete="tel" maxLength={30} value={f.phone} onChange={set('phone')} aria-invalid={bad('phone')} />
+          </Field>
+          <Field label="Email for enquiries" error={form.fieldError('leadsEmail')} hint="Enquiries and valuation requests go to this address instead of to your team members. It is never shown publicly.">
+            <input className="input" name="leadsEmail" type="email" maxLength={254} value={f.leadsEmail} onChange={set('leadsEmail')} aria-invalid={bad('leadsEmail')} />
+          </Field>
+          <Field label="Website" error={form.fieldError('website')}>
+            <input className="input" name="website" inputMode="url" autoCapitalize="none" spellCheck={false} maxLength={300} placeholder="https://www.example.co.uk" value={f.website} onChange={set('website')} aria-invalid={bad('website')} />
+          </Field>
+          <Field label="Office address" error={form.fieldError('address')}>
+            <input className="input" name="address" autoComplete="off" maxLength={200} value={f.address} onChange={set('address')} aria-invalid={bad('address')} />
+          </Field>
+          <div className="wide">
+            <Field label="About your agency" error={form.fieldError('about')} hint="A few sentences in plain text, up to 600 characters.">
+              <textarea className="input" name="about" rows={4} maxLength={600} value={f.about} onChange={set('about')} aria-invalid={bad('about')} />
+            </Field>
+          </div>
+          </div>
+        </fieldset>
+        <fieldset className="agency-set" disabled={!canEdit}>
+          <legend>Redress, client money protection and fees</legend>
+          <p className="small muted" style={{ margin: '0 0 10px' }}>Letting agents in England must show their fees, their redress scheme and their client money protection scheme wherever they advertise, including on Streetkey.</p>
+          <div className="agency-fields">
+          <Field label={`Redress scheme membership number${org.redressScheme ? ` (${org.redressScheme})` : ''}`} error={form.fieldError('redressNumber')}>
+            <input className="input" name="redressNumber" autoComplete="off" maxLength={40} value={f.redressNumber} onChange={set('redressNumber')} aria-invalid={bad('redressNumber')} />
+          </Field>
+          <Field label="Client money protection scheme" error={form.fieldError('clientMoneyScheme')}>
+            <input className="input" name="clientMoneyScheme" list="client-money-schemes" autoComplete="off" maxLength={120} value={f.clientMoneyScheme} onChange={set('clientMoneyScheme')} aria-invalid={bad('clientMoneyScheme')} />
+            <datalist id="client-money-schemes">{CLIENT_MONEY_SCHEMES.map((s) => <option key={s} value={s} />)}</datalist>
+          </Field>
+          <div className="wide">
+            <Field label="Link to your tenant and landlord fees" error={form.fieldError('feesUrl')}>
+              <input className="input" name="feesUrl" inputMode="url" autoCapitalize="none" spellCheck={false} maxLength={300} placeholder="https://www.example.co.uk/fees" value={f.feesUrl} onChange={set('feesUrl')} aria-invalid={bad('feesUrl')} />
+            </Field>
+          </div>
+          </div>
+        </fieldset>
+        {canEdit && (
+          <div className="row">
+            <button className="btn accent" disabled={form.busy}>{form.busy ? 'Saving…' : 'Save profile'}</button>
+            {/* Always on the page, so the words are read out when they appear. */}
+            <span className="small" role="status">{saved ? 'Profile saved.' : ''}</span>
+          </div>
+        )}
+      </form>
+    </Section>
+  );
+}
+
 export function Agency() { return <Gate what="Agency feeds"><AgencyInner /></Gate>; }
 function AgencyInner() {
   const [orgs, setOrgs] = useState<Awaited<ReturnType<typeof api.me.orgs>>['items'] | null>(null);
@@ -939,7 +1026,7 @@ function AgencyInner() {
           <Field label="Agency trading name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></Field>
           <Field label="Redress scheme"><select className="input" value={f.redressScheme} onChange={(e) => setF({ ...f, redressScheme: e.target.value })}><option>The Property Ombudsman</option><option>Property Redress Scheme</option></select></Field>
           <button className="btn accent" disabled={form.busy}>Create agency</button>
-          <p className="xs muted">An admin checks your redress scheme membership before your listings go live.</p>
+          <p className="xs muted">An admin checks your redress scheme membership before your listings go live. Next, you can add your phone number, address, fees and client money protection details to your agent page.</p>
         </form>
       ) : (
         <div className="grid g2">
@@ -954,25 +1041,29 @@ function AgencyInner() {
             {runs.length === 0 ? <p className="small muted">No uploads yet.</p> : <ul className="clean small">{runs.map((r) => <li key={r.id}>{new Date(r.createdAt).toLocaleString('en-GB')}: {r.accepted} accepted, {r.withdrawn} withdrawn, {r.rejected.length} rejected{r.rejected.length > 0 && <ul className="clean xs muted">{r.rejected.slice(0, 5).map((x) => <li key={x.ref}>{x.ref}: {x.reason}</li>)}</ul>}</li>)}</ul>}
           </Section>
           <div style={{ gridColumn: '1 / -1' }}>
+            <AgencyProfile key={org.id} org={org} onSaved={(o) => setOrgs((now) => now?.map((x) => (x.id === o.id ? o : x)) ?? now)} />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
             <Section title="Results" kicker={report && report !== 'error' ? `Last ${report.days} days` : 'Last 30 days'}
               right={report && report !== 'error' && report.items.length > 0 ? <a className="btn ghost sm" href={`/api/orgs/${org.id}/report?format=csv`} download>Download spreadsheet</a> : undefined}>
               {report === null ? <Checking /> : report === 'error' ? <p className="small" role="alert">Couldn’t load your results. Please try again.</p>
-                : report.items.length === 0 ? <p className="small muted">Your results appear here once you have live listings: views, saves, enquiries and viewing requests for each one.</p>
+                : report.items.length === 0 ? <p className="small muted">Your results appear here once you have live listings: views, calls, saves, enquiries and viewing requests for each one.</p>
                 : <>
-                  <div className="grid g4" style={{ marginBottom: 12 }}>
+                  <div className="results-totals" style={{ marginBottom: 12 }}>
                     <div className="card flat"><Stat label="Live and recent listings" value={report.totals.listings} /></div>
-                    <div className="card flat"><Stat label="Views" value={report.totals.views.toLocaleString('en-GB')} sub={`${report.totals.visitors.toLocaleString('en-GB')} visitors`} /></div>
+                    <div className="card flat"><Stat label="Views" value={report.totals.views.toLocaleString('en-GB')} /></div>
+                    <div className="card flat"><Stat label="Calls" value={report.totals.calls.toLocaleString('en-GB')} sub="Taps on your phone number" /></div>
                     <div className="card flat"><Stat label="Enquiries" value={report.totals.enquiries} sub={`${report.totals.viewings} viewing request${report.totals.viewings === 1 ? '' : 's'}`} /></div>
                     <div className="card flat"><Stat label="Saves" value={report.totals.saves} /></div>
                   </div>
                   <div className="table-wrap" tabIndex={0} role="region" aria-label="Results by listing"><table className="t">
                     <caption className="sr-only">Results for each listing, most enquiries first</caption>
-                    <thead><tr><th scope="col">Listing</th><th scope="col" className="r">Price</th><th scope="col" className="r">Days listed</th><th scope="col" className="r">Views</th><th scope="col" className="r">Saves</th><th scope="col" className="r">Enquiries</th><th scope="col" className="r">Viewings</th></tr></thead>
+                    <thead><tr><th scope="col">Listing</th><th scope="col" className="r">Price</th><th scope="col" className="r">Days listed</th><th scope="col" className="r">Views</th><th scope="col" className="r">Calls</th><th scope="col" className="r">Saves</th><th scope="col" className="r">Enquiries</th><th scope="col" className="r">Viewings</th></tr></thead>
                     <tbody>{report.items.map((r) => (
                       <tr key={r.ref}>
                         <td className="small"><Link to={`/property/${r.ref}`}><b>{r.title ?? r.ref}</b></Link><div className="xs muted">{r.town} · {r.postcode} · {r.channel === 'rent' ? 'To rent' : 'For sale'}{r.status !== 'live' ? ` · ${r.status.replace('_', ' ')}` : ''}</div></td>
                         <td className="r num">£{Math.round(r.price).toLocaleString('en-GB')}{r.channel === 'rent' ? ' pcm' : ''}</td>
-                        <td className="r num">{r.daysOnMarket ?? '—'}</td><td className="r num">{r.views}</td><td className="r num">{r.saves}</td><td className="r num">{r.enquiries}</td><td className="r num">{r.viewings}</td>
+                        <td className="r num">{r.daysOnMarket ?? '—'}</td><td className="r num">{r.views}</td><td className="r num">{r.calls}</td><td className="r num">{r.saves}</td><td className="r num">{r.enquiries}</td><td className="r num">{r.viewings}</td>
                       </tr>
                     ))}</tbody>
                   </table></div>

@@ -1,10 +1,14 @@
 /**
- * Agent pages and valuation requests.
+ * Agent pages, agency profiles and valuation requests.
  *
- * Every estate or letting agency (an organisation) has a public page: who they are, how much they have
- * on the market and their live listings. From that page anyone can ask the agent to value a home they
- * want to sell or let ("Book a valuation"). The request is stored for the agency, emailed to the people
- * who run it (its owners and admins) and listed in their account, where they mark it contacted or closed.
+ * Every estate or letting agency (an organisation) has a public page: who they are, how to reach them,
+ * their redress scheme, client money protection and fees, how much they have on the market and their live
+ * listings. The people who run the agency (its owners and admins) fill in that profile (PATCH /api/orgs/:id);
+ * the leads email they can set there is never part of the public page.
+ *
+ * From the page anyone can ask the agent to value a home they want to sell or let ("Book a valuation").
+ * The request is stored for the agency, emailed to its leads email (or, without one, to its owners and
+ * admins) and listed in their account, where they mark it contacted or closed.
  *
  * A request holds how to reach the person, where the home is and whether they want to sell or let it.
  * Nothing about their money is asked for or kept: no funds, mortgage or income. That is a product rule,
@@ -17,13 +21,15 @@
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { AgentProfileDTO, ValuationRequestDTO } from '../../../src/lib/apiTypes';
+import type { AgentProfileDTO, OrgDTO, ValuationRequestDTO } from '../../../src/lib/apiTypes';
 import { normalisePostcode } from '../../../src/engine/listings';
 import { one, q } from '../db';
 import { mails } from '../services/email';
 import { audit, forbidden, HttpError, notFound, parse, requireUser } from '../services/http';
 import { historyFor } from '../services/history';
+import { agencyRecipients } from '../services/leads';
 import { LISTING_SELECT, photosFor, PROPERTY_TYPES, PUBLIC_STATUSES, toDTO, type ListingRow } from '../services/listings';
+import { ORG_SELECT, OrgProfileBody, profileColumns, PUBLIC_PROFILE_COLS, publicProfile, toOrg, type OrgProfileRow, type OrgRow } from '../services/orgs';
 import { enforce, limit } from '../services/ratelimit';
 import { UUID_RE } from '../ai/inbox/shared';
 import { viewerOf } from './listings';
@@ -93,8 +99,9 @@ export async function agentRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     if (!UUID_RE.test(id)) throw notFound('That agent');
     // Sold or let in the last 12 months: listings that still stand as sold or let, by the day their history says it happened.
-    const o = await one<{ id: string; name: string; kind: AgentProfileDTO['agent']['kind']; verified: boolean; redress_scheme: string | null; created_at: Date; sale: number; rent: number; sold_or_let: number }>(
-      `SELECT o.id, o.name, o.kind, o.verified, o.redress_scheme, o.created_at,
+    // The profile columns named here are the public ones: the leads email is never read for this page.
+    const o = await one<{ id: string; name: string; kind: AgentProfileDTO['agent']['kind']; verified: boolean; redress_scheme: string | null; created_at: Date; sale: number; rent: number; sold_or_let: number } & Omit<OrgProfileRow, 'leads_email'>>(
+      `SELECT o.id, o.name, o.kind, o.verified, o.redress_scheme, o.created_at, ${PUBLIC_PROFILE_COLS},
               (SELECT count(*) FROM listings l WHERE l.organisation_id = o.id AND l.status = ANY($2) AND l.channel = 'sale')::int AS sale,
               (SELECT count(*) FROM listings l WHERE l.organisation_id = o.id AND l.status = ANY($2) AND l.channel = 'rent')::int AS rent,
               (SELECT count(*) FROM listings l WHERE l.organisation_id = o.id AND l.status IN ('sold', 'let')
@@ -109,6 +116,7 @@ export async function agentRoutes(app: FastifyInstance) {
       agent: {
         id: o.id, name: o.name, kind: o.kind, verified: o.verified, redressScheme: o.redress_scheme, since: o.created_at.toISOString().slice(0, 10),
         counts: { sale: o.sale, rent: o.rent, soldOrLet12m: o.sold_or_let },
+        ...publicProfile(o),
       },
       // The same shape as the public search (GET /api/listings).
       listings: rows.map((r) => toDTO(r, photos.get(r.id) ?? [], viewer, history.get(r.id))),
@@ -133,12 +141,28 @@ export async function agentRoutes(app: FastifyInstance) {
       [org.id, details.name, details.email, details.phone, details.postcode, details.addressLine, details.intent, details.propertyType, details.beds, details.message, req.user?.id ?? null]);
     // The request is stored: an email that fails must not turn it into an error (the person would send it twice). Logged without the details.
     try {
-      const to = await q<{ email: string }>(
-        `SELECT DISTINCT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.organisation_id = $1 AND m.role IN ('owner', 'admin') AND u.deleted_at IS NULL`, [org.id]);
-      for (const m of to) await mails.valuationRequest(m.email, org.name, details);
+      // The agency's leads email when it has set one; otherwise its owners and admins.
+      for (const to of await agencyRecipients(org.id)) await mails.valuationRequest(to, org.name, details);
     } catch (e) { req.log.warn({ what: 'valuation_request', code: (e as { code?: string }).code ?? 'error' }, 'valuation request notification failed'); }
     await audit(req, 'valuation.requested', `org:${org.id}`, { request: row!.id, intent: b.intent });
     return reply.code(201).send({ ok: true });
+  });
+
+  /* ---------- the agency's profile ---------- */
+  /**
+   * What the agency says about itself on its public page, and where its leads are emailed. For its owners and
+   * admins only (the same check as its valuation requests). A box left out stays as it is; an empty one is cleared.
+   */
+  app.patch('/api/orgs/:id', { preHandler: limit('orgs.update', 20, 60, 'user') }, async (req): Promise<{ org: OrgDTO }> => {
+    const id = await ownOrg(req);
+    const cols = profileColumns(parse(OrgProfileBody, req.body ?? {}));
+    const keys = Object.keys(cols);
+    if (keys.length) {
+      await q(`UPDATE organisations SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')} WHERE id = $1`, [id, ...Object.values(cols)]);
+      await audit(req, 'org.profile_updated', `org:${id}`, { fields: keys }); // which boxes changed, never what was typed
+    }
+    const o = await one<OrgRow>(`${ORG_SELECT} WHERE o.id = $1 AND m.user_id = $2`, [id, req.user!.id]);
+    return { org: toOrg(o!) };
   });
 
   /* ---------- the agency's own list ---------- */

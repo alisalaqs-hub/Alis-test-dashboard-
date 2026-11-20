@@ -46,6 +46,8 @@ export interface Property {
   agent: string;
   /** Real listings placed by an agency (or a landlord or developer company): its id, for the agent's page at /agent/<id>. */
   agentId?: string;
+  /** That organisation's phone number, when it has given one, for a "Call" link. */
+  agentPhone?: string;
   daysOnMarket: number;
   photoHue: number;         // used to render placeholder art
   serviceChargeAnnual?: number;

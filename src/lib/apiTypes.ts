@@ -56,6 +56,8 @@ export interface ListingDTO {
   organisationId?: string | null;
   /** That organisation's name; null when there is none. */
   agentName?: string | null;
+  /** That organisation's phone number, for a "Call" link; null when it has not given one. Private sellers' and landlords' numbers are never sent. */
+  agentPhone?: string | null;
   ownershipVerified: boolean;
   rejectionReason?: string | null;
   createdAt: string;
@@ -140,20 +142,42 @@ export interface OfficialListingDTO {
   attribution: string[];
 }
 
-/** An agency's results: one row per listing, with totals. */
+/**
+ * An agency's results: one row per listing, with totals. views: visits to the listing page, counted for
+ * everyone without recording who viewed. calls: taps on the agency's phone number on the listing.
+ */
 export interface OrgReportRowDTO {
   ref: string; title: string | null; town: string; postcode: string; channel: 'sale' | 'rent'; status: string; price: number;
   publishedAt: string | null; daysOnMarket: number | null;
-  views: number; visitors: number; saves: number; enquiries: number; viewings: number;
+  views: number; calls: number; saves: number; enquiries: number; viewings: number;
 }
 export interface OrgReportDTO {
   days: number;
-  totals: { listings: number; views: number; visitors: number; saves: number; enquiries: number; viewings: number };
+  totals: { listings: number; views: number; calls: number; saves: number; enquiries: number; viewings: number };
   items: OrgReportRowDTO[];
   note: string;
 }
 
 /* ───────────── Agent pages and valuation requests ───────────── */
+
+/**
+ * What an agency says about itself on its public page. Each is null until the agency fills it in.
+ * Letting agents in England must show their fees, redress scheme and client money protection wherever they advertise.
+ */
+export interface AgencyProfileDTO {
+  phone: string | null;
+  /** Always an https address. */
+  website: string | null;
+  /** Short plain text. */
+  about: string | null;
+  address: string | null;
+  /** The client money protection scheme the agency belongs to. */
+  clientMoneyScheme: string | null;
+  /** The agency's membership number with its redress scheme. */
+  redressNumber: string | null;
+  /** Where the agency publishes its tenant and landlord fees (always an https address). */
+  feesUrl: string | null;
+}
 
 /** An agent's public page: who they are, how much they have on the market, and their live listings (newest first, at most 60). */
 export interface AgentProfileDTO {
@@ -165,9 +189,20 @@ export interface AgentProfileDTO {
     since: string;
     /** Homes on the market now (live or under offer), and those marked sold or let in the last 12 months. */
     counts: { sale: number; rent: number; soldOrLet12m: number };
-  };
+  } & AgencyProfileDTO;
   listings: ListingDTO[];
 }
+
+/** An organisation as its own members see it (GET /api/me/orgs): its profile, and the leads email the public never sees. */
+export interface OrgDTO extends AgencyProfileDTO {
+  id: string; name: string; kind: 'agency' | 'landlord' | 'developer' | 'contractor'; verified: boolean; redressScheme: string | null;
+  /** The signed-in person's role. Owners and admins may change the profile. */
+  role: 'owner' | 'admin' | 'member';
+  /** Where enquiries and valuation requests are emailed instead of to individual members; null when they go to members. */
+  leadsEmail: string | null;
+}
+/** What PATCH /api/orgs/:id accepts: a box left out stays as it is; an empty one (or null) is cleared. */
+export type OrgProfileBody = Partial<Record<keyof AgencyProfileDTO | 'leadsEmail', string | null>>;
 
 /**
  * What someone sends to ask an agent to value their home. Nothing about the person's money is asked

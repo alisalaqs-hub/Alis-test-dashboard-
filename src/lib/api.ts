@@ -5,7 +5,7 @@
  * fast and the site stays in demo mode.
  */
 import type { EpcCertificate, EpcSummary, FloodResult } from '../engine/evidence';
-import type { AgentProfileDTO, AiImageDTO, CheckDTO, DataStatusDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, OfficialListingDTO, OrgReportDTO, SavedSearchDTO, SoldPricesDTO, UserDTO, ValuationRequestBody, ValuationRequestDTO, ValuationStatus } from './apiTypes';
+import type { AgentProfileDTO, AiImageDTO, CheckDTO, DataStatusDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, OfficialListingDTO, OrgDTO, OrgProfileBody, OrgReportDTO, SavedSearchDTO, SoldPricesDTO, UserDTO, ValuationRequestBody, ValuationRequestDTO, ValuationStatus } from './apiTypes';
 
 export const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
@@ -39,6 +39,15 @@ const post = <T>(p: string, b?: unknown, o?: { timeout?: number }) => request<T>
 const patch = <T>(p: string, b: unknown) => request<T>('PATCH', p, b);
 const put = <T>(p: string, b?: unknown) => request<T>('PUT', p, b ?? {});
 const del = <T>(p: string, b?: unknown) => request<T>('DELETE', p, b);
+/**
+ * Tells the server something happened, without waiting and without ever troubling the page: no body, no
+ * answer read, and it still goes if the person is leaving the page (a tap on a phone number opens the dialler).
+ */
+function beacon(path: string) {
+  try {
+    void fetch(`${API_BASE}${path}`, { method: 'POST', credentials: 'include', keepalive: true }).catch(() => {});
+  } catch { /* counting never breaks the page */ }
+}
 const qs = (o: Record<string, string | number | undefined | null>) => { const s = new URLSearchParams(); for (const [k, v] of Object.entries(o)) if (v != null && v !== '') s.set(k, String(v)); const t = s.toString(); return t ? `?${t}` : ''; };
 
 /** Absolute URL for media the server returns as /media/... */
@@ -90,7 +99,8 @@ export const api = {
     removeSearch: (id: string) => del<{ ok: true }>(`/api/me/searches/${id}`),
     listings: () => get<{ items: MyListing[] }>('/api/me/listings'),
     inbox: () => get<{ items: EnquirySummaryDTO[]; unread: number }>('/api/me/inbox'),
-    orgs: () => get<{ items: { id: string; name: string; kind: string; verified: boolean; role: string }[] }>('/api/me/orgs'),
+    /** The organisations you belong to, each with its profile. */
+    orgs: () => get<{ items: OrgDTO[] }>('/api/me/orgs'),
   },
   listings: {
     updatePhoto: (ref: string, id: string, b: { alt?: string }) => patch<{ ok: true }>(`/api/listings/${ref}/photos/${id}`, b),
@@ -116,6 +126,13 @@ export const api = {
     },
     deletePhoto: (ref: string, id: string) => del<{ ok: true }>(`/api/listings/${ref}/photos/${id}`),
     enquire: (ref: string, b: { name: string; email: string; phone?: string; kind: 'viewing' | 'question' | 'offer'; message: string; preferredSlot?: string; website?: string }) => post<{ ok: true }>(`/api/listings/${ref}/enquiries`, b),
+    /**
+     * The listing page is being looked at: one view for the lister's results (fire and forget). The server counts
+     * a visitor once per listing in half an hour and records nothing about who they are, so no consent is needed.
+     */
+    viewed: (ref: string) => beacon(`/api/listings/${encodeURIComponent(ref)}/view`),
+    /** Someone tapped the agent's phone number on a listing: one call for the agent's results (fire and forget). */
+    callTapped: (ref: string) => beacon(`/api/listings/${encodeURIComponent(ref)}/call`),
   },
   /** Estate and letting agents' public pages. */
   agents: {
@@ -159,6 +176,8 @@ export const api = {
   },
   orgs: {
     create: (b: { name: string; kind: string; redressScheme?: string }) => post<{ id: string; verified: boolean; note: string }>('/api/orgs', b),
+    /** The agency's profile (owners and admins): a box left out stays as it is, an empty one is cleared. */
+    update: (id: string, b: OrgProfileBody) => patch<{ org: OrgDTO }>(`/api/orgs/${id}`, b),
     keys: (id: string) => get<{ items: { id: string; label: string; prefix: string; lastUsedAt: string | null; revokedAt: string | null; createdAt: string }[] }>(`/api/orgs/${id}/feed-keys`),
     createKey: (id: string, label: string) => post<{ key: string; note: string }>(`/api/orgs/${id}/feed-keys`, { label }),
     revokeKey: (id: string, keyId: string) => del<{ ok: true }>(`/api/orgs/${id}/feed-keys/${keyId}`),

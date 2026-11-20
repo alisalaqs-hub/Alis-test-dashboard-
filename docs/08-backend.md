@@ -197,15 +197,18 @@ service) and a distance-from-a-place filter.
 ### Results for agencies
 
 `GET /api/orgs/:id/report?days=30` (agency owners and admins): for each of the agency's live, under-offer, sold
-or let listings, the views and visitors (only from people who allowed analytics), saves, enquiries and viewing
-requests over the period (7 to 90 days), days on the market, and totals. Enquiries held back as spam are left
+or let listings, the views, calls, saves, enquiries and viewing requests over the period (7 to 90 days), days
+on the market, and totals. Views and calls are the complete counts described under *Leads, agency profiles and
+view counts* below, so they no longer depend on who allowed analytics; there is no "visitors" figure, because
+telling people apart would mean keeping something that identifies them. Enquiries held back as spam are left
 out. `?format=csv` downloads the same as a spreadsheet; cells that begin with `=`, `+`, `-` or `@` are made
 safe so a listing title can never run as a formula. Shown under *Account → Agency & feeds → Results*.
 
 ### Agent pages and valuation requests
 
 Every organisation has a public page at `/agent/<id>` (`src/pages/AgentProfile.tsx`, `server/src/routes/agents.ts`,
-migration 017): its name, a *Verified* tag once an admin has checked it, its redress scheme, how many homes it
+migration 017): its name, a *Verified* tag once an admin has checked it, what it says about itself (see *Leads,
+agency profiles and view counts* below), its redress scheme, how many homes it
 has for sale and to rent, a *Book a valuation* form (estate and letting agencies only) and its live listings. Search engines are offered the page
 only while the agent has live listings. Listings say whose they are (`organisationId` and `agentName` on the
 listing, `agentId` on the website's `Property`), so a listing page can link to its agent.
@@ -215,7 +218,8 @@ listing, `agentId` on the website's `Property`), so a listing page can link to i
 - `POST /api/agents/:id/valuation-requests` (public): name, email, optional phone, the property's postcode,
   optional address line, `intent` (`sell` or `let`), optional property type, bedrooms and message. **Nothing
   about the person's money is asked for or stored: no funds, mortgage or income. This is a product rule.** The
-  request is stored, then emailed to the agency's owners and admins. A filled-in honeypot (`website`) gets the
+  request is stored, then emailed to the agency's leads email (or, without one, its owners and admins), with
+  Reply-To set to the person who asked. A filled-in honeypot (`website`) gets the
   same answer and nothing is kept. Limits: 5 a minute per network, 30 a day per account (or network), 300 a
   day per network, and 3 a day per email address per agent.
 - `GET /api/orgs/:id/valuation-requests` and `PATCH /api/orgs/:id/valuation-requests/:rid` with `{ status }`
@@ -224,6 +228,79 @@ listing, `agentId` on the website's `Property`), so a listing page can link to i
   chose. Shown under *Account → Agency & feeds → Valuation requests*.
 - Data protection: requests sent while signed in are in the person's data export and are deleted with their
   account; the daily clean-up deletes every request after 12 months; the privacy notice says so.
+
+### Leads, agency profiles and view counts
+
+Migration 018. Three things that decide whether a lister can act on a lead and see what their listing is doing.
+
+**1. Lead emails** (`server/src/services/leads.ts`, `server/src/services/email.ts`, `server/src/routes/enquiries.ts`).
+
+- **To the lister.** A new enquiry is emailed with the enquirer's name, email and phone (when given), whether it
+  is a viewing request or a question, the preferred time (when given), the message, and the listing's
+  reference, title and full address. `Reply-To` is the enquirer, so the lister answers from their own mail; the
+  link to the conversation in the inbox is there as well. The subject carries the listing's public title only,
+  never the person's details or a private seller's house number. A later message in the same conversation goes
+  the same way (`enquiry_followup`).
+- **To the enquirer.** A short confirmation (`enquiry_confirmation`): what they sent, to whom (the agency's
+  name, or "the seller" / "the landlord", never a private person's name), that the answer comes by email, and
+  "Never pay a deposit or holding fee before you have viewed the property."
+- **Held-back messages.** Nothing the spam and scam screen holds back is emailed to anyone: no lead, and no
+  confirmation either, because it would quote the held message to whatever address was typed. When the lister
+  chooses *Not spam*, they get the same full email; the enquirer is not emailed at that point.
+- **Who receives a lead.** An agency can set a leads email on its profile. When it has, enquiries, later
+  messages and valuation requests go to that one address *instead of* to individual members. Without one they
+  go, as before, to the person who created the listing and the agency's owners and admins. The conversation is
+  in every member's inbox on the site either way.
+- What someone types into a one-line box (name, phone, preferred time) is kept on one line in the email, so it
+  cannot pass for another line of it.
+
+**2. Agency profile** (`server/src/services/orgs.ts`, `server/src/routes/agents.ts`). `organisations` gains
+`phone`, `leads_email`, `website`, `about`, `address`, `client_money_scheme`, `redress_number` and `fees_url`.
+Letting agents in England must show their fees, their redress scheme and their client money protection scheme
+wherever they advertise, portals included, which is why each has a place.
+
+- `PATCH /api/orgs/:id` (the agency's owners and admins; not Streetkey's own admins): any of `phone`,
+  `leadsEmail`, `website`, `about`, `address`, `clientMoneyScheme`, `redressNumber`, `feesUrl`. A box left out
+  stays as it is; an empty one (or `null`) is cleared. Checks: phone is digits, spaces and `+ ( ) -` only, 7 to
+  15 digits; `website` and `feesUrl` must be `https://` on an ordinary host name, with no sign-in details or
+  port, up to 300 characters; `about` is plain text up to 600 characters (HTML is refused); address 200,
+  scheme 120, membership number 40. The audit trail records which boxes changed, never what was typed. The
+  agency's name and redress scheme are not editable here: an admin checks them before verifying the agency.
+- `GET /api/me/orgs` returns the whole profile to the organisation's members, the leads email included.
+- `GET /api/agents/:id` returns everything **except** the leads email, which is never read for that page.
+- Every listing that belongs to an organisation with a phone number carries it as `agentPhone` (null
+  otherwise; a private seller's or landlord's number is never sent), and the website's `Property` has
+  `agentPhone`. `src/lib/phone.ts` turns a number into a `tel:` link.
+- Shown on the agent page (`/agent/<id>`) and edited under *Account → Agency & feeds → Agency profile*.
+
+**3. Views and calls** (`server/src/services/views.ts`). `listing_views` holds one row per listing per day with
+two numbers, `views` and `calls`. Nothing in it says who viewed.
+
+- **A view** is counted when someone fetches a listing that is on the market (`GET /api/listings/:ref`), or
+  when the listing page says it is being looked at (`POST /api/listings/:ref/view`, no body). The second
+  exists because the website keeps the listings it has already loaded, so a page opened from search results
+  does not fetch the listing again. Both use the same marker, so one page view is never counted twice.
+- **Not counted:** the listing's owner, members of its agency and Streetkey's admins; obvious robots (a user
+  agent containing bot, crawler, spider, preview or monitoring, or none at all); a listing that is not live
+  or under offer; and the same visitor again in the same half hour.
+- **The half-hour check** uses the rate-limit store (`rate_limits`, in fixed half-hour windows like every
+  other limit): a marker that is a one-way hash of the listing and the visitor (their account when signed in,
+  otherwise their network and browser). It cannot be read back as "who viewed what", and the daily clean-up
+  removes it with the other rate-limit rows. No new personal data is kept.
+- **A call** is one tap on the agent's phone number on a listing: `POST /api/listings/:ref/call` (public, no
+  body, 10 a minute and 200 a day per network). Only a listing on the market whose organisation has a phone
+  number has anything to count. The website calls `api.listings.callTapped(ref)` and
+  `api.listings.viewed(ref)`; neither waits for an answer.
+- Counting never fails a request and never holds one up: errors are swallowed, the count runs alongside the
+  listing's other reads, and the request stops waiting for it after 400 ms.
+- **Where the figures appear:** the agency's Results (table, totals and spreadsheet, with a *Calls* column),
+  `GET /api/me/listings` (`views30d`) and `GET /api/me/listings/:ref/stats` (`days[].views`, `days[].calls`,
+  `totals.listing_view` and `calls`). Views recorded before this, from visitors who allowed analytics, were
+  carried over as each day's starting figure. The AI insights and the agency briefing
+  (`server/src/ai/inbox/insights.ts`, `server/src/ai/briefing/agency.ts`) still read the analytics events, so
+  their view figures count only visitors who allowed analytics.
+- The daily clean-up deletes rows older than 13 months. The privacy notice says page views are counted without
+  recording who viewed.
 
 ### What the photos show
 

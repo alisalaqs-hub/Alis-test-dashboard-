@@ -5,6 +5,16 @@
 .agent-h2 { font-size: 1.25rem; }
 .agent-counts { margin: 0; font-weight: 600; }
 
+/* What the agent says about itself: a few lines of plain text, how to reach them, and the details the law asks letting agents to show. */
+.agent-about { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; }
+.agent-contact { gap: 10px; margin-top: 2px; }
+.agent-contact .btn { white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.agent-facts { margin: 0; display: grid; gap: 4px; font-size: 14px; max-width: 70ch; }
+.agent-facts > div { display: grid; grid-template-columns: minmax(0, 13em) minmax(0, 1fr); gap: 2px 14px; }
+.agent-facts dt { color: var(--muted); }
+.agent-facts dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .agent-facts { gap: 8px; } .agent-facts > div { grid-template-columns: minmax(0, 1fr); } }
+
 /* The valuation form sits beside the listings on a wide screen, and above them on a narrow one. */
 .agent-layout { display: grid; gap: 20px; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); align-items: start; }
 .agent-form { gap: 10px; }
@@ -22,3 +32,15 @@
 .vr-item { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 6px; min-width: 0; }
 .vr-contact { overflow-wrap: anywhere; }
 .vr-message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The agency's profile form in its account: two boxes side by side on a wide screen, one on a narrow one. */
+.agency-profile { gap: 16px; }
+.agency-set { border: 0; margin: 0; padding: 0; min-width: 0; }
+.agency-set > legend { padding: 0; margin-bottom: 6px; font-weight: 700; font-size: 14px; color: var(--ink); }
+.agency-fields { display: grid; gap: 12px 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.agency-fields .wide { grid-column: 1 / -1; }
+.agency-fields textarea.input { resize: vertical; min-height: 96px; }
+@media (max-width: 720px) { .agency-fields { grid-template-columns: minmax(0, 1fr); } }
+
+/* Results totals: as many across as fit. */
+.results-totals { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }

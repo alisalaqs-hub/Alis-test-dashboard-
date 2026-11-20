@@ -18,17 +18,19 @@ async function agency() {
 const idOf = async (ref: string) => (await one<{ id: string }>('SELECT id FROM listings WHERE ref = $1', [ref]))!.id;
 
 describe('agency results report', () => {
-  it('counts views, visitors, saves, enquiries and viewing requests per listing over the period', async () => {
+  it('counts views, calls, saves, enquiries and viewing requests per listing over the period', async () => {
     const { agent, orgId, mk } = await agency();
     const busy = await mk({ title: 'Busy terrace near the station', addressLine: '1 Busy Road' });
     const quiet = await mk({ title: 'Quiet flat, no enquiries yet', addressLine: '2 Quiet Road', channel: 'rent', price: 1500 });
     const draft = await mk({ title: 'Unpublished draft, never shown', addressLine: '3 Draft Road' });
     await q(`UPDATE listings SET status = 'live', published_at = now() - interval '12 days' WHERE ref = ANY($1)`, [[busy, quiet]]);
     const [busyId, quietId] = [await idOf(busy), await idOf(quiet)];
-    // 3 views from 2 visitors in the period, 1 old view outside it, 1 view on the quiet one
+    // 3 views and 2 calls in the period, 1 old view and call outside it, 1 view on the quiet one
+    await q(`INSERT INTO listing_views (listing_id, day, views, calls) VALUES
+      ($1, current_date - 1, 2, 0), ($1, current_date - 3, 1, 2), ($1, current_date - 60, 1, 1), ($2, current_date, 1, 0)`, [busyId, quietId]);
+    // what visitors who allowed analytics did is no longer where views come from: these change nothing
     await q(`INSERT INTO engagement_events (listing_id, session_id, name, occurred_at) VALUES
-      ($1, 's1', 'listing_view', now() - interval '1 day'), ($1, 's1', 'listing_view', now() - interval '2 days'), ($1, 's2', 'listing_view', now() - interval '3 days'),
-      ($1, 's3', 'listing_view', now() - interval '60 days'), ($1, 's1', 'photo_open', now()), ($2, 's9', 'listing_view', now())`, [busyId, quietId]);
+      ($1, 's1', 'listing_view', now() - interval '1 day'), ($1, 's2', 'listing_view', now() - interval '2 days'), ($1, 's1', 'photo_open', now())`, [busyId]);
     const buyer = await signUp();
     await q(`INSERT INTO saved_listings (user_id, listing_key) VALUES ($1, $2)`, [buyer.user.id, busy]);
     await q(`INSERT INTO enquiries (listing_id, name, email, kind, filtered, created_at) VALUES
@@ -40,13 +42,36 @@ describe('agency results report', () => {
     expect(r.json.days).toBe(30);
     expect(r.json.items.map((i: { ref: string }) => i.ref)).toEqual([busy, quiet]); // most enquiries first; the draft is not there
     expect(r.json.items.map((i: { ref: string }) => i.ref)).not.toContain(draft);
-    expect(r.json.items[0]).toMatchObject({ ref: busy, views: 3, visitors: 2, saves: 1, enquiries: 2, viewings: 1, daysOnMarket: 12, channel: 'sale' });
-    expect(r.json.items[1]).toMatchObject({ ref: quiet, views: 1, visitors: 1, saves: 0, enquiries: 0, viewings: 0, channel: 'rent' });
-    expect(r.json.totals).toEqual({ listings: 2, views: 4, visitors: 3, saves: 1, enquiries: 2, viewings: 1 });
+    expect(r.json.items[0]).toMatchObject({ ref: busy, views: 3, calls: 2, saves: 1, enquiries: 2, viewings: 1, daysOnMarket: 12, channel: 'sale' });
+    expect(r.json.items[1]).toMatchObject({ ref: quiet, views: 1, calls: 0, saves: 0, enquiries: 0, viewings: 0, channel: 'rent' });
+    expect(r.json.totals).toEqual({ listings: 2, views: 4, calls: 2, saves: 1, enquiries: 2, viewings: 1 });
+    expect(Object.keys(r.json.items[0])).not.toContain('visitors'); // people are not told apart, so there is no such figure
+    expect(r.json.note).toMatch(/without recording who viewed/);
 
-    // a longer period picks up the older view and enquiry
+    // a longer period picks up the older view, call and enquiry
     const long = await agent.c.get(`/api/orgs/${orgId}/report?days=90`);
-    expect(long.json.items[0]).toMatchObject({ views: 4, enquiries: 3, viewings: 2 });
+    expect(long.json.items[0]).toMatchObject({ views: 4, calls: 3, enquiries: 3, viewings: 2 });
+    // a shorter one leaves out the day three days ago
+    const short = await agent.c.get(`/api/orgs/${orgId}/report?days=3`);
+    expect(short.json.days).toBe(7); // the shortest period there is
+    expect(short.json.items[0]).toMatchObject({ views: 3, calls: 2 });
+  });
+
+  it('shows views next to enquiries for visitors who never allowed analytics', async () => {
+    // What a reviewer saw: 0 views beside 2 enquiries. Two people look at a listing and enquire; neither allows analytics.
+    const { agent, orgId, mk } = await agency();
+    expect((await agent.c.patch(`/api/orgs/${orgId}`, { phone: '020 7946 0123' })).status).toBe(200);
+    const ref = await mk({ title: 'Flat that people look at', addressLine: '5 Looked Road' });
+    await q(`UPDATE listings SET status = 'live', published_at = now() WHERE ref = $1`, [ref]);
+    for (const [i, ua] of ['Mozilla/5.0 (Windows NT 10.0) Chrome/130.0', 'Mozilla/5.0 (iPhone) Safari/604.1'].entries()) {
+      expect((await client().get(`/api/listings/${ref}`, { 'user-agent': ua })).status).toBe(200);
+      expect((await client().post(`/api/listings/${ref}/enquiries`, { name: `Visitor ${i}`, email: `visitor${i}@example.com`, kind: 'question', message: 'Is it still available?' }, { 'user-agent': ua })).status).toBe(201);
+    }
+    expect((await client().post(`/api/listings/${ref}/call`, undefined, { 'user-agent': 'Mozilla/5.0 (iPhone) Safari/604.1' })).status).toBe(202);
+    await agent.c.get(`/api/listings/${ref}`); // the agency checking its own listing is not a view
+    const r = await agent.c.get(`/api/orgs/${orgId}/report`);
+    expect(r.json.items[0]).toMatchObject({ ref, views: 2, calls: 1, enquiries: 2 });
+    expect(r.json.totals).toMatchObject({ views: 2, calls: 1, enquiries: 2 });
   });
 
   it('is for the agency only', async () => {
@@ -61,13 +86,14 @@ describe('agency results report', () => {
     const { agent, orgId, mk } = await agency();
     const ref = await mk({ title: '=HYPERLINK("http://evil.example","Click"), 2 bed', addressLine: '4 Sheet Road' });
     await q(`UPDATE listings SET status = 'live', published_at = now() WHERE ref = $1`, [ref]);
+    await q(`INSERT INTO listing_views (listing_id, day, views, calls) VALUES ($1, current_date, 9, 4)`, [await idOf(ref)]);
     const r = await agent.c.get(`/api/orgs/${orgId}/report?format=csv`);
     expect(r.status).toBe(200);
     expect(r.headers['content-type']).toMatch(/text\/csv/);
     expect(r.headers['content-disposition']).toMatch(/attachment; filename="streetkey-results-\d{4}-\d{2}-\d{2}\.csv"/);
     const lines = r.body.replace(/^﻿/, '').trim().split('\r\n');
-    expect(lines[0]).toBe('Reference,Title,Town,Postcode,For,Status,Price,Days on the market,Views (30 days),Visitors (30 days),Saves,Enquiries (30 days),Viewing requests (30 days)');
+    expect(lines[0]).toBe('Reference,Title,Town,Postcode,For,Status,Price,Days on the market,Views (30 days),Calls (30 days),Saves,Enquiries (30 days),Viewing requests (30 days)');
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain(`${ref},"'=HYPERLINK(""http://evil.example"",""Click""), 2 bed",London,E17 4QH,For sale,live,525000,0,0,0,0,0,0`);
+    expect(lines[1]).toContain(`${ref},"'=HYPERLINK(""http://evil.example"",""Click""), 2 bed",London,E17 4QH,For sale,live,525000,0,9,4,0,0,0`);
   });
 });

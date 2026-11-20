@@ -1,12 +1,13 @@
 /**
- * An estate or letting agent's public page (/agent/<id>): who they are, what they have on the market,
- * a short form to ask them for a valuation, and their live listings.
+ * An estate or letting agent's public page (/agent/<id>): who they are and how to reach them (what they
+ * say about themselves, a number to call, their website, address, redress scheme, client money protection
+ * and fees), what they have on the market, a short form to ask them for a valuation, and their live listings.
  *
  * "Book a valuation" asks only how to reach the person, where the property is and whether they want to
  * sell or let it. It never asks about their money (funds, a mortgage or income): that is a product rule.
  * The request goes to the agent by email and into their account, and nowhere else.
  */
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Seg, Tag } from '../components/ui';
 import { PropertyCard } from '../components/PropertyCard';
@@ -14,6 +15,7 @@ import { api, ApiError } from '../lib/api';
 import type { AgentProfileDTO } from '../lib/apiTypes';
 import { dtoToProperty } from '../lib/listingAdapter';
 import { usePageMeta } from '../lib/meta';
+import { displayUrl, telHref } from '../lib/phone';
 import { useServer } from '../lib/server';
 import '../styles/agent.css';
 
@@ -22,6 +24,9 @@ type Agent = AgentProfileDTO['agent'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KIND: Record<Agent['kind'], string> = { agency: 'Estate and letting agent', landlord: 'Landlord', developer: 'Property developer', contractor: 'Contractor' };
 const countsLine = (c: Agent['counts']) => `${c.sale} for sale · ${c.rent} to rent`;
+
+/** Said after the text of a link to another website, which opens in a new tab so the person keeps their place here. */
+const NewTab = () => <span className="sr-only"> (opens in a new tab)</span>;
 
 function NotFoundCard() {
   return (
@@ -88,18 +93,33 @@ function AgentPage({ profile }: { profile: AgentProfileDTO }) {
   const homes = useMemo(() => profile.listings.map(dtoToProperty), [profile.listings]);
   const onMarket = agent.counts.sale + agent.counts.rent;
   const since = new Date(`${agent.since}T00:00:00Z`);
+  // What the agent says about itself. Letting agents in England must show their redress scheme, their client
+  // money protection scheme and their fees wherever they advertise, so each has its own line when given.
+  const redress = [agent.redressScheme, agent.redressNumber ? `membership number ${agent.redressNumber}` : ''].filter(Boolean).join(', ');
+  const facts: [term: string, detail: ReactNode][] = [];
+  if (agent.address) facts.push(['Address', agent.address]);
+  if (redress) facts.push(['Redress scheme', redress]);
+  if (agent.clientMoneyScheme) facts.push(['Client money protection', agent.clientMoneyScheme]);
+  if (agent.feesUrl) facts.push(['Fees', <a href={agent.feesUrl} target="_blank" rel="noopener noreferrer nofollow">Tenant and landlord fees<NewTab /></a>]);
   return (
     <div className="stack" style={{ gap: 20 }}>
       <header className="stack agent-head">
         <div className="eyebrow">{KIND[agent.kind] ?? 'Agent'}</div>
         <h1 className="agent-h1">{agent.name}</h1>
-        {(agent.verified || agent.redressScheme) && (
-          <div className="row">
-            {agent.verified && <Tag kind="ok" title="Checked by Streetkey">Verified</Tag>}
-            {agent.redressScheme && <span className="small muted">Redress scheme: {agent.redressScheme}</span>}
+        {agent.verified && <div className="row"><Tag kind="ok" title="Checked by Streetkey">Verified</Tag></div>}
+        <p className="agent-counts">{countsLine(agent.counts)}{agent.counts.soldOrLet12m > 0 ? ` · ${agent.counts.soldOrLet12m} sold or let in the last 12 months` : ''}</p>
+        {agent.about && <p className="agent-about">{agent.about}</p>}
+        {(agent.phone || agent.website) && (
+          <div className="row agent-contact">
+            {agent.phone && <a className="btn accent" href={telHref(agent.phone)}>Call {agent.phone}</a>}
+            {agent.website && <a className="btn ghost" href={agent.website} target="_blank" rel="noopener noreferrer nofollow">{displayUrl(agent.website)}<NewTab /></a>}
           </div>
         )}
-        <p className="agent-counts">{countsLine(agent.counts)}{agent.counts.soldOrLet12m > 0 ? ` · ${agent.counts.soldOrLet12m} sold or let in the last 12 months` : ''}</p>
+        {facts.length > 0 && (
+          <dl className="agent-facts">
+            {facts.map(([term, detail]) => <div key={term}><dt>{term}</dt><dd>{detail}</dd></div>)}
+          </dl>
+        )}
         {!Number.isNaN(since.getTime()) && <p className="xs muted" style={{ margin: 0 }}>On Streetkey since {since.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</p>}
       </header>
 

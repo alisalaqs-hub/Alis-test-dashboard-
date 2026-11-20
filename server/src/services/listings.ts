@@ -55,10 +55,13 @@ export interface ListingRow {
   service_charge_annual: number | null; ground_rent_annual: number | null; features: string[]; description: string | null;
   material_info: Record<string, unknown>; ownership_declared: boolean; ownership_verified: boolean; rejection_reason: string | null;
   created_at: Date; updated_at: Date; published_at: Date | null;
+  /** The listing organisation's phone number (its profile, migration 018), when the query read it. */
+  organisation_phone?: string | null;
 }
 
 /** SELECT list used everywhere listings are read (joins the organisation and owner's display name). */
-export const LISTING_SELECT = `SELECT l.*, o.name AS organisation_name, o.verified AS organisation_verified, u.display_name AS owner_name
+export const LISTING_SELECT = `SELECT l.*, o.name AS organisation_name, o.verified AS organisation_verified, u.display_name AS owner_name,
+         o.phone AS organisation_phone
   FROM listings l LEFT JOIN organisations o ON o.id = l.organisation_id LEFT JOIN users u ON u.id = l.owner_user_id`;
 
 /** Hide the house number for private sellers, e.g. "Flat 2, 14 Elm Road" → "Elm Road" (shared with the website's preview). */
@@ -81,6 +84,8 @@ export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: stri
     source: { kind: r.source_kind, name, verified: r.source_kind === 'agent-feed' || r.source_kind === 'agent' ? !!r.organisation_verified : r.ownership_verified },
     // The lister's organisation, so a listing can link to its agent's page (/agent/<id>). Private sellers and landlords have none.
     organisationId: r.organisation_id ?? null, agentName: r.organisation_id ? r.organisation_name ?? null : null,
+    // The organisation's phone number, for a "Call" link on its listings. A private seller's or landlord's number is never sent.
+    agentPhone: r.organisation_id ? r.organisation_phone ?? null : null,
     ownershipVerified: r.ownership_verified,
     rejectionReason: mine || viewer.admin ? r.rejection_reason : undefined,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(), publishedAt: r.published_at?.toISOString() ?? null,
