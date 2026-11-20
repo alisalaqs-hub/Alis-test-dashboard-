@@ -150,8 +150,10 @@ describe('listing supply', () => {
   it('parses the BLM feed, rejecting bad rows', () => {
     const r = parseBLM(SAMPLE_BLM, SAMPLE_AGENT);
     expect(r.version).toBe('3');
-    expect(r.accepted).toHaveLength(4);
-    expect(r.rejected.map((x) => x.ref).sort()).toEqual(['LVH005', 'LVH006']);
+    expect(r.accepted).toHaveLength(5);
+    // a bad postcode, and price on application; the let-agreed row is kept and shown as under offer
+    expect(r.rejected.map((x) => x.ref).sort()).toEqual(['LVH005', 'LVH007']);
+    expect(r.accepted.find((p) => p.id.endsWith('lvh006'))!.status).toBe('under offer');
     const flat = r.accepted.find((p) => p.id.endsWith('lvh002'))!;
     expect(flat.tenure).toBe('leasehold'); expect(flat.leaseYears).toBe(125); expect(flat.serviceChargeAnnual).toBe(1400); expect(flat.epc.current).toBe('C');
     expect(r.accepted.find((p) => p.id.endsWith('lvh004'))!.listing).toBe('rent');

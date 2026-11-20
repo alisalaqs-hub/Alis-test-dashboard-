@@ -224,3 +224,25 @@ export interface ValuationRequestDTO {
   intent: 'sell' | 'let'; propertyType: string | null; beds: number | null; message: string | null;
   status: ValuationStatus; createdAt: string;
 }
+
+/* ───────────── Agent feeds ───────────── */
+
+/**
+ * A listing a feed run has something to say about. Without `imported` the listing was not imported, for the
+ * reason given. With it, the listing went in and the reason says what was left out (a photo, a floor plan, a date).
+ */
+export interface FeedIssueDTO { ref: string; reason: string; imported?: boolean }
+/** What one feed run did: a BLM file sent with a feed key, or uploaded by hand from the agency page. */
+export interface FeedResultDTO {
+  /** Listings imported from the file, and how many of those were already on Streetkey. */
+  accepted: number; updated: number;
+  /** Listings the same source sent before that are not among those accepted from this file. */
+  withdrawn: number;
+  rejected: FeedIssueDTO[];
+  /** Media in the file that Streetkey does not show: energy certificates, brochures, virtual tours, and pictures given as file names. */
+  leftOut: { epc: number; documents: number; virtualTours: number; notLinks: number };
+  /** For example "BLM 3". */
+  format: string;
+  /** Whether the listings are live or waiting for the agency to be verified. */
+  note: string;
+}

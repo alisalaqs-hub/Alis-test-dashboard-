@@ -65,6 +65,12 @@ describe('agent feeds', () => {
     const second = (await send(`${head}#DATA#${rows.slice(1).join('~')}~\n#END#`)).json();
     expect(second.withdrawn).toBe(1);
     expect((await client().get('/api/listings')).json.total).toBe(first.accepted - 1);
+    // the let-agreed row is listed as under offer, its weekly rent (£405) as a monthly figure; price on application is never listed
+    const stored = await listingsOf(org.json.id);
+    expect(stored.find((r) => r.source_ref === 'LVH006')).toMatchObject({ status: 'under_offer', price: 1755 });
+    expect(stored.find((r) => r.source_ref === 'LVH004')).toMatchObject({ status: 'live', price: 1600 });
+    expect(stored.some((r) => r.source_ref === 'LVH007')).toBe(false);
+    expect(second.rejected).toContainEqual({ ref: 'LVH007', reason: 'Price on application: Streetkey shows a price on every listing' });
     const runs = await agent.c.get(`/api/orgs/${org.json.id}/feed-runs`);
     expect(runs.json.items).toHaveLength(2);
   });
@@ -80,11 +86,14 @@ describe('agent feeds', () => {
     expect(first.status).toBe(200);
     expect(first.json.accepted).toBe(2);
     const reasons = first.json.rejected.map((r: { ref: string; reason: string }) => `${r.ref}: ${r.reason}`);
-    // (plain http links are already left out by the BLM reader)
+    // (plain http links are already left out by the BLM reader, and counted)
     expect(reasons.sort()).toEqual([
       'A1: Photo 2 skipped (127.0.0.1:9443): photos must be on a public https web address',
       'A2: Listed more than once in this file: the last one was used',
     ]);
+    // both listings went in: these are notes about them, not rejections
+    expect(first.json.rejected.every((r: { imported?: boolean }) => r.imported === true)).toBe(true);
+    expect(first.json.leftOut).toEqual({ epc: 0, documents: 0, virtualTours: 0, notLinks: 1 });
     const rows = await listingsOf(org.id);
     expect(rows.map((r) => [r.source_ref, r.status, r.price])).toEqual([['A1', 'live', 300000], ['A2', 'live', 415000]]);
     const photos = await photosOf(rows[0].id);

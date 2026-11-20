@@ -1,0 +1,26 @@
+/* Upload a feed file by hand (src/components/FeedUpload.tsx). Colours come from the site's own variables, so both themes work. */
+.fu { display: flex; flex-direction: column; gap: 12px; }
+.fu-p { margin: 0; }
+.fu .field { max-width: 460px; }
+.fu-status:empty { display: none; }
+
+/* While the file is read and imported. */
+.fu-progress { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.fu-bar { width: 180px; max-width: 100%; height: 8px; accent-color: var(--accent); }
+
+/* The result. */
+.fu-result { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--surface-2); }
+.fu-head { margin: 0; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+.fu-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
+.fu-counts > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.fu-counts dt { font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.fu-counts dd { margin: 0; }
+.fu-counts dd.num { font-size: 22px; font-weight: 700; color: var(--ink); line-height: 1.25; }
+.fu-sub { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--ink); }
+.fu-scroll { max-height: 280px; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.fu-scroll:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.fu-scroll li { overflow-wrap: anywhere; }
+
+@media (max-width: 520px) {
+  .fu-counts { grid-template-columns: minmax(0, 1fr); }
+}

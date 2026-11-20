@@ -533,15 +533,123 @@ export function extractListing(text: string, url = ''): Extracted {
 }
 
 /* ---------- 4. BLM v3 bulk listing feed (exported by UK agency CRMs) ---------- */
-const BLM_TYPE: Record<string, PropertyType> = { '1': 'terraced', '2': 'terraced', '3': 'semi-detached', '4': 'detached', '5': 'terraced', '7': 'flat', '8': 'flat', '9': 'flat', '10': 'flat', '11': 'flat', '12': 'bungalow', '13': 'bungalow', '14': 'bungalow', '15': 'bungalow', '28': 'flat' };
-const BLM_TENURE: Record<string, Property['tenure']> = { '1': 'freehold', '2': 'leasehold', '4': 'leasehold', '5': 'share-of-freehold' };
+/*
+ * BLM is the bulk file UK agency software already exports to the portals (Rightmove's "BLM v3" and "v3i").
+ * The field names and code tables below are that format's. One rule runs through all of them: a code is
+ * mapped only when Streetkey can show exactly what it means. Anything else rejects that one listing, with
+ * the reason in the run report. Nothing is guessed: not the price, the type, the tenure or the status.
+ */
+import { isFloorPlanCaption } from './floorplan';
+
+/** PROP_SUB_ID. Types Streetkey has no word for (cottage, town house, land, house share and so on) are rejected, never guessed. */
+const BLM_TYPE: Record<string, PropertyType> = {
+  '1': 'terraced', '2': 'terraced', '3': 'semi-detached', '4': 'detached', '5': 'terraced',
+  '7': 'flat', '8': 'flat', '9': 'flat', '10': 'flat', '11': 'flat',
+  '12': 'bungalow', '13': 'bungalow', '14': 'bungalow', '15': 'bungalow', '28': 'flat', '29': 'flat',
+};
+/** TENURE_TYPE_ID: 1 freehold, 2 leasehold, 5 share of freehold. 3 (feudal) and 4 (commonhold) have no Streetkey equivalent. */
+const BLM_TENURE: Record<string, Property['tenure']> = { '1': 'freehold', '2': 'leasehold', '5': 'share-of-freehold' };
+/** STATUS_ID: 0 available. 1 sold subject to contract, 2 the same in Scotland, 3 under offer, 4 reserved and 5 let agreed all show as under offer. */
+const BLM_STATUS: Record<string, 'live' | 'under offer'> = { '': 'live', '0': 'live', '1': 'under offer', '2': 'under offer', '3': 'under offer', '4': 'under offer', '5': 'under offer' };
+/** What the listings table's price_qualifier column takes (server/src/services/listings.ts). */
+export type FeedPriceQualifier = 'guide' | 'offers over' | 'offers in region of' | 'fixed' | 'pcm';
+/** PRICE_QUALIFIER codes Streetkey can show on a sale: 0 none, 2 guide price, 3 fixed price, 4 offers in excess of, 5 offers in the region of, 10 offers over. */
+const BLM_QUALIFIER: Record<string, FeedPriceQualifier | null> = { '': null, '0': null, '2': 'guide', '3': 'fixed', '4': 'offers over', '5': 'offers in region of', '10': 'offers over' };
+/** The qualifiers that invite offers, in words: a rent may not carry one. */
+const BLM_OFFERS_WORDS: Record<string, string> = { '2': 'guide price', '4': 'offers in excess of', '5': 'offers in the region of', '10': 'offers over' };
+/** PRICE_QUALIFIER codes whose price Streetkey cannot show truthfully: the listing is rejected with this reason. */
+const BLM_QUALIFIER_REFUSED: Record<string, string> = {
+  '1': 'Price on application: Streetkey shows a price on every listing',
+  '6': 'Sale by tender (PRICE_QUALIFIER 6): Streetkey cannot show this kind of price',
+  '7': 'Priced “from” (PRICE_QUALIFIER 7): Streetkey shows one price for one home',
+  '9': 'Shared ownership (PRICE_QUALIFIER 9): Streetkey cannot show the price of a share',
+  '11': 'Part buy, part rent (PRICE_QUALIFIER 11): Streetkey cannot show the price of a share',
+  '12': 'Shared equity (PRICE_QUALIFIER 12): Streetkey cannot show this kind of price',
+};
+/** LET_RENT_FREQUENCY as payments a year: 0 weekly, 1 monthly, 2 quarterly, 3 annual. (5 is per person per week: rejected.) */
+const BLM_RENTS_A_YEAR: Record<string, number> = { '0': 52, '1': 12, '2': 4, '3': 1 };
+/** LET_FURN_ID: 0 furnished, 1 part furnished, 2 unfurnished. 3 (not specified) and 4 (either) are left out. */
+const BLM_FURNISHED: Record<string, NonNullable<FeedLetting['furnished']>> = { '0': 'furnished', '1': 'part-furnished', '2': 'unfurnished' };
+/** MEDIA_IMAGE_60 and above carry the energy certificate graphs, and MEDIA_DOCUMENT_50 and above the certificates. */
+const BLM_EPC_IMAGE_FROM = 60, BLM_EPC_DOCUMENT_FROM = 50;
+/** A caption that marks an energy certificate ("EPC", "EPC graph", "Energy Performance Certificate", or "HIP" on its own). */
+const EPC_CAPTION = /^\s*(?:epc\b|energy\s+performance\b|hip\s*$)/i;
+const TYPES_SHOWN = 'terraced, semi-detached and detached houses, flats and bungalows';
+
+/** The caption a feed's floor plan is stored with: the one the site recognises a floor plan by (isFloorPlanCaption). */
+export const FEED_PLAN_CAPTION = 'Floor plan';
+
+/** What a letting says beyond the rent, when the file has it. availableFrom is YYYY-MM-DD. */
+export interface FeedLetting { deposit?: number; availableFrom?: string; furnished?: 'furnished' | 'part-furnished' | 'unfurnished' }
+/** One listing read from a feed file, keyed by the agent's own reference. */
+export type FeedListing = ListingInput & {
+  ref: string;
+  /** How the price is qualified: on a sale as the agent marked it, on a letting always 'pcm' (the rent is a monthly figure). */
+  priceQualifier?: FeedPriceQualifier;
+  /** Lettings only, and only the parts the file gave. */
+  letting?: FeedLetting;
+  /** Links to floor plan pictures, in file order. They are never among the photos. */
+  floorPlans?: string[];
+};
+/** A listing that was not imported. Where a server marks it `imported`, the listing went in with the named detail left out. */
+export interface FeedIssue { ref: string; reason: string; imported?: boolean }
 
 export interface FeedReport {
   accepted: Property[];
-  /** The facts exactly as supplied (no defaults filled in), keyed by the agent's own reference — what a server stores. */
-  inputs: (ListingInput & { ref: string })[];
-  rejected: { ref: string; reason: string }[]; fields: number; version: string;
+  /** The facts exactly as supplied, keyed by the agent's own reference: what a server stores. */
+  inputs: FeedListing[];
+  /** Listings that were not imported, each with the reason. */
+  rejected: FeedIssue[];
+  /** Listings that were imported with a detail left out because it could not be read. */
+  notes: FeedIssue[];
+  /**
+   * Media in the file that Streetkey does not show, counted across the whole file: energy certificate graphs and
+   * documents, brochures and other documents, virtual tours, and pictures that are not https links (file names,
+   * for media sent in a zip beside the file, and plain http links).
+   */
+  leftOut: { epc: number; documents: number; virtualTours: number; notLinks: number };
+  fields: number; version: string;
 }
+
+/**
+ * A feed file's bytes as text. BLM files are usually Windows-1252 (the pound sign and curly quotes are single
+ * bytes); newer software writes UTF-8. Valid UTF-8 is read as UTF-8, anything else as Windows-1252.
+ */
+export function decodeFeedBytes(bytes: Uint8Array): string {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { /* not UTF-8 */ }
+  return new TextDecoder('windows-1252').decode(bytes);
+}
+/** Whether text has the two markers every BLM file has. */
+export const looksLikeBLM = (text: string) => /#HEADER#/i.test(text) && /#DATA#/i.test(text);
+
+/** The media a file carried that Streetkey does not show, as sentences for the run report. Empty when there was none. */
+export function feedLeftOutText(l: FeedReport['leftOut']): string[] {
+  const some = (n: number, one: string, many: string) => `${n.toLocaleString('en-GB')} ${n === 1 ? one : many}`;
+  const kinds = [
+    l.epc ? some(l.epc, 'energy certificate graph or document', 'energy certificate graphs or documents') : '',
+    l.documents ? some(l.documents, 'brochure or other document', 'brochures or other documents') : '',
+    l.virtualTours ? some(l.virtualTours, 'virtual tour', 'virtual tours') : '',
+  ].filter(Boolean);
+  const out: string[] = [];
+  if (kinds.length) out.push(`Streetkey does not show these yet, so they were left out: ${kinds.join(', ')}.`);
+  if (l.notLinks) {
+    out.push(l.notLinks === 1 ? '1 picture was left out because it was not given as an https web address. Streetkey does not read file names or http links.'
+      : `${l.notLinks.toLocaleString('en-GB')} pictures were left out because they were not given as https web addresses. Streetkey does not read file names or http links.`);
+  }
+  return out;
+}
+
+/** A BLM date as YYYY-MM-DD: "2026-12-01", "2026-12-01 00:00:00" or the British "01/12/2026". null when it is not a real date. */
+function blmDate(value: string): string | null {
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$/.exec(value);
+  const uk = iso ? null : /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[ T].*)?$/.exec(value);
+  const [y, m, d] = iso ? [Number(iso[1]), Number(iso[2]), Number(iso[3])] : uk ? [Number(uk[3]), Number(uk[2]), Number(uk[1])] : [0, 0, 0];
+  const date = new Date(Date.UTC(y, m - 1, d));
+  if (y < 1000 || date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return null;
+  return date.toISOString().slice(0, 10);
+}
+/** A rent paid `timesAYear` as a monthly figure, to the nearest pound: weekly × 52 ÷ 12, quarterly ÷ 3, annual ÷ 12. A monthly rent is kept as sent. */
+const monthlyRent = (rent: number, timesAYear: number) => (timesAYear === 12 ? rent : Math.round((rent * timesAYear) / 12));
 
 export function parseBLM(raw: string, agentName: string): FeedReport {
   const header = raw.match(/#HEADER#([\s\S]*?)#DEFINITION#/i)?.[1] ?? '';
@@ -552,38 +660,126 @@ export function parseBLM(raw: string, agentName: string): FeedReport {
   const fields = defBlock.split(eor)[0].trim().split(eof).map((x) => x.trim()).filter(Boolean);
   const dataBlock = raw.match(/#DATA#([\s\S]*?)#END#/i)?.[1] ?? '';
   const rows = dataBlock.split(eor).map((r) => r.trim()).filter(Boolean);
-  const accepted: Property[] = []; const inputs: FeedReport['inputs'] = []; const rejected: FeedReport['rejected'] = [];
+  const accepted: Property[] = []; const inputs: FeedListing[] = []; const rejected: FeedIssue[] = []; const notes: FeedIssue[] = [];
+  const leftOut = { epc: 0, documents: 0, virtualTours: 0, notLinks: 0 };
+  // The numbered media fields of one kind, in order (MEDIA_IMAGE_00, MEDIA_IMAGE_01 and so on), each with its caption field.
+  const numbered = (kind: string) => fields
+    .flatMap((f) => { const m = new RegExp(`^MEDIA_${kind}_(\\d+)$`).exec(f); return m ? [{ field: f, n: Number(m[1]), caption: `MEDIA_${kind}_TEXT_${m[1]}` }] : []; })
+    .sort((a, b) => a.n - b.n);
+  const media = { image: numbered('IMAGE'), plan: numbered('FLOOR_PLAN'), document: numbered('DOCUMENT'), tour: numbered('VIRTUAL_TOUR') };
+  const isLink = (v: string) => /^https:\/\//i.test(v);
   for (const r of rows) {
     const row = r.endsWith(eof) ? r.slice(0, -1) : r;
     const vals = row.split(eof);
     const rec: Record<string, string> = Object.fromEntries(fields.map((f, k) => [f, (vals[k] ?? '').trim()]));
     const ref = rec.AGENT_REF || '(no ref)';
-    if (vals.length !== fields.length) { rejected.push({ ref, reason: `Expected ${fields.length} fields, got ${vals.length}` }); continue; }
-    if (rec.STATUS_ID && rec.STATUS_ID !== '0' && rec.STATUS_ID !== '1') { rejected.push({ ref, reason: `Status ${rec.STATUS_ID} is not available/under offer — skipped` }); continue; }
-    const postcode = `${rec.POSTCODE1 ?? ''} ${rec.POSTCODE2 ?? ''}`.trim();
-    const price = Number(rec.PRICE);
-    if (!POSTCODE_RE.test(postcode)) { rejected.push({ ref, reason: 'Missing or invalid postcode' }); continue; }
-    if (!price) { rejected.push({ ref, reason: 'Missing price' }); continue; }
+    const reject = (reason: string) => { rejected.push({ ref, reason }); };
+    if (vals.length !== fields.length) { reject(`Expected ${fields.length} fields, got ${vals.length}`); continue; }
+    if (!rec.AGENT_REF) { reject('Missing agent reference (AGENT_REF)'); continue; }
+    if (rec.PUBLISHED_FLAG === '0') { reject('Marked as not published in the file (PUBLISHED_FLAG 0)'); continue; }
+    const status = BLM_STATUS[rec.STATUS_ID ?? ''];
+    if (!status) { reject(`Status code ${rec.STATUS_ID} is not one Streetkey knows (STATUS_ID)`); continue; }
+    if (rec.TRANS_TYPE_ID !== '1' && rec.TRANS_TYPE_ID !== '2') { reject(`The file does not say whether this is a sale or a letting (TRANS_TYPE_ID is ${rec.TRANS_TYPE_ID || 'empty'})`); continue; }
     const lettings = rec.TRANS_TYPE_ID === '2';
+    const postcode = `${rec.POSTCODE1 ?? ''} ${rec.POSTCODE2 ?? ''}`.trim();
+    if (!POSTCODE_RE.test(postcode)) { reject('Missing or invalid postcode'); continue; }
+    const town = rec.TOWN || rec.ADDRESS_3;
+    if (!town) { reject('Missing town (TOWN)'); continue; }
+
+    // The property type: only the codes Streetkey has a word for.
+    const typeCode = rec.PROP_SUB_ID ?? '';
+    const type = BLM_TYPE[typeCode];
+    if (!type) {
+      reject(typeCode && typeCode !== '0' ? `Property type code ${typeCode} is not one Streetkey shows (PROP_SUB_ID): it shows ${TYPES_SHOWN}`
+        : `Property type not given (PROP_SUB_ID is ${typeCode || 'empty'}): Streetkey shows ${TYPES_SHOWN}`);
+      continue;
+    }
+
+    // The price, as the agent qualified it.
+    const qualifierCode = rec.PRICE_QUALIFIER ?? '';
+    if (BLM_QUALIFIER_REFUSED[qualifierCode]) { reject(BLM_QUALIFIER_REFUSED[qualifierCode]); continue; }
+    if (!(qualifierCode in BLM_QUALIFIER)) { reject(`Price qualifier code ${qualifierCode} is not one Streetkey knows (PRICE_QUALIFIER)`); continue; }
+    // A rent is one fixed figure: a letting that invites offers is refused, as it is on a listing made by hand.
+    if (lettings && BLM_OFFERS_WORDS[qualifierCode]) { reject(`A rent must be one fixed figure: this letting is marked “${BLM_OFFERS_WORDS[qualifierCode]}” (PRICE_QUALIFIER ${qualifierCode})`); continue; }
+    const sent = Number(rec.PRICE);
+    if (!(sent > 0)) { reject('Missing price'); continue; }
+    let price = sent;
+    if (lettings) {
+      // The rent is shown per month, so the file must say how often the figure it gives is paid.
+      const frequency = rec.LET_RENT_FREQUENCY ?? '';
+      const timesAYear = BLM_RENTS_A_YEAR[frequency];
+      if (!timesAYear) {
+        reject(frequency === '5' ? 'Rent is per person per week (LET_RENT_FREQUENCY 5): Streetkey shows one monthly rent for the whole property'
+          : frequency ? `Rent frequency code ${frequency} is not one Streetkey knows (LET_RENT_FREQUENCY)`
+            : 'Rent frequency not given (LET_RENT_FREQUENCY): Streetkey cannot tell whether the rent is weekly or monthly');
+        continue;
+      }
+      price = monthlyRent(sent, timesAYear);
+    }
+
     const features = Object.keys(rec).filter((k) => /^FEATURE\d+$/.test(k)).map((k) => rec[k]).filter(Boolean);
     const all = `${rec.SUMMARY ?? ''} ${rec.DESCRIPTION ?? ''} ${features.join(' ')}`;
     const ex = extractListing(all);
-    const media = Object.keys(rec).filter((k) => /^MEDIA_IMAGE_\d+$/.test(k)).sort().map((k) => rec[k]).filter((v) => /^https:\/\//i.test(v));
-    const input: ListingInput = {
+
+    // Tenure: the file's code, or else what the agent's own description says. A home for sale with neither is rejected.
+    // A letting rarely carries one, and the listings table cannot yet hold "not given" (see docs/08-backend.md).
+    const tenureCode = rec.TENURE_TYPE_ID ?? '';
+    const tenureGiven = tenureCode !== '' && tenureCode !== '0';
+    if (!lettings && tenureGiven && !BLM_TENURE[tenureCode]) { reject(`Tenure code ${tenureCode} is not one Streetkey shows (TENURE_TYPE_ID): it shows freehold, leasehold and share of freehold`); continue; }
+    const tenure = BLM_TENURE[tenureCode] ?? (tenureGiven ? undefined : ex.fields.tenure);
+    if (!lettings && !tenure) { reject('Tenure not given (TENURE_TYPE_ID): Streetkey shows the tenure of every home for sale'); continue; }
+
+    // Pictures. Energy certificate graphs travel as images (from MEDIA_IMAGE_60, or captioned EPC or HIP) and are not
+    // photos. A floor plan is not a photo either, whether it has its own field or is an image captioned "Floor plan".
+    const photos: string[] = [], floorPlans: string[] = [];
+    for (const m of media.plan) { const v = rec[m.field]; if (v) { if (isLink(v)) floorPlans.push(v); else leftOut.notLinks++; } }
+    for (const m of media.image) {
+      const v = rec[m.field], caption = rec[m.caption] ?? '';
+      if (!v) continue;
+      if (m.n >= BLM_EPC_IMAGE_FROM || EPC_CAPTION.test(caption)) leftOut.epc++;
+      else if (!isLink(v)) leftOut.notLinks++;
+      else if (isFloorPlanCaption(caption)) floorPlans.push(v);
+      else photos.push(v);
+    }
+    for (const m of media.document) { if (rec[m.field]) { if (m.n >= BLM_EPC_DOCUMENT_FROM || EPC_CAPTION.test(rec[m.caption] ?? '')) leftOut.epc++; else leftOut.documents++; } }
+    for (const m of media.tour) if (rec[m.field]) leftOut.virtualTours++;
+
+    // What a letting says beyond the rent: only the parts the file gave, and only where they can be read with certainty.
+    const letting: FeedLetting = {};
+    if (lettings) {
+      const deposit = Number(rec.LET_BOND);
+      if (deposit > 0) letting.deposit = deposit;
+      if (rec.LET_DATE_AVAILABLE) {
+        const from = blmDate(rec.LET_DATE_AVAILABLE);
+        if (from) letting.availableFrom = from;
+        else notes.push({ ref, reason: `Available date “${rec.LET_DATE_AVAILABLE.slice(0, 30)}” could not be read (LET_DATE_AVAILABLE): left out` });
+      }
+      const furnished = BLM_FURNISHED[rec.LET_FURN_ID ?? ''];
+      if (furnished) letting.furnished = furnished;
+    }
+
+    const qualifier = lettings ? 'pcm' : BLM_QUALIFIER[qualifierCode];
+    const input: FeedListing = {
+      ref,
       id: `feed-${agentName.toLowerCase().replace(/[^a-z]+/g, '-')}-${ref.toLowerCase()}`,
       listing: lettings ? 'rent' : 'sale', title: rec.SUMMARY?.slice(0, 90),
-      addressLine: [rec.ADDRESS_1, rec.ADDRESS_2].filter(Boolean).join(' '), town: rec.TOWN || rec.ADDRESS_3 || 'Unknown', postcode,
-      type: BLM_TYPE[rec.PROP_SUB_ID] ?? ex.fields.type ?? 'terraced', tenure: BLM_TENURE[rec.TENURE_TYPE_ID] ?? ex.fields.tenure ?? 'freehold',
-      leaseYears: ex.fields.leaseYears, beds: Number(rec.BEDROOMS) || 0, baths: Number(rec.BATHROOMS) || 1, floorArea: ex.fields.floorArea ?? 0,
+      addressLine: [rec.ADDRESS_1, rec.ADDRESS_2].filter(Boolean).join(' '), town, postcode,
+      type, tenure: tenure ?? 'freehold',
+      leaseYears: ex.fields.leaseYears, beds: Number(rec.BEDROOMS) || 0, baths: Number(rec.BATHROOMS) || 0, floorArea: ex.fields.floorArea ?? 0,
       condition: ex.fields.condition, price, epc: ex.fields.epc, councilTax: ex.fields.councilTax, serviceChargeAnnual: ex.fields.serviceChargeAnnual,
-      features, description: rec.DESCRIPTION, photos: media.length ? media : undefined,
+      features, description: rec.DESCRIPTION, photos: photos.length ? photos : undefined,
       source: { kind: 'agent-feed', name: `${agentName} (agent feed)`, licence: 'Displayed under agent feed agreement; agent retains ownership', verified: true },
-      status: rec.STATUS_ID === '1' ? 'under offer' : 'live',
+      status,
+      ...(qualifier ? { priceQualifier: qualifier } : {}),
+      ...(Object.keys(letting).length ? { letting } : {}),
+      ...(floorPlans.length ? { floorPlans } : {}),
     };
-    inputs.push({ ...input, ref });
-    accepted.push(buildListing(input));
+    inputs.push(input);
+    const built = buildListing(input);
+    if (floorPlans.length) built.floorPlan = { url: floorPlans[0], alt: FEED_PLAN_CAPTION };
+    accepted.push(built);
   }
-  return { accepted, inputs, rejected, fields: fields.length, version };
+  return { accepted, inputs, rejected, notes, leftOut, fields: fields.length, version };
 }
 
 /* ---------- 5. merge the same home from several sources ---------- */

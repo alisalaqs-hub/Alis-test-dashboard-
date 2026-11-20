@@ -7,6 +7,8 @@
 import type { EpcCertificate, EpcSummary, FloodResult } from '../engine/evidence';
 import type { AgentProfileDTO, AiImageDTO, CheckDTO, DataStatusDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, OfficialListingDTO, OrgDTO, OrgProfileBody, OrgReportDTO, SavedSearchDTO, SoldPricesDTO, UserDTO, ValuationRequestBody, ValuationRequestDTO, ValuationStatus } from './apiTypes';
 
+import type { FeedIssueDTO, FeedResultDTO } from './apiTypes';
+
 export const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
 export class ApiError extends Error {
@@ -16,14 +18,16 @@ export class ApiError extends Error {
 /** Low-level call used by feature clients (src/lib/ai/*). Throws ApiError with a message written for people. */
 export async function apiCall<T>(method: string, path: string, body?: unknown, opts: { timeout?: number } = {}): Promise<T> { return request<T>(method, path, body, opts); }
 
-async function request<T>(method: string, path: string, body?: unknown, opts: { timeout?: number } = {}): Promise<T> {
+/** opts.contentType: the body is text sent exactly as it is, with this content type (a feed file), not as JSON. */
+async function request<T>(method: string, path: string, body?: unknown, opts: { timeout?: number; contentType?: string } = {}): Promise<T> {
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+  const asIs = isForm || (opts.contentType !== undefined && typeof body === 'string');
   let r: Response;
   try {
     r = await fetch(`${API_BASE}${path}`, {
       method, credentials: 'include',
-      headers: body !== undefined && !isForm ? { 'Content-Type': 'application/json' } : undefined,
-      body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
+      headers: body !== undefined && !isForm ? { 'Content-Type': asIs ? opts.contentType! : 'application/json' } : undefined,
+      body: body === undefined ? undefined : asIs ? (body as BodyInit) : JSON.stringify(body),
       signal: AbortSignal.timeout(opts.timeout ?? 30_000),
     });
   } catch (e) {
@@ -181,9 +185,16 @@ export const api = {
     keys: (id: string) => get<{ items: { id: string; label: string; prefix: string; lastUsedAt: string | null; revokedAt: string | null; createdAt: string }[] }>(`/api/orgs/${id}/feed-keys`),
     createKey: (id: string, label: string) => post<{ key: string; note: string }>(`/api/orgs/${id}/feed-keys`, { label }),
     revokeKey: (id: string, keyId: string) => del<{ ok: true }>(`/api/orgs/${id}/feed-keys/${keyId}`),
+    /**
+     * Uploads a BLM file by hand (the agency's owners and admins), as text. It runs the same import as a file sent
+     * with a feed key. The file is the full stock uploaded by hand: listings from the last upload by hand that are
+     * not in it are withdrawn, and listings sent with a feed key are untouched.
+     */
+    uploadFeed: (id: string, text: string) => request<FeedResultDTO>('POST', `/api/orgs/${encodeURIComponent(id)}/feed-upload`, text, { timeout: 120_000, contentType: 'text/plain; charset=utf-8' }),
     /** What each of the agency's listings brought in over the last `days` days. */
     report: (id: string, days = 30) => get<OrgReportDTO>(`/api/orgs/${id}/report?days=${days}`),
-    runs: (id: string) => get<{ items: { id: string; format: string; accepted: number; withdrawn: number; rejected: { ref: string; reason: string }[]; createdAt: string }[] }>(`/api/orgs/${id}/feed-runs`),
+    /** source: 'upload' for a file uploaded by hand, 'key' for one sent with a feed key (keyLabel names the key). */
+    runs: (id: string) => get<{ items: { id: string; format: string; accepted: number; withdrawn: number; rejected: FeedIssueDTO[]; createdAt: string; source?: 'key' | 'upload'; keyLabel?: string | null }[] }>(`/api/orgs/${id}/feed-runs`),
     /** Valuations people asked this agency for from its public page, newest first (at most 200). */
     valuationRequests: (id: string) => get<{ items: ValuationRequestDTO[] }>(`/api/orgs/${id}/valuation-requests`),
     setValuationStatus: (id: string, rid: string, status: ValuationStatus) => patch<{ request: ValuationRequestDTO }>(`/api/orgs/${id}/valuation-requests/${rid}`, { status }),
