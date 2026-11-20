@@ -146,6 +146,23 @@ async function importFeed(req: FastifyRequest, org: FeedOrg, source: FeedSource)
   const { inputs, rejected } = prepareFeed(report);
   const geo = await bulkGeocode(inputs.map((i) => i.postcode));
   const sourceId = source.via === 'key' ? source.keyId : await handSource(org.id, source.userId);
+  /*
+   * "Not in the file" only means "no longer for sale" when the whole file could be read. If any row could not
+   * be lined up with the header (or has no reference), or the file has rows but not one listing in it could be
+   * imported, the listings already on Streetkey are left as they are and the report says so.
+   */
+  const unreadable = report.rejected.filter((r) => r.ref === '(no ref)' || /^Expected \d+ fields/.test(r.reason)).length;
+  const keepStock = unreadable > 0 || (inputs.length === 0 && report.rejected.length > 0);
+  if (keepStock) {
+    rejected.push({
+      ref: '(whole file)', imported: true,
+      reason: unreadable > 0
+        ? `${unreadable} row${unreadable === 1 ? '' : 's'} could not be read, so no listings were withdrawn on this run. Listings no longer in your file stay on Streetkey until a file that reads cleanly is sent`
+        : 'No listing in this file could be imported, so no listings were withdrawn on this run',
+    });
+  }
+  // What the last run from this source reported, to avoid emailing the same report every time a file is re-sent.
+  const last = await one<{ rejected: unknown }>('SELECT rejected FROM feed_runs WHERE organisation_id = $1 AND feed_key_id = $2 ORDER BY created_at DESC LIMIT 1', [org.id, sourceId]);
 
   const rows = inputs.map((i) => {
     const g = geo.get(i.postcode);
@@ -157,7 +174,9 @@ async function importFeed(req: FastifyRequest, org: FeedOrg, source: FeedSource)
       price_qualifier: i.priceQualifier ?? null,
       epc: i.epc ?? null, council_tax: i.councilTax ?? null, service_charge_annual: i.serviceChargeAnnual ?? null, features: i.features, description: i.description ?? null,
       // What a letting says beyond the rent (deposit, available date, furnishing), exactly as the file gave it.
-      material_info: i.letting ? { letting: i.letting } : {},
+      // floorAreaEstimated: the file gave no floor area, so the figure stored (the column needs one) is a guess from
+      // the bedroom count. It is never shown as the home's floor area.
+      material_info: { ...(i.letting ? { letting: i.letting } : {}), ...(i.floorArea ? {} : { floorAreaEstimated: true }) },
     };
   });
   // Each listing's pictures in order: its photos, then its floor plan under the caption the site knows a floor plan by.
@@ -190,7 +209,7 @@ async function importFeed(req: FastifyRequest, org: FeedOrg, source: FeedSource)
          lat = EXCLUDED.lat, lng = EXCLUDED.lng, property_type = EXCLUDED.property_type, tenure = EXCLUDED.tenure, lease_years = EXCLUDED.lease_years,
          beds = EXCLUDED.beds, baths = EXCLUDED.baths, floor_area = EXCLUDED.floor_area, condition = EXCLUDED.condition, price = EXCLUDED.price,
          price_qualifier = EXCLUDED.price_qualifier, epc = EXCLUDED.epc, council_tax = EXCLUDED.council_tax, service_charge_annual = EXCLUDED.service_charge_annual,
-         features = EXCLUDED.features, description = EXCLUDED.description, material_info = (listings.material_info - 'letting') || EXCLUDED.material_info,
+         features = EXCLUDED.features, description = EXCLUDED.description, material_info = (listings.material_info - 'letting' - 'floorAreaEstimated') || EXCLUDED.material_info,
          published_at = coalesce(listings.published_at, EXCLUDED.published_at), updated_at = now()
        RETURNING id, source_ref`, [JSON.stringify(rows), org.id, sourceId], c) : [];
     const idOf = new Map(saved.map((r) => [r.source_ref, r.id]));
@@ -223,7 +242,8 @@ async function importFeed(req: FastifyRequest, org: FeedOrg, source: FeedSource)
 
     // Withdraw what this source sent before and has not sent now. A feed key also takes over listings with no working
     // key when it is the agency's only working key; an upload by hand only ever withdraws earlier uploads by hand.
-    const withdrawn = await q<{ id: string }>(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE organisation_id = $1 AND source_kind = 'agent-feed'
+    // Never from a file that could not be read properly (see keepStock): a damaged export must not empty an agency's page.
+    const withdrawn = keepStock ? [] : await q<{ id: string }>(`UPDATE listings SET status = 'withdrawn', updated_at = now() WHERE organisation_id = $1 AND source_kind = 'agent-feed'
       AND status IN ('live', 'under_offer', 'pending') AND NOT (source_ref = ANY($2))
       AND (feed_key_id = $3 OR ($4::boolean AND
         (feed_key_id IS NULL OR feed_key_id IN (SELECT id FROM feed_keys WHERE organisation_id = $1 AND revoked_at IS NOT NULL AND prefix <> $5))
@@ -243,7 +263,10 @@ async function importFeed(req: FastifyRequest, org: FeedOrg, source: FeedSource)
 
   const format = `BLM ${report.version}`;
   // The agency's owners and admins are told what happened. The import is done by now: an email that fails must not undo it.
-  try {
+  // A file re-sent with nothing new in it (software that sends hourly) is not reported again: no listings added or
+  // withdrawn, and the same listings left out for the same reasons as last time.
+  const nothingNew = !!last && result.accepted === result.updated && result.withdrawn === 0 && JSON.stringify(last.rejected) === JSON.stringify(rejected);
+  if (!nothingNew) try {
     await sendFeedReport(org.id, {
       organisationName: org.name, via: source.via, keyLabel: source.via === 'key' ? source.label : undefined, format,
       ...result, issues: rejected, leftOut: report.leftOut, verified: org.verified, at: new Date(),

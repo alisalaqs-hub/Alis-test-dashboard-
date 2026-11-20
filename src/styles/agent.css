@@ -44,3 +44,4 @@
 
 /* Results totals: as many across as fit. */
 .results-totals { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.acct-sub { font-size: 15px; margin: 0 0 6px; font-family: var(--sans); letter-spacing: 0; }

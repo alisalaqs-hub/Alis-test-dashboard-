@@ -104,7 +104,8 @@ describe('feed import: what the agent sent, and nothing else', () => {
     const a = await agency();
     const first = await a.send([letRow('L1', { LET_BOND: '1500', LET_DATE_AVAILABLE: '01/12/2026', LET_FURN_ID: '0' }), letRow('L2'), saleRow('S1', { LET_BOND: '999' })]);
     expect(first.json).toMatchObject({ accepted: 3, rejected: [] });
-    const info = async () => Object.fromEntries((await stored(a.id)).map((l) => [l.source_ref, l.material_info]));
+    // (These rows give no floor area, which is recorded too: see the floor area test below.)
+    const info = async () => Object.fromEntries((await stored(a.id)).map((l) => { const { floorAreaEstimated: _guess, ...rest } = l.material_info; void _guess; return [l.source_ref, rest]; }));
     expect(await info()).toEqual({ L1: { letting: { deposit: 1500, availableFrom: '2026-12-01', furnished: 'furnished' } }, L2: {}, S1: {} });
 
     // something else kept with the listing stays when the feed updates it
@@ -378,5 +379,57 @@ describe('uploading a feed file by hand', () => {
     expect(keyed.status).toBe(413);
     expect(keyed.json.error.code).toBe('feed_too_large');
     expect(await statuses(a.id)).toEqual({});
+  });
+});
+
+describe('feed import: a floor area the file did not give', () => {
+  it('is marked as a guess, and the mark goes once the file gives one', async () => {
+    const a = await agency();
+    await a.send([saleRow('F1'), saleRow('F2', { DESCRIPTION: 'A bright flat of 64 sq m with a balcony.' })]);
+    const flags = async () => Object.fromEntries((await stored(a.id)).map((l) => [l.source_ref, l.material_info.floorAreaEstimated ?? false]));
+    expect(await flags()).toEqual({ F1: true, F2: false });
+    await a.send([saleRow('F1', { DESCRIPTION: 'Now measured: 92 sq m over two floors.' }), saleRow('F2', { DESCRIPTION: 'A bright flat with a balcony.' })]);
+    expect(await flags()).toEqual({ F1: false, F2: true });
+  });
+});
+
+describe('feed import: a file that cannot be trusted changes nothing it should not', () => {
+  it('withdraws nothing when a row cannot be read, and says so in the result', async () => {
+    const a = await agency();
+    expect((await a.send([saleRow('K1'), saleRow('K2'), saleRow('K3')])).json).toMatchObject({ accepted: 3, withdrawn: 0 });
+    // The next export is damaged: K2's row has lost its fields and K3 is missing. Neither is withdrawn.
+    const damaged = blmFile([saleRow('K1')]).replace(/#END#\s*$/, '') + 'K2^only^three^~\n#END#\n';
+    const r = await a.send(damaged);
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ accepted: 1, withdrawn: 0 });
+    expect(await statuses(a.id)).toEqual({ K1: 'live', K2: 'live', K3: 'live' });
+    expect(r.json.rejected.find((x: { ref: string }) => x.ref === '(whole file)').reason).toMatch(/could not be read, so no listings were withdrawn/);
+    // A clean file afterwards works as usual: what is no longer in it is withdrawn.
+    expect((await a.send([saleRow('K1')])).json).toMatchObject({ accepted: 1, withdrawn: 2 });
+    expect(await statuses(a.id)).toEqual({ K1: 'live', K2: 'withdrawn', K3: 'withdrawn' });
+  });
+
+  it('withdraws nothing when not one listing in the file could be imported', async () => {
+    const a = await agency();
+    await a.send([saleRow('N1'), saleRow('N2')]);
+    const r = await a.send([saleRow('N1', { PRICE_QUALIFIER: '1' }), saleRow('N2', { PROP_SUB_ID: '999' })]); // price on application; unknown type
+    expect(r.json).toMatchObject({ accepted: 0, withdrawn: 0 });
+    expect(await statuses(a.id)).toEqual({ N1: 'live', N2: 'live' });
+    expect(r.json.rejected.some((x: { ref: string; reason: string }) => x.ref === '(whole file)' && /No listing in this file could be imported/.test(x.reason))).toBe(true);
+  });
+
+  it('emails the report again only when something is new', async () => {
+    const a = await agency();
+    const rows = [saleRow('E1'), saleRow('E2', { PRICE_QUALIFIER: '1' })];
+    const before = reports(a.owner.email).length;
+    await a.send(rows);
+    expect(reports(a.owner.email).length).toBe(before + 1);
+    await a.send(rows); // the same file an hour later: nothing added, nothing withdrawn, the same listing left out
+    await a.send(rows);
+    expect(reports(a.owner.email).length).toBe(before + 1);
+    await a.send([...rows, saleRow('E3')]); // a new listing
+    expect(reports(a.owner.email).length).toBe(before + 2);
+    await a.send([saleRow('E1')]); // E3 gone, and E2 no longer sent at all
+    expect(reports(a.owner.email).length).toBe(before + 3);
   });
 });

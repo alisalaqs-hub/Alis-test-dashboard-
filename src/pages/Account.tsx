@@ -1,3 +1,4 @@
+import { FeedUpload } from '../components/FeedUpload';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AiButton, AiCard, AiDisclaimer, AiErrorNote, AiLabel, AiThinking, AiUnavailable } from '../components/ai/Ai';
@@ -1031,14 +1032,27 @@ function AgencyInner() {
       ) : (
         <div className="grid g2">
           <Section title={org.name} right={org.verified ? <Tag kind="ok">Verified</Tag> : <Tag kind="warn">Awaiting verification</Tag>}>
-            <p className="small">Send your full stock from your CRM as a BLM v3 file. New properties are added, changes updated, and anything missing from the file is withdrawn.</p>
+            <h4 className="acct-sub">Upload your listings</h4>
+            <p className="small">Export your stock from your agency software as a BLM file (the file it makes for other portals) and upload it here. New properties are added, changes updated, and anything missing from the file is withdrawn.</p>
+            <FeedUpload orgId={org.id} onUploaded={() => void load()} />
+            <p className="small" style={{ marginTop: 6 }}>Adding one property? <Link to="/list">Add a listing by hand</Link>.</p>
+            <h4 className="acct-sub" style={{ marginTop: 18 }}>Send it automatically</h4>
+            <p className="small">Create a feed key and give your software supplier the details below. Each file is your full stock for that key.</p>
             <pre className="code small">{`POST ${endpoint}\nAuthorization: Bearer <your feed key>\nContent-Type: text/plain\n\n<BLM file>`}</pre>
             <button className="btn" onClick={() => void api.orgs.createKey(org.id, 'CRM feed').then((r) => { setKey(r.key); void load(); })}>Create a feed key</button>
             {key && <div className="callout ok small" role="status">Copy this key now; it won’t be shown again:<br /><code className="inline" style={{ wordBreak: 'break-all' }}>{key}</code></div>}
             {keys.length > 0 && <ul className="clean small" style={{ marginTop: 10 }}>{keys.map((k) => <li key={k.id} className="row between"><span><code className="inline">{k.prefix}…</code> {k.label}{k.lastUsedAt ? ` · last used ${new Date(k.lastUsedAt).toLocaleDateString('en-GB')}` : ''}</span>{k.revokedAt ? <span className="xs muted">Revoked</span> : <button className="btn sm ghost" onClick={() => void api.orgs.revokeKey(org.id, k.id).then(load)}>Revoke</button>}</li>)}</ul>}
           </Section>
           <Section title="Recent feed uploads">
-            {runs.length === 0 ? <p className="small muted">No uploads yet.</p> : <ul className="clean small">{runs.map((r) => <li key={r.id}>{new Date(r.createdAt).toLocaleString('en-GB')}: {r.accepted} accepted, {r.withdrawn} withdrawn, {r.rejected.length} rejected{r.rejected.length > 0 && <ul className="clean xs muted">{r.rejected.slice(0, 5).map((x) => <li key={x.ref}>{x.ref}: {x.reason}</li>)}</ul>}</li>)}</ul>}
+            {runs.length === 0 ? <p className="small muted">No uploads yet.</p> : <ul className="clean small">{runs.map((r) => {
+              // Notes about listings that did go in are not rejections.
+              const out = r.rejected.filter((x) => !x.imported);
+              return (
+                <li key={r.id}>{new Date(r.createdAt).toLocaleString('en-GB')}{r.source === 'upload' ? ', uploaded by hand' : r.keyLabel ? `, ${r.keyLabel}` : ''}: {r.accepted} accepted, {r.withdrawn} withdrawn, {out.length} not accepted
+                  {out.length > 0 && <ul className="clean xs muted">{out.slice(0, 5).map((x, n) => <li key={`${x.ref}-${n}`}>{x.ref}: {x.reason}</li>)}{out.length > 5 && <li>and {out.length - 5} more, listed in the report emailed to you</li>}</ul>}
+                </li>
+              );
+            })}</ul>}
           </Section>
           <div style={{ gridColumn: '1 / -1' }}>
             <AgencyProfile key={org.id} org={org} onSaved={(o) => setOrgs((now) => now?.map((x) => (x.id === o.id ? o : x)) ?? now)} />
