@@ -5,6 +5,7 @@
  */
 import { apiCall } from '../api';
 import type { CheckPoint, CheckSeverity, ListingInput } from '../../engine/listings';
+import { cleanLetting, epcNeedsExemption, type Letting } from '../../engine/letting';
 import { ACCOUNT_CHANGED_EVENT } from '../server';
 import { aiGet, aiPost, type AiJob } from './core';
 
@@ -17,22 +18,40 @@ export interface ListingFacts {
   channel: 'sale' | 'rent'; type: string; beds: number; baths: number; floorArea: number | null; title: string | null; town: string | null;
   district: string | null; postcode?: string | null; tenure: string | null; leaseYears: number | null; epc: string | null; councilTax: string | null;
   condition: string | null; era: string | null; features: string[]; price: number | null; serviceCharge: number | null; groundRent: number | null;
+  /** Rentals only: the letting details (deposit, when it is available, furnishing and so on). */
+  letting?: Letting | null;
 }
 
 const OUTWARD = /^\s*([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})?\s*$/i;
 /** The postcode district only (e.g. E17), which is all the description writer needs. */
 export const outward = (postcode: string) => OUTWARD.exec(postcode)?.[1]?.toUpperCase() ?? null;
 
-/** The listing form's fields as facts for the AI. The full postcode is only sent when a check needs it. */
+/**
+ * The letting details the form sends for a rental: what was entered, the HMO licence only for an HMO and the
+ * EPC exemption only while the rating is F or G. null for a sale.
+ */
+export function lettingFrom(f: Pick<ListingInput, 'listing' | 'letting' | 'epc'>): Letting | null {
+  if (f.listing !== 'rent') return null;
+  // (A new form starts with "pets considered" and "bills included" unticked, which is an answer. A rental saved before
+  // these were asked says nothing about them until its lister does.)
+  return cleanLetting({ ...f.letting, epcExemption: !!f.letting?.epcExemption && epcNeedsExemption(f.epc) });
+}
+
+/**
+ * The listing form's fields as facts for the AI. The full postcode is only sent when a check needs it.
+ * A let is described by its letting details, never by tenure, lease length or charges (those are for buyers).
+ */
 export function factsFrom(f: ListingInput, o: { fullPostcode?: boolean; staged?: boolean } = {}): ListingFacts {
-  const lease = f.tenure !== 'freehold';
+  const rent = f.listing === 'rent';
+  const lease = !rent && f.tenure !== 'freehold';
   return {
     channel: f.listing, type: f.type, beds: f.beds, baths: f.baths, floorArea: f.floorArea > 0 ? f.floorArea : null, title: f.title?.trim() || null,
     town: f.town.trim() || null, district: outward(f.postcode), ...(o.fullPostcode ? { postcode: f.postcode.trim() || null } : {}),
-    tenure: f.tenure ?? null, leaseYears: lease ? f.leaseYears ?? null : null, epc: f.epc || null, councilTax: f.councilTax || null,
+    tenure: rent ? null : f.tenure ?? null, leaseYears: lease ? f.leaseYears ?? null : null, epc: f.epc || null, councilTax: f.councilTax || null,
     condition: f.condition ?? null, era: f.era ?? null,
     features: [...f.features, ...(o.staged ? ['Contains virtually staged images'] : [])].map((x) => x.slice(0, 60)).slice(0, 30),
     price: f.price > 0 ? f.price : null, serviceCharge: lease ? f.serviceChargeAnnual ?? null : null, groundRent: lease ? f.groundRentAnnual ?? null : null,
+    ...(rent ? { letting: lettingFrom(f) } : {}),
   };
 }
 
@@ -197,6 +216,7 @@ export function listingDraftAccountType(): 'owner' | 'landlord' {
 /* ───────── price guide ───────── */
 export interface PriceGuideResult {
   low: number | null; high: number | null; position: 'below' | 'within' | 'above' | null; askingVsMidPct?: number | null;
+  /** Real HM Land Registry sold prices nearby (the only evidence a guide is given from); null when there isn't enough. */
   basis: { n: number; scope: string; perM2: number; method: string; evidence: 'sales' | 'rentals' | 'assumed-yield'; demo: boolean } | null;
   narrative: { explanation: string; position: string; advice: string[] } | null; note?: string; label?: string;
 }
@@ -218,5 +238,5 @@ export const precheckListing = (facts: ListingFacts, description: string, photoC
 export { isEnforced, SEVERITY_LABEL, severityClass, severityLabel } from '../../engine/listings';
 export const FIELD_LABEL: Record<string, string> = {
   title: 'Headline', description: 'Description', price: 'Price', postcode: 'Postcode', tenure: 'Tenure', leaseYears: 'Lease', serviceCharge: 'Service charge',
-  groundRent: 'Ground rent', councilTax: 'Council tax', epc: 'EPC', beds: 'Bedrooms', baths: 'Bathrooms', floorArea: 'Floor area', features: 'Features', photos: 'Photos', general: 'General',
+  groundRent: 'Ground rent', councilTax: 'Council tax', epc: 'EPC', beds: 'Bedrooms', baths: 'Bathrooms', floorArea: 'Floor area', features: 'Features', photos: 'Photos', deposit: 'Deposit', general: 'General',
 };

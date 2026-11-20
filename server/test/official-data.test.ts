@@ -348,7 +348,7 @@ describe('official data for a listing', () => {
 });
 
 describe('AI price guide on real sold prices', () => {
-  it('explains where a sale price sits against HM Land Registry sold prices, and keeps demonstration evidence for rentals', async () => {
+  it('explains where a sale price sits against HM Land Registry sold prices, and gives no guide without them (or for a let)', async () => {
     const f = official();
     const ai = mockOpenAI({ chat: () => reply.json({ explanation: 'Nearby terraced homes sold in this range.', position: 'Your price is above it.', advice: ['Check your photos.'] }) });
     try {
@@ -363,12 +363,15 @@ describe('AI price guide on real sold prices', () => {
       const prompt = JSON.stringify(ai.calls('chat')[0].body.messages);
       expect(prompt).toMatch(/real sold prices/);
       expect(prompt).not.toMatch(/demonstration/);
+      // a let is never judged: there is no real record of rents, and example listings are never used instead
       const rent = await c.post('/api/ai/listing/price-guide', { postcode: 'E17 4QH', type: 'terraced', beds: 3, floorArea: 92, condition: 'fair', channel: 'rent', askingPrice: 1800 });
-      expect(rent.json.basis.demo).toBe(true);
-      // with official data switched off, sales fall back to the demonstration evidence too
+      expect(rent.json).toMatchObject({ low: null, high: null, basis: null, narrative: null });
+      expect(rent.json.note).toMatch(/don’t check rents/);
+      // with official data switched off there is nothing real to compare a sale with, so nothing is said about its price
       config.data.disabled = true;
       const off = await c.post('/api/ai/listing/price-guide', { postcode: 'E17 4QH', type: 'terraced', beds: 3, floorArea: 93, condition: 'fair', channel: 'sale', askingPrice: 700_000 });
-      expect(off.json.basis.demo).toBe(true);
+      expect(off.json).toMatchObject({ low: null, high: null, basis: null, narrative: null, note: 'We can’t check this price yet: there aren’t enough recent sold prices near this postcode.' });
+      expect(ai.calls('chat')).toHaveLength(1);
     } finally { ai.restore(); f.restore(); }
   });
 });

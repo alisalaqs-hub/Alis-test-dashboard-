@@ -8,7 +8,8 @@ import { z } from 'zod';
 import { repeatsStructuredFact } from '../../../../src/engine/listings';
 import { chatJSON, HOUSE_RULES, untrusted } from '../core';
 import { S, type Infer } from '../schema';
-import { factLines, FactsSchema, gbpText, materialInfo, missingFacts, outwardCode, sqft, typeWord, type Facts } from './facts';
+import { availableNow, dateText, FURNISHING_LABEL } from '../../../../src/engine/letting';
+import { factLines, FactsSchema, gbpText, lettingFacts, materialInfo, missingFacts, outwardCode, sqft, typeWord, type Facts } from './facts';
 import { cleanLines, cleanText, clip, moneyIn, notesProblems, REASON_TEXT, sentences, wordCount, type Reason, type RuleContext } from './wording';
 
 export const TONES = ['warm', 'concise', 'premium', 'investor'] as const;
@@ -56,9 +57,11 @@ const RULES = (f: Facts) => [
   'Avoid unverifiable superlatives and pressure (“best in the area”, “unbeatable”, “won’t last”, “rare opportunity”, “below market value”). Describe features plainly.',
   'Never say who the home suits or who should live there (for example “ideal for professionals”, “perfect for families”, “would suit a couple”): describe the space instead. Never use discriminatory wording.',
   f.channel === 'rent'
-    ? 'This is a letting: state the rent once, as a fixed monthly rent. Never invite offers or bids, never mention tenant fees, and never write “no DSS”, “no benefits”, “professionals only”, “no children” or “no pets”.'
+    ? 'This is a letting, written for tenants: state the rent once, as a fixed monthly rent. Never invite offers or bids, never mention tenant fees, and never write “no DSS”, “no benefits”, “professionals only”, “no children” or “no pets”. Do not mention tenure, a lease, a minimum or fixed term, rent in advance or a holding deposit, and state no deposit other than the one in the facts. Never say which sex the home is for, or that it is unsuitable for disabled people.'
     : 'This is a sale: you may state the asking price once. No pressure or investment claims.',
-  'Material information (tenure, lease, charges, council tax band, EPC) is shown separately from the seller’s answers. You may mention it briefly, exactly as given.',
+  f.channel === 'rent'
+    ? 'Material information (rent, deposit, council tax band, EPC and the letting details in the facts) is shown separately from the landlord’s answers. You may mention it briefly, exactly as given.'
+    : 'Material information (tenure, lease, charges, council tax band, EPC) is shown separately from the seller’s answers. You may mention it briefly, exactly as given.',
   'Use British English and plain UK portal style: short paragraphs separated as items in "paragraphs", no headings, no emojis, no exclamation marks, no markdown.',
   'Headline: at most 70 characters, factual, no price, e.g. “Three-bedroom terraced house with garden”.',
   'Key features: 5 to 8 short bullets, each a stated fact (no full sentences needed).',
@@ -86,7 +89,7 @@ function factBullets(f: Facts): string[] {
     f.beds === 0 ? 'Studio' : `${f.beds} bedroom${f.beds === 1 ? '' : 's'}`,
     `${f.baths} bathroom${f.baths === 1 ? '' : 's'}`,
     f.floorArea ? `Approx. ${Math.round(f.floorArea)} m² (${sqft(f.floorArea)} sq ft)` : '',
-    f.tenure ? cap(f.tenure.replace(/-/g, ' ')) + (f.tenure !== 'freehold' && f.leaseYears ? `, ${f.leaseYears} years remaining` : '') : '',
+    f.tenure && f.channel !== 'rent' ? cap(f.tenure.replace(/-/g, ' ')) + (f.tenure !== 'freehold' && f.leaseYears ? `, ${f.leaseYears} years remaining` : '') : '',
     f.epc ? `EPC rating ${f.epc}` : '',
     f.councilTax && f.councilTax !== 'EXEMPT' ? `Council tax band ${f.councilTax}` : '',
   ];
@@ -98,7 +101,16 @@ function factSentences(f: Facts, intro: boolean): string[] {
   const out: string[] = [];
   if (intro) out.push(`${f.beds === 0 ? 'A studio' : `A ${f.beds}-bedroom`} ${typeWord(f.type)} ${f.channel === 'rent' ? 'to rent' : 'for sale'}${f.town ? ` in ${f.town}` : ''}.`);
   if (f.floorArea) out.push(`The accommodation extends to approximately ${Math.round(f.floorArea)} m² (${sqft(f.floorArea)} sq ft).`);
-  if (f.tenure) out.push(`The property is ${f.tenure === 'share-of-freehold' ? 'offered with a share of the freehold' : f.tenure}${f.tenure !== 'freehold' && f.leaseYears ? `, with ${f.leaseYears} years remaining on the lease` : ''}.`);
+  if (f.tenure && f.channel !== 'rent') out.push(`The property is ${f.tenure === 'share-of-freehold' ? 'offered with a share of the freehold' : f.tenure}${f.tenure !== 'freehold' && f.leaseYears ? `, with ${f.leaseYears} years remaining on the lease` : ''}.`);
+  // A let: when it is available, how it is furnished and the deposit, as stated.
+  const l = lettingFacts(f);
+  if (l) {
+    out.push([
+      `It is available ${availableNow(l.availableFrom) ? 'now' : `from ${dateText(l.availableFrom!)}`}`,
+      l.furnished ? `and is offered ${FURNISHING_LABEL[l.furnished].toLowerCase()}` : '',
+    ].filter(Boolean).join(' ') + '.');
+    if (l.deposit != null && l.deposit > 0) out.push(`The deposit is ${gbpText(l.deposit)}.`);
+  }
   if (f.epc || f.councilTax) out.push([f.epc ? `It has an EPC rating of ${f.epc}` : '', f.councilTax && f.councilTax !== 'EXEMPT' ? `${f.epc ? 'and is in' : 'It is in'} council tax band ${f.councilTax}` : ''].filter(Boolean).join(' ') + '.');
   return out;
 }
@@ -112,6 +124,11 @@ const NOTE_TEXT: Partial<Record<Reason, string>> = {
   pets: 'Your notes include a blanket “no pets” line, which was left out: tenants can ask to keep a pet and landlords must not unreasonably refuse.',
   superlative: 'Your notes include claims that can’t be verified (such as “best in the area”), so they were left out.',
   price: 'Your notes mention a price other than your stated price, so it was left out. Update the price field if it has changed.',
+  'deposit-text': 'Your notes ask for a deposit above the cap, so it was left out: in England the most a landlord can take is five weeks’ rent (six weeks’ when the yearly rent is £50,000 or more).',
+  'holding-deposit': 'Your notes ask for a holding deposit of more than one week’s rent, so it was left out.',
+  'rent-advance': 'Your notes ask for rent in advance, so that was left out: since 1 May 2026 landlords in England can’t ask for more than one month’s rent in advance.',
+  'fixed-term': 'Your notes ask for a minimum or fixed term, so that was left out: since 1 May 2026 new tenancies in England run month to month.',
+  'sex-disability': 'Your notes include wording about sex or disability (such as “female only” or “not suitable for wheelchair users”), so it was left out: describe the home and its access instead.',
 };
 
 /** "fixed rent" / "the rent is fixed" (not "fixed-term tenancy" or "fixed wardrobes"). */

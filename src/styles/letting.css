@@ -1,0 +1,6 @@
+/* Letting details on a rental listing (src/components/LettingFacts.tsx): a definition list, two columns where there is room. */
+.letting-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 24px; margin: 0; padding: 0; }
+.letting-fact { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.letting-fact dt { color: var(--muted); font-size: 13.5px; flex: none; }
+.letting-fact dd { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); text-align: right; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .letting-facts { grid-template-columns: minmax(0, 1fr); } }

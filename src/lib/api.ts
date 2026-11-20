@@ -8,6 +8,7 @@ import type { EpcCertificate, EpcSummary, FloodResult } from '../engine/evidence
 import type { AgentProfileDTO, AiImageDTO, CheckDTO, DataStatusDTO, EnquirySummaryDTO, HealthDTO, ListingDTO, MessageDTO, OfficialListingDTO, OrgDTO, OrgProfileBody, OrgReportDTO, SavedSearchDTO, SoldPricesDTO, UserDTO, ValuationRequestBody, ValuationRequestDTO, ValuationStatus } from './apiTypes';
 
 import type { FeedIssueDTO, FeedResultDTO } from './apiTypes';
+import type { LettingDTO } from './apiTypes';
 
 export const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
@@ -63,6 +64,10 @@ export type ListingWrite = Partial<{
   channel: 'sale' | 'rent'; title: string | null; addressLine: string; town: string; postcode: string; type: string; tenure: string; leaseYears: number | null;
   beds: number; baths: number; floorArea: number; era: string | null; condition: string | null; price: number; priceQualifier: string | null; epc: string | null;
   councilTax: string | null; serviceChargeAnnual: number | null; groundRentAnnual: number | null; features: string[]; description: string | null; ownershipDeclared: boolean;
+  /** Rentals only: deposit, when it is available, furnishing and so on. null clears it. */
+  letting: LettingDTO | null;
+  /** New listings only: list under this agency (the signed-in person must belong to it). */
+  organisationId: string | null;
 }>;
 
 export const api = {

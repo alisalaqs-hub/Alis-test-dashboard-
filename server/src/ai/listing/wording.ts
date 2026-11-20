@@ -3,16 +3,21 @@
  * a seller's own description). UK context: Consumer Protection from Unfair Trading Regulations
  * 2008 / DMCC Act 2024 (no misleading or unverifiable claims, no pressure selling), NTS material
  * information, Equality Act 2010 (no discrimination or steering), Tenant Fees Act 2019 and the
- * Renters' Rights Act (fixed rent, no bidding, no blanket bans).
+ * Renters' Rights Act (fixed rent, no bidding, no blanket bans; from 1 May 2026 no more than one month's rent
+ * in advance and no minimum fixed term), and the deposit caps in England.
  *
  * Every rule here removes or flags whole sentences; nothing is rewritten silently.
  */
-import { BIDDING, DISCRIMINATORY, TENANT_FEES } from '../../../../src/engine/listings';
+import { BIDDING, DISCRIMINATORY, inEngland, lettingWording, sexOrDisabilityWording, TENANT_FEES, type LettingWordingId } from '../../../../src/engine/listings';
 import { numbersIn, sqft, statedMoney, statedNumbers, type Facts } from './facts';
 
 export type Reason =
   | 'price' | 'figure' | 'schools' | 'transport' | 'area' | 'amenities' | 'planning' | 'investment'
-  | 'superlative' | 'discrimination' | 'steering' | 'bidding' | 'fees' | 'pets' | 'mismatch' | 'unstated';
+  | 'superlative' | 'discrimination' | 'steering' | 'bidding' | 'fees' | 'pets' | 'mismatch' | 'unstated'
+  // Lettings in England: a deposit or holding deposit above the cap, rent in advance, a minimum or fixed term.
+  | LettingWordingId
+  // Sex-specific or disability wording ("female only", "not suitable for wheelchair users"): a warning, not a refusal.
+  | 'sex-disability';
 
 /** Friendly explanations shown to the seller (one per reason). */
 export const REASON_TEXT: Record<Reason, string> = {
@@ -32,6 +37,11 @@ export const REASON_TEXT: Record<Reason, string> = {
   pets: 'Removed a blanket “no pets” line: tenants can ask to keep a pet and landlords must not unreasonably refuse.',
   mismatch: 'Removed a detail that didn’t match your listing (for example the EPC rating, council tax band, tenure or bedrooms).',
   unstated: 'Removed a detail that isn’t in your listing details (such as which way the garden faces). Add it to your notes if it’s accurate.',
+  'deposit-text': 'Removed a deposit above the cap: in England the most a landlord can take is five weeks’ rent (six weeks’ when the yearly rent is £50,000 or more).',
+  'holding-deposit': 'Removed a holding deposit of more than one week’s rent.',
+  'rent-advance': 'Removed a request for rent in advance: since 1 May 2026 landlords in England can’t ask for more than one month’s rent in advance.',
+  'fixed-term': 'Removed a minimum or fixed term: since 1 May 2026 new tenancies in England run month to month, so a minimum fixed term can’t be required.',
+  'sex-disability': 'Removed wording about sex or disability (such as “female only” or “not suitable for wheelchair users”): it could discriminate. Describe the home and its access instead.',
 };
 
 /** Topics the model may only mention when the seller's own facts or notes do. */
@@ -63,6 +73,18 @@ const STEERING = [
 ];
 const FEES = TENANT_FEES;
 const PETS = /\b(no pets|pets not (allowed|permitted|accepted)|strictly no (pets|animals))\b/i;
+
+/**
+ * Letting wording that only needs a warning: sex-specific or disability wording, and (for homes in England)
+ * a deposit above the cap, rent in advance of two months or more, or a minimum or fixed term. The same
+ * patterns as the listing form and the server's checks (src/engine/listings.ts).
+ */
+function lettingProblems(s: string, f: Facts): Reason[] {
+  return [
+    ...(sexOrDisabilityWording(s) ? ['sex-disability' as const] : []),
+    ...(inEngland(f.postcode ?? f.district) ? lettingWording(s, f.price ?? 0).map((w) => w.id) : []),
+  ];
+}
 
 const WORDS: Record<string, number> = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 // The property-size forms only ("three-bedroom house", "3-bed"): "two double bedrooms and a single" describes a subset.
@@ -143,11 +165,15 @@ export function sentenceProblem(sentence: string, ctx: RuleContext, allowed = al
   const f = ctx.facts;
   const s = sentence;
   for (const re of DISCRIMINATION) if (re.test(s)) return 'discrimination';
+  // A let that names a sex or rules out disabled people gets that warning, rather than the general "who it would suit" one.
+  if (f.channel === 'rent' && sexOrDisabilityWording(s)) return 'sex-disability';
   for (const re of STEERING) if (re.test(s)) return 'steering';
   if (f.channel === 'rent') {
     if (BIDDING.test(s)) return 'bidding';
     if (FEES.test(s)) return 'fees';
     if (PETS.test(s)) return 'pets';
+    const letting = lettingProblems(s, f);
+    if (letting.length) return letting[0];
   }
   for (const re of SUPERLATIVE) if (re.test(s)) return 'superlative';
   // Prices: only the stated price (and stated charges) may appear.
@@ -159,9 +185,10 @@ export function sentenceProblem(sentence: string, ctx: RuleContext, allowed = al
   if (epc && f.epc && epc[1] !== f.epc) return 'mismatch';
   const ct = s.match(/\bcouncil tax\b[^.]{0,12}?\bband\s+([A-I])\b(?![a-z])/i);
   if (ct && f.councilTax && ct[1].toUpperCase() !== f.councilTax) return 'mismatch';
-  // (Share-of-freehold homes also have a lease, so only plain freehold/leasehold are compared.)
-  if (f.tenure === 'freehold' && /\bleasehold\b/i.test(s) && !/\bnot leasehold\b/i.test(s)) return 'mismatch';
-  if (f.tenure === 'leasehold' && /\b(?<!share of (the )?)freehold\b/i.test(s)) return 'mismatch';
+  // (Share-of-freehold homes also have a lease, so only plain freehold/leasehold are compared. A let has no stated tenure.)
+  const tenure = f.channel === 'rent' ? null : f.tenure;
+  if (tenure === 'freehold' && /\bleasehold\b/i.test(s) && !/\bnot leasehold\b/i.test(s)) return 'mismatch';
+  if (tenure === 'leasehold' && /\b(?<!share of (the )?)freehold\b/i.test(s)) return 'mismatch';
   for (const m of s.matchAll(BEDS_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n !== f.beds) return 'mismatch'; }
   for (const m of s.matchAll(BATHS_RE)) { const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]); if (Number.isFinite(n) && n !== f.baths) return 'mismatch'; }
   // Plural counts ("four bedrooms", "two double bedrooms") may describe some of the rooms, but never more than the listing has.
@@ -235,10 +262,13 @@ export function notesProblems(notes: string, facts: Facts): Reason[] {
   const money = statedMoney(facts);
   for (const p of notes.split(/\n+/)) for (const s of sentences(p)) {
     for (const re of DISCRIMINATION) if (re.test(s)) out.add('discrimination');
-    for (const re of STEERING) if (re.test(s)) out.add('steering');
+    const sexOrDisability = facts.channel === 'rent' && !!sexOrDisabilityWording(s);
+    if (!sexOrDisability) for (const re of STEERING) if (re.test(s)) out.add('steering');
     if (facts.channel === 'rent' && BIDDING.test(s)) out.add('bidding');
     if (facts.channel === 'rent' && FEES.test(s)) out.add('fees');
     if (facts.channel === 'rent' && PETS.test(s)) out.add('pets');
+    // (Notes often run several asks together: "six months upfront, minimum 12 months", so every one is named.)
+    if (facts.channel === 'rent') for (const r of lettingProblems(s, facts)) out.add(r);
     for (const re of SUPERLATIVE) if (re.test(s)) out.add('superlative');
     if (moneyMatchesIn(s).some((a) => !money.some((m) => isStated(a, m)))) out.add('price');
   }

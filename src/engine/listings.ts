@@ -11,6 +11,7 @@
  * the agent's consent; pasted listings are user-provided and private.
  */
 import { PROPERTIES, type ListingSource, type Property } from '../data/properties';
+import { aboveCap, cleanLetting, depositCap, depositCapText, depositWarning, gbpWhole, weeklyRent, type Letting } from './letting';
 import { regionFromPostcode, type Condition, type Era, type PropertyType, type RegionKey } from './refurb';
 import type { Nation } from './tax';
 
@@ -73,6 +74,8 @@ export interface ListingInput {
   visibility?: 'public' | 'private';
   status?: Property['status'];
   geo?: { lat: number; lng: number };
+  /** Letting details (rentals only): deposit, when it is available, furnishing and so on. */
+  letting?: Letting | null;
 }
 
 const EPC_SCORE: Record<string, number> = { A: 94, B: 84, C: 72, D: 61, E: 47, F: 30, G: 15 };
@@ -105,6 +108,8 @@ export function buildListing(i: ListingInput): Property {
     serviceChargeAnnual: i.serviceChargeAnnual, groundRentAnnual: i.groundRentAnnual,
     documents: [epc ? 'EPC (stated)' : 'EPC (required)', 'Floor plan (requested)'],
     source: i.source, visibility: i.visibility ?? 'public', photos: i.photos, description: i.description, status: i.status ?? 'live', createdAt: new Date().toISOString(),
+    // Sale listings never carry letting details.
+    ...(i.listing === 'rent' && cleanLetting(i.letting) ? { letting: cleanLetting(i.letting)! } : {}),
   };
 }
 
@@ -161,16 +166,46 @@ export interface Check { id: string; ok: boolean; severity: 'block' | 'warn'; me
  * Wording rules shared by the listing form, the server (submit and edits) and the AI wording checks
  * (server/src/ai/listing/wording.ts), so a listing is judged the same way everywhere.
  *
- * Discrimination: blanket exclusions ("No DSS", "professionals only", "no children") are unlawful in
- * rental adverts and refused. Honest wording that merely mentions these words is not: "no family
- * bathroom", "no children's play area", "DSS welcome", "we accept housing benefit".
+ * Discrimination: blanket exclusions ("No DSS", "professionals only", "no children") and nationality
+ * requirements ("British passport holders only", "UK citizens only") are unlawful in rental adverts and
+ * refused. Honest wording that merely mentions these words is not: "no family bathroom", "no children's
+ * play area", "DSS welcome", "we accept housing benefit". Students are not a protected group, so "no
+ * students" is not refused. Wording about sex or disability ("female only", "not suitable for wheelchair
+ * users") is a warning, not a refusal: see SEX_OR_DISABILITY below.
  */
+const EXCLUDES = String.raw`(?:no|not\s+suitable\s+for|unsuitable\s+for|sorry,?\s+no|not\s+accepting|we\s+(?:do\s+not|don['’]t)\s+accept|cannot\s+accept|can['’]t\s+accept)`;
+const WANTED = String.raw`(?:only|preferred|wanted|required|sought)`;
+const NATIONALITY = String.raw`(?:british|english|scottish|welsh|irish|uk|u\.k\.|eu|european)`;
 export const DISCRIMINATORY: RegExp[] = [
-  /\b(?:no|not\s+suitable\s+for|unsuitable\s+for|sorry,?\s+no|not\s+accepting|we\s+(?:do\s+not|don['’]t)\s+accept|cannot\s+accept|can['’]t\s+accept)\s+(?:dss|benefits?(?:\s+claimants)?|housing\s+benefits?|universal\s+credit|children(?!['’])|kids(?!['’])|families|students(?!['’])|foreigners|immigrants|refugees|asylum\s+seekers|disabled(?:\s+people)?|pensioners|sharers|couples)\b/i,
-  /\b(?:dss|housing\s+benefits?|universal\s+credit|benefit\s+claimants|children|families|students)\s+(?:tenants\s+)?(?:are\s+|is\s+)?(?:not\s+(?:accepted|considered|allowed|welcome|permitted)|need\s+not\s+apply)\b/i,
-  /\b(?:professionals?|working\s+(?:people|professionals?|tenants?|persons?)|white|black|asian|british|english|christians?|muslims?|jewish|hindus?|sikhs?|single\s+(?:people|persons?|females?|males?)|females?|males?|ladies|gentlemen|men|women|young\s+(?:people|professionals?)|mature\s+(?:people|persons?|professionals?)|non[- ]students?|employed\s+(?:people|persons?|tenants?))\s+(?:only|preferred|wanted|required|sought)\b/i,
-  /\b(?:english|british)\s+(?:speakers?|nationals?|citizens?)\s+only\b/i,
+  new RegExp(String.raw`\b${EXCLUDES}\s+(?:dss|benefits?(?:\s+claimants)?|housing\s+benefits?|universal\s+credit|children(?!['’])|kids(?!['’])|families|foreigners|immigrants|refugees|asylum\s+seekers|pensioners|sharers|couples)\b`, 'i'),
+  /\b(?:dss|housing\s+benefits?|universal\s+credit|benefit\s+claimants|children|families)\s+(?:tenants\s+)?(?:are\s+|is\s+)?(?:not\s+(?:accepted|considered|allowed|welcome|permitted)|need\s+not\s+apply)\b/i,
+  new RegExp(String.raw`\b(?:professionals?|working\s+(?:people|professionals?|tenants?|persons?)|white|black|asian|british|english|christians?|muslims?|jewish|hindus?|sikhs?|single\s+(?:people|persons?)|young\s+(?:people|professionals?)|mature\s+(?:people|persons?|professionals?)|employed\s+(?:people|persons?|tenants?))\s+${WANTED}\b`, 'i'),
+  /\b(?:english|british)\s+speakers?\s+only\b/i,
+  // Nationality requirements: "British passport holders only", "UK citizens only", "must hold a British passport".
+  new RegExp(String.raw`\b${NATIONALITY}\s+(?:passports?(?:\s+holders?)?|citizens?|citizenship|nationals?|nationality|born)\s+(?:only|preferred|wanted|required|sought|essential|needed)\b`, 'i'),
+  new RegExp(String.raw`\bmust\s+(?:be|have|hold)\s+(?:an?\s+)?${NATIONALITY}\s+(?:citizens?|citizenship|nationals?|nationality|passports?(?:\s+holders?)?)\b`, 'i'),
 ];
+/*
+ * Sex-specific and disability wording ("suit single female", "female only", "male only", "not suitable for
+ * wheelchair users"). The lister is warned and can still publish: it is flagged for them to check, not refused.
+ * A plain statement about the building ("no wheelchair access", "no lift") is not flagged.
+ */
+const SEX_WORD = String.raw`(?:females?|males?|ladies|lady|gentlemen|gentleman|women|woman|men|man|girls?|boys?)`;
+const WHO = String.raw`(?:(?:a|an|one)\s+)?(?:(?:single|young|mature|professional|working|quiet|tidy)\s+)*`;
+const DISABILITY_WORD = String.raw`(?:wheelchairs?(?:\s+users?)?|disabled(?:\s+(?:people|persons?|tenants?|applicants?|users?))?|(?:people|persons?|tenants?|anyone|those|someone)\s+(?:with|who\s+(?:have|has))\s+(?:a\s+)?(?:disabilit(?:y|ies)|mobility\s+(?:issues|problems|difficulties|impairments?))|(?:people|anyone|those|someone)\s+in\s+(?:a\s+)?wheelchairs?|mobility\s+scooter\s+users?)`;
+export const SEX_OR_DISABILITY: RegExp[] = [
+  new RegExp(String.raw`\b(?:single\s+)?${SEX_WORD}(?:\s+(?:tenants?|lodgers?|housemates?|flatmates?|sharers?|occupants?|professionals?|students?|applicants?))?[\s-]+${WANTED}\b`, 'i'),
+  new RegExp(String.raw`\b(?:would\s+)?(?:suits?|ideal\s+for|perfect\s+for|suitable\s+for|suited\s+to)\s+${WHO}${SEX_WORD}\b(?!\s+cave)`, 'i'),
+  new RegExp(String.raw`\b(?:all[\s-]+(?:female|male|girls?|boys?)|(?:female|male|girls?|boys?)[\s-]+only)\b`, 'i'),
+  new RegExp(String.raw`\b${EXCLUDES}\s+(?:(?:single|young)\s+)?(?:females?|males?|ladies|gentlemen|women|men|girls|boys)\b`, 'i'),
+  new RegExp(String.raw`\b(?:not\s+suitable|unsuitable|not\s+suited|not\s+appropriate)\s+(?:for|to)\s+(?:(?:the|any)\s+)?${DISABILITY_WORD}\b`, 'i'),
+  new RegExp(String.raw`\b(?:no|sorry,?\s+no|not\s+accepting|we\s+(?:do\s+not|don['’]t)\s+accept|cannot\s+accept|can['’]t\s+accept)\s+(?:wheelchair\s+users?|disabled(?:\s+(?:people|persons?|tenants?|applicants?))?(?!\s+(?:access|parking|facilities|toilets?|bays?|spaces?|adaptations?))|mobility\s+scooter\s+users?)\b`, 'i'),
+];
+/** Sex-specific or disability wording in listing text: the first match, or null. */
+export function sexOrDisabilityWording(text: string): string | null {
+  for (const re of SEX_OR_DISABILITY) { const m = re.exec(text); if (m) return m[0]; }
+  return null;
+}
 /** Wording honest landlords use to say they *don't* do something ("no bidding", "we don't charge admin fees"). */
 const NOT_DONE = endsWith(String.raw`\b(?:no|not|never|zero|nil|without|free\s+of|don['’]t\s+(?:charge|accept|take|ask\s+for)|do\s+not\s+(?:charge|accept|take|ask\s+for)|won['’]t\s+(?:charge|accept|take)|will\s+not\s+(?:charge|accept|take)|not\s+accepting)\s+(?:[\w-]+\s+){0,2}`);
 /** Rental bidding: a rental advert must state one fixed rent (Renters' Rights Act). */
@@ -178,6 +213,101 @@ export const BIDDING: RegExp = new Unless(String.raw`\b(?:offers?\s+(?:over|in\s
 /** Tenant fees banned by the Tenant Fees Act 2019 (not "no admin fees", which is what honest landlords write). */
 export const TENANT_FEES: RegExp = new Unless(String.raw`\b(?:admin(?:istration)?\s+fees?|referencing\s+fees?|check[- ](?:in|out)\s+fees?|inventory\s+fees?|(?:tenancy\s+)?set[- ]up\s+fees?|renewal\s+fees?|agency\s+fees?|application\s+fees?|credit\s+check\s+fees?)\b`, 'i', NOT_DONE);
 export const isDiscriminatory = (text: string) => DISCRIMINATORY.some((re) => re.test(text));
+
+/* ---------- letting rules in listing text (England) ---------- */
+/*
+ * What a rental advert says about deposits, rent in advance and the length of the tenancy, checked against the
+ * rules for England. Each is a warning the lister can read and still publish with, never a block:
+ *  - a deposit above the cap (five weeks' rent, or six when the yearly rent is £50,000 or more), or a holding
+ *    deposit above one week's rent;
+ *  - rent in advance of two months or more (since 1 May 2026 no more than one month can be asked for);
+ *  - a fixed or minimum term (since 1 May 2026 new tenancies run month to month).
+ * Wording that rules these out ("no minimum term", "we never ask for six months' rent in advance") is left alone.
+ */
+export type LettingWordingId = 'deposit-text' | 'holding-deposit' | 'rent-advance' | 'fixed-term';
+export interface LettingWording { id: LettingWordingId; text: string }
+export const RENT_ADVANCE_MESSAGE = 'Since 1 May 2026 landlords in England can’t ask for more than one month’s rent in advance. Check this wording.';
+export const FIXED_TERM_MESSAGE = 'Since 1 May 2026 new tenancies in England run month to month, so a minimum fixed term can’t be required. Check this wording.';
+export const SEX_OR_DISABILITY_MESSAGE = 'Wording about sex or disability (such as “female only” or “not suitable for wheelchair users”) could discriminate. Describe the home and its access instead.';
+
+const QTY_WORDS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, eighteen: 18, 'twenty four': 24 };
+const QTY = String.raw`(\d{1,2}(?:\.\d)?|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen|twenty[- ]four)`;
+const qty = (s: string) => QTY_WORDS[s.toLowerCase().replace(/-/g, ' ')] ?? Number(s);
+const POSSESSIVE = String.raw`(?:['’]s?)?`;
+const POUNDS = String.raw`£\s?(\d[\d,]*(?:\.\d{1,2})?)`;
+const DEPOSIT = String.raw`(holding\s+)?(?:(?:security|damage|tenancy|rental)\s+)?deposit`;
+/** The few words that join "deposit" to its amount ("deposit of", "deposit is equal to", "deposit: "). */
+const JOIN = String.raw`(?:\s*[:=–-]\s*|\s+(?:is|of|will\s+be|equal\s+to|equivalent\s+to|equals|required|payable|amount|the|at|to|just|only))`;
+// "deposit of two months’ rent", "deposit: £2,500", "holding deposit of two weeks’ rent"
+const DEPOSIT_THEN_AMOUNT = new RegExp(String.raw`\b${DEPOSIT}\b${JOIN}{0,4}\s*(?:${POUNDS}|${QTY}[\s-]*(weeks?|wks?|months?|mths?)\b)`, 'gi');
+// "6 weeks deposit", "two months’ rent as a deposit", "£500 holding deposit"
+const AMOUNT_THEN_DEPOSIT = new RegExp(String.raw`(?:${POUNDS}|\b${QTY}[\s-]*(weeks?|wks?|months?|mths?)${POSSESSIVE}(?:\s+(?:of\s+)?rent)?)\s+(?:as\s+(?:an?\s+|the\s+)?)?${DEPOSIT}\b`, 'gi');
+const ADVANCE = String.raw`(?:in\s+advance|up[- ]?front)`;
+// "six months’ rent in advance required", "12 months upfront", "a year’s rent in advance"
+const PERIOD_IN_ADVANCE = new RegExp(String.raw`\b${QTY}[\s-]*(months?|mths?|years?|yrs?)${POSSESSIVE}(?:\s+(?:of\s+)?(?:the\s+)?rent(?:al)?)?(?:\s+(?:is\s+|to\s+be\s+)?(?:payable|paid|required|due|needed))?\s+${ADVANCE}\b`, 'gi');
+// "rent in advance: 6 months"
+const ADVANCE_THEN_PERIOD = new RegExp(String.raw`\brent(?:al)?\s+(?:payable\s+|paid\s+|required\s+|due\s+)?${ADVANCE}(?:\s*[:=–-]\s*|\s+(?:of|is|for|required|will\s+be|the|first))*\s*${QTY}[\s-]*(months?|mths?|years?|yrs?)\b`, 'gi');
+const TERM_COUNT = String.raw`(?:\d{1,2}|one|two|three|six|nine|twelve|eighteen|twenty[- ]four)`;
+const TERM_UNIT = String.raw`(?:months?|mths?|years?|yrs?)`;
+// "minimum 12 month fixed term", "minimum term 6 months", "12 months minimum", "fixed term of 12 months"
+const FIXED_TERM = new RegExp([
+  String.raw`\bmin(?:imum|\.)?\s+(?:fixed[\s-]+)?(?:term|tenancy|let|contract|rental\s+period|stay)\b`,
+  String.raw`\bmin(?:imum|\.)?\s+(?:of\s+)?${TERM_COUNT}[\s-]*${TERM_UNIT}\b`,
+  String.raw`\b${TERM_COUNT}[\s-]*${TERM_UNIT}${POSSESSIVE}\s+(?:min(?:imum)?|fixed)\b`,
+  String.raw`\bfixed[\s-]+term\b`,
+  String.raw`\binitial\s+(?:term|tenancy|period)\s+of\s+${TERM_COUNT}[\s-]*${TERM_UNIT}\b`,
+].join('|'), 'gi');
+/** "no", "never", "without", "isn’t" and the like within a few words before the match: the wording rules it out. */
+const RULED_OUT = endsWith(String.raw`(?:\b(?:no|not|never|without|nor|cannot)|n['’]t)\s+(?:[\w’'-]+\s+){0,4}`);
+/** Straight before the match only ("no fixed term", "there isn’t a minimum term"). */
+const NOT_ANY = endsWith(String.raw`(?:\b(?:no|not|never|without)|n['’]t)\s+(?:(?:a|an|any|the|set|longer|be)\s+)*`);
+const number = (s: string) => Number(s.replace(/,/g, ''));
+const isWeeks = (unit: string) => /^w/i.test(unit);
+const isYears = (unit: string) => /^y/i.test(unit);
+
+/** Whether the letting rules for England apply: a postcode in Wales, Scotland or Northern Ireland has its own rules. */
+export function inEngland(postcode: string | null | undefined): boolean {
+  const region = postcode ? regionFromPostcode(postcode) : null;
+  return region !== 'wales' && region !== 'scotland' && region !== 'northern-ireland';
+}
+
+/**
+ * Deposit, rent-in-advance and fixed-term wording in a rental advert that needs checking (at most one of each
+ * kind, with the words that matched). monthlyRent: the stated rent, which the deposit cap is worked out from;
+ * without it only the rent-in-advance and fixed-term wording can be checked.
+ */
+export function lettingWording(text: string, monthlyRent: number): LettingWording[] {
+  const out: LettingWording[] = [];
+  const add = (id: LettingWordingId, hit: string) => { if (!out.some((o) => o.id === id)) out.push({ id, text: tidy(hit).slice(0, 120) }); };
+  const cap = depositCap(monthlyRent);
+  if (cap) {
+    const week = weeklyRent(monthlyRent);
+    const deposit = (m: RegExpMatchArray, holding: string | undefined, pounds: string | undefined, count: string | undefined, unit: string | undefined) => {
+      if (RULED_OUT(text, m.index ?? 0)) return;
+      const amount = pounds ? number(pounds) : count && unit ? qty(count) * (isWeeks(unit) ? week : monthlyRent) : NaN;
+      if (!Number.isFinite(amount)) return;
+      if (holding) { if (aboveCap(amount, week)) add('holding-deposit', m[0]); }
+      else if (aboveCap(amount, cap.amount)) add('deposit-text', m[0]);
+    };
+    for (const m of text.matchAll(DEPOSIT_THEN_AMOUNT)) deposit(m, m[1], m[2], m[3], m[4]);
+    for (const m of text.matchAll(AMOUNT_THEN_DEPOSIT)) deposit(m, m[4], m[1], m[2], m[3]);
+  }
+  for (const re of [PERIOD_IN_ADVANCE, ADVANCE_THEN_PERIOD]) {
+    for (const m of text.matchAll(re)) {
+      const months = qty(m[1]) * (isYears(m[2]) ? 12 : 1);
+      if (months >= 2 && !RULED_OUT(text, m.index ?? 0)) add('rent-advance', m[0]);
+    }
+  }
+  for (const m of text.matchAll(FIXED_TERM)) if (!NOT_ANY(text, m.index ?? 0)) add('fixed-term', m[0]);
+  return out;
+}
+/** The warning for each kind of letting wording. The deposit ones name the cap for this rent. */
+export function lettingWordingMessage(id: LettingWordingId, monthlyRent: number): string {
+  if (id === 'rent-advance') return RENT_ADVANCE_MESSAGE;
+  if (id === 'fixed-term') return FIXED_TERM_MESSAGE;
+  if (id === 'holding-deposit') return `In England a holding deposit can’t be more than one week’s rent${monthlyRent > 0 ? ` (${gbpWhole(weeklyRent(monthlyRent))} here)` : ''}. Check this wording.`;
+  return `${depositCapText(monthlyRent) ?? 'In England the most a landlord can take as a deposit is five weeks’ rent (six when the yearly rent is £50,000 or more).'} Check this wording.`;
+}
 
 /* ---------- contact details, payment requests and scam phrases in listing text ---------- */
 /*
@@ -369,20 +499,35 @@ export function complianceChecks(i: ListingInput, o: { minPhotos?: number } = {}
   // Everything a lister writes that the public may see, including the town and the address line.
   const text = [i.title ?? '', i.description ?? '', i.features.join('\n'), i.town ?? '', i.addressLine ?? ''].join('\n');
   const photos = i.photos?.length ?? 0;
+  const rent = i.listing === 'rent';
+  const letting = rent ? cleanLetting(i.letting) : null;
+  // The deposit, rent-in-advance and fixed-term rules are England's: a home elsewhere in the UK isn't checked against them.
+  const england = rent && inEngland(i.postcode);
+  const worded = england ? lettingWording(text, i.price) : [];
+  const said = (id: LettingWordingId) => worded.some((w) => w.id === id);
+  const overCap = england ? depositWarning(letting?.deposit, i.price) : null;
+  const warn = (id: string, ok: boolean, message: string): Check => ({ id, ok, severity: 'warn', message });
   const c: Check[] = [
-    { id: 'price', ok: i.price > 0, severity: 'block', message: i.listing === 'rent' ? 'State the monthly rent.' : 'State the asking price.' },
+    { id: 'price', ok: i.price > 0, severity: 'block', message: rent ? 'State the monthly rent.' : 'State the asking price.' },
     { id: 'postcode', ok: POSTCODE_RE.test(i.postcode), severity: 'block', message: 'Enter a full UK postcode (e.g. E17 4QH).' },
-    { id: 'tenure', ok: !!i.tenure, severity: 'block', message: 'Tenure is required material information.' },
-    { id: 'lease', ok: i.tenure !== 'leasehold' || (i.leaseYears ?? 0) > 0, severity: 'block', message: 'Leasehold: state the remaining lease length, service charge and ground rent.' },
-    { id: 'charges', ok: i.tenure !== 'leasehold' || i.serviceChargeAnnual != null, severity: 'warn', message: 'Leasehold: add the annual service charge (material information).' },
+    // Tenure, lease length and charges are material information for a sale. A tenant isn't buying the lease, so a let is never asked for them.
+    { id: 'tenure', ok: rent || !!i.tenure, severity: 'block', message: 'Tenure is required material information.' },
+    { id: 'lease', ok: rent || i.tenure !== 'leasehold' || (i.leaseYears ?? 0) > 0, severity: 'block', message: 'Leasehold: state the remaining lease length, service charge and ground rent.' },
+    { id: 'charges', ok: rent || i.tenure !== 'leasehold' || i.serviceChargeAnnual != null, severity: 'warn', message: 'Leasehold: add the annual service charge (material information).' },
     { id: 'ctax', ok: !!i.councilTax && i.councilTax !== 'Not stated', severity: 'block', message: 'Council tax band is required material information.' },
     { id: 'epc', ok: !!i.epc, severity: 'block', message: 'An EPC is legally required before marketing. Add the rating (and upload the certificate).' },
-    { id: 'epc-let', ok: i.listing !== 'rent' || !i.epc || i.epc.toUpperCase() <= 'E', severity: 'block', message: 'Rented homes in England & Wales must have EPC E or better (unless a registered exemption applies).' },
+    { id: 'epc-let', ok: !rent || !i.epc || i.epc.toUpperCase() <= 'E' || !!letting?.epcExemption, severity: 'block', message: 'Rented homes in England & Wales must have EPC E or better (unless a registered exemption applies). If this home has one, tick “This property has a registered exemption”.' },
+    warn('deposit-cap', !overCap, overCap ?? 'A deposit can’t be more than the cap for the rent.'),
     ...(o.minPhotos ? [{ id: 'photo-min', ok: photos >= o.minPhotos, severity: 'block' as const, message: o.minPhotos === 1 ? 'Add at least one photo.' : `Add at least ${o.minPhotos} photos.` }] : []),
     { id: 'photos', ok: photos >= 3, severity: 'warn', message: 'Listings with 3+ photos get far more engagement. Virtually staged images must be labelled.' },
-    { id: 'discrim', ok: !isDiscriminatory(text), severity: 'block', message: 'Remove discriminatory wording (e.g. “No DSS”, “no children”) — unlawful in rental adverts.' },
-    { id: 'bidding', ok: i.listing !== 'rent' || !BIDDING.test(text), severity: 'block', message: 'Rental adverts must state a fixed rent; inviting bids above it is prohibited.' },
-    { id: 'fees', ok: i.listing !== 'rent' || !TENANT_FEES.test(text), severity: 'block', message: 'Remove mentions of tenant fees (such as admin or referencing fees): most letting fees are banned under the Tenant Fees Act 2019.' },
+    { id: 'discrim', ok: !isDiscriminatory(text), severity: 'block', message: 'Remove discriminatory wording (such as “No DSS”, “no children” or “British passport holders only”): it is unlawful in rental adverts.' },
+    warn('sex-disability', !rent || !sexOrDisabilityWording(text), SEX_OR_DISABILITY_MESSAGE),
+    { id: 'bidding', ok: !rent || !BIDDING.test(text), severity: 'block', message: 'Rental adverts must state a fixed rent; inviting bids above it is prohibited.' },
+    { id: 'fees', ok: !rent || !TENANT_FEES.test(text), severity: 'block', message: 'Remove mentions of tenant fees (such as admin or referencing fees): most letting fees are banned under the Tenant Fees Act 2019.' },
+    warn('deposit-text', !said('deposit-text'), lettingWordingMessage('deposit-text', i.price)),
+    warn('holding-deposit', !said('holding-deposit'), lettingWordingMessage('holding-deposit', i.price)),
+    warn('rent-advance', !said('rent-advance'), RENT_ADVANCE_MESSAGE),
+    warn('fixed-term', !said('fixed-term'), FIXED_TERM_MESSAGE),
     { id: 'contact', ok: contactDetails(text).length === 0, severity: 'warn', message: 'Remove phone numbers, email addresses, web links and messaging apps: people contact you through Streetkey, which keeps your details private.' },
     { id: 'payment', ok: paymentRequests(text).length === 0, severity: 'warn', message: 'Don’t ask for money before a viewing or by bank transfer: listings that do are held for a closer review.' },
     { id: 'scam', ok: scamPhrases(text).length === 0, severity: 'warn', message: 'Offer viewings in person. Listings that say the owner is abroad, offer no viewings or post the keys look like a common scam and are held for review.' },

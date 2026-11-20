@@ -5,6 +5,7 @@
 import type { SavedSearchFilters } from './ai/search';
 import type { EpcBand, EvidenceRange, FloodResult, HpiSummary, SoldSale, SoldStats } from '../engine/evidence';
 import type { ListingHistory } from '../engine/history';
+import type { Letting } from '../engine/letting';
 
 export type ListingStatus = 'draft' | 'pending' | 'live' | 'under_offer' | 'sold' | 'let' | 'withdrawn' | 'rejected';
 export type SourceKindDTO = 'owner' | 'landlord' | 'agent-feed' | 'agent';
@@ -21,15 +22,18 @@ export interface PhotoDTO {
  */
 export type ListingHistoryDTO = ListingHistory;
 
+/** Letting details on a rental: deposit, when it is available, furnishing and so on (only what the lister has said). */
+export type LettingDTO = Letting;
+
 export interface ListingDTO {
   ref: string;
   status: ListingStatus;
   channel: 'sale' | 'rent';
   title: string | null;
-  /** Street only for private sellers when viewed publicly; full address for the lister. */
+  /** Street only when viewed publicly, whoever listed it; the full first line for the lister, their agency and admins. */
   addressLine: string;
   town: string;
-  /** Full postcode for the lister; outward code (district) only when viewed publicly. */
+  /** Outward code (district) only when viewed publicly, whoever listed it; the full postcode for the lister, their agency and admins. */
   postcode: string;
   district: string;
   lat: number | null;
@@ -65,6 +69,8 @@ export interface ListingDTO {
   updatedAt: string;
   /** Null until the listing has been on the market (absent on older servers). */
   history?: ListingHistoryDTO | null;
+  /** Rentals only, when the lister gave letting details. Sale listings never carry it (absent on older servers). */
+  letting?: LettingDTO;
   /** True when the signed-in person listed it (or belongs to the listing agency). */
   mine: boolean;
 }

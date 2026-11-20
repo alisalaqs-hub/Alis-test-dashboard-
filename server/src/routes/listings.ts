@@ -216,8 +216,11 @@ export async function listingRoutes(app: FastifyInstance) {
     const open = (await one<{ n: number }>(`SELECT count(*)::int n FROM listings WHERE owner_user_id = $1 AND status IN ('draft', 'pending', 'rejected')`, [u.id]))!.n;
     if (open >= 25 && u.role !== 'admin') throw new HttpError(409, 'You have a lot of unfinished listings. Finish or delete some drafts first.', 'too_many_drafts');
     const geo = await geocode(b.postcode);
-    // Agency staff list under their agency; everyone else is a private seller or landlord.
-    const orgId = u.account_type === 'agent' ? (await orgIdsFor(u.id))[0] ?? null : null;
+    // Agency staff list under their agency; everyone else is a private seller or landlord. The form names the
+    // agency when the person says they are listing as an agent (organisationId): they must belong to it.
+    const orgs = await orgIdsFor(u.id);
+    if (b.organisationId && !orgs.includes(b.organisationId)) throw new HttpError(403, 'You can only list under an agency you belong to.', 'not_a_member', { organisationId: 'Choose your own agency.' });
+    const orgId = b.organisationId ?? (u.account_type === 'agent' ? orgs[0] ?? null : null);
     const sourceKind = orgId ? 'agent' : u.account_type === 'landlord' || b.channel === 'rent' ? 'landlord' : 'owner';
     const cols = { ...columnsFrom(b), postcode: geo.postcode, district: geo.district, lat: geo.lat, lng: geo.lng, owner_user_id: u.id, organisation_id: orgId, source_kind: sourceKind, status: 'draft', ref: listingRef() };
     const keys = Object.keys(cols);
@@ -239,7 +242,7 @@ export async function listingRoutes(app: FastifyInstance) {
     const admin = req.user!.role === 'admin';
     if (CLOSED.includes(row.status) && !admin) throw new HttpError(409, 'Re-list this property before editing it.', 'not_editable');
     const b = parse(ListingPatch, req.body);
-    const all: Record<string, unknown> = columnsFrom(b);
+    const all: Record<string, unknown> = columnsFrom(b, row);
     if (b.postcode) { const g = await geocode(b.postcode); Object.assign(all, { postcode: g.postcode, district: g.district, lat: g.lat, lng: g.lng }); }
     // Only what actually changed (the form sends every field on each save).
     const cols: Record<string, unknown> = Object.fromEntries(Object.entries(all).filter(([k, v]) => !same(v, (row as unknown as Record<string, unknown>)[k])));

@@ -6,6 +6,7 @@
  * sourced from any portal, agent feed or HM Land Registry record.
  */
 import type { ListingHistory } from '../engine/history';
+import type { Letting } from '../engine/letting';
 import type { Condition, Era, PropertyType } from '../engine/refurb';
 import type { Nation } from '../engine/tax';
 
@@ -70,6 +71,8 @@ export interface Property {
   createdAt?: string;
   /** Real listings only: Streetkey's record of when it was first listed, its days on the market and each asking price change. */
   history?: ListingHistory;
+  /** Rentals only: the letting details the lister gave (deposit, when it is available, furnishing and so on). Never on a sale. */
+  letting?: Letting;
 }
 
 export type SourceKind = 'demo' | 'owner' | 'landlord' | 'agent-feed' | 'external-link';

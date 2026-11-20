@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { CheckDTO, ListingDTO, ListingHistoryDTO, ListingStatus, PhotoDTO } from '../../../src/lib/apiTypes';
 import { complianceChecks, locate, normalisePostcode, placeFieldProblem, POSTCODE_RE, streetOnly, type ListingInput } from '../../../src/engine/listings';
+import { cleanLetting, epcNeedsExemption, FURNISHINGS, HMO_LICENCES, isIsoDate, LET_TYPES, type Letting } from '../../../src/engine/letting';
 import type { PropertyType } from '../../../src/engine/refurb';
 import { q, type Q } from '../db';
 
@@ -13,6 +14,23 @@ export const ERAS = ['pre-1919', '1919-1944', '1945-1979', '1980-1999', '2000+']
 export const CONDITIONS = ['derelict', 'poor', 'fair', 'good'] as const;
 
 const money = z.coerce.number().positive().max(100_000_000);
+/** An empty form field means "not given". */
+const blank = (v: unknown) => (v === '' ? null : v);
+/**
+ * Letting details for a rental, as the listing form sends them. Unknown keys are refused. The server writes the
+ * checked values into material_info.letting (see columnsFrom); nothing else may write that key.
+ */
+export const LettingBody = z.strictObject({
+  deposit: z.preprocess(blank, z.coerce.number('Enter the deposit in pounds.').min(0, 'Enter the deposit in pounds.').max(1_000_000, 'That deposit looks too high.').nullable()).optional(),
+  availableFrom: z.preprocess(blank, z.string().trim().refine(isIsoDate, 'Enter the date it is available from.').nullable()).optional(),
+  furnished: z.preprocess(blank, z.enum(FURNISHINGS).nullable()).optional(),
+  petsConsidered: z.boolean().nullable().optional(),
+  billsIncluded: z.boolean().nullable().optional(),
+  maxOccupants: z.preprocess(blank, z.coerce.number('Enter the most people who can live there.').int('Enter a whole number of people.').min(1, 'Enter at least 1.').max(50, 'That looks too many.').nullable()).optional(),
+  letType: z.preprocess(blank, z.enum(LET_TYPES).nullable()).optional(),
+  hmoLicence: z.preprocess(blank, z.enum(HMO_LICENCES).nullable()).optional(),
+  epcExemption: z.boolean().nullable().optional(),
+});
 export const ListingBody = z.object({
   channel: z.enum(['sale', 'rent']),
   title: z.string().trim().max(120).optional().nullable(),
@@ -38,7 +56,12 @@ export const ListingBody = z.object({
   groundRentAnnual: z.coerce.number().min(0).max(1_000_000).optional().nullable(),
   features: z.array(z.string().trim().min(1).max(60)).max(30).default([]),
   description: z.string().trim().max(8000).optional().nullable(),
-  materialInfo: z.record(z.string().max(60), z.union([z.string().max(500), z.number(), z.boolean(), z.null()])).optional(),
+  materialInfo: z.record(z.string().max(60), z.union([z.string().max(500), z.number(), z.boolean(), z.null()])).optional()
+    .refine((m) => !m || !('letting' in m), 'Send letting details in the letting field.'),
+  /** Rentals only: kept in material_info.letting. Ignored (and cleared) on a sale. null clears it. */
+  letting: LettingBody.nullable().optional(),
+  /** List under this organisation (the signed-in person must belong to it). Used when the listing is created. */
+  organisationId: z.uuid('That agency could not be found.').nullable().optional(),
   ownershipDeclared: z.boolean().optional(),
 });
 export type ListingBodyT = z.infer<typeof ListingBody>;
@@ -67,10 +90,28 @@ export const LISTING_SELECT = `SELECT l.*, o.name AS organisation_name, o.verifi
 /** Hide the house number for private sellers, e.g. "Flat 2, 14 Elm Road" → "Elm Road" (shared with the website's preview). */
 export { streetOnly };
 
-/** history: the listing's public history from historyFor (services/history), when the caller loaded it. */
+/**
+ * The letting details stored on a rental (material_info.letting), checked again on the way out; null for a sale
+ * or when there are none. (material_info may arrive as the JSON text an edit is about to save.)
+ */
+export function lettingOf(r: Pick<ListingRow, 'channel' | 'material_info'>): Letting | null {
+  if (r.channel !== 'rent') return null;
+  let info: unknown = r.material_info;
+  if (typeof info === 'string') { try { info = JSON.parse(info); } catch { return null; } }
+  return cleanLetting((info as { letting?: unknown } | null)?.letting);
+}
+
+/**
+ * history: the listing's public history from historyFor (services/history), when the caller loaded it.
+ * The public sees the street and the outward postcode only, whoever listed it (private seller, landlord or
+ * agency); the lister, their agency and admins see the address in full.
+ */
 export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: string | null; orgIds?: string[]; admin?: boolean }, history?: ListingHistoryDTO | null): ListingDTO {
   const mine = !!(viewer.userId && r.owner_user_id === viewer.userId) || !!(r.organisation_id && viewer.orgIds?.includes(r.organisation_id));
-  const full = mine || !!viewer.admin || r.source_kind === 'agent-feed' || r.source_kind === 'agent';
+  const full = mine || !!viewer.admin;
+  const letting = lettingOf(r);
+  // A declared exemption only means something (and is only shown) while the rating is F or G.
+  if (letting?.epcExemption && !epcNeedsExemption(r.epc)) delete letting.epcExemption;
   const name = r.organisation_name ? r.organisation_name : r.source_kind === 'landlord' ? 'Private landlord' : 'Private seller';
   return {
     ref: r.ref, status: r.status, channel: r.channel, title: r.title,
@@ -90,6 +131,7 @@ export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: stri
     rejectionReason: mine || viewer.admin ? r.rejection_reason : undefined,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(), publishedAt: r.published_at?.toISOString() ?? null,
     history: history ?? null,
+    ...(letting && Object.keys(letting).length ? { letting } : {}),
     mine,
   };
 }
@@ -117,6 +159,7 @@ export function checksFor(r: ListingRow, photoCount: number): CheckDTO[] {
     serviceChargeAnnual: r.service_charge_annual ?? undefined, groundRentAnnual: r.ground_rent_annual ?? undefined,
     features: r.features ?? [], description: r.description ?? undefined, photos: Array.from({ length: photoCount }, () => ''),
     source: { kind: r.source_kind === 'landlord' ? 'landlord' : 'owner', name: '', licence: '', verified: false },
+    letting: lettingOf(r),
   };
   const checks: CheckDTO[] = complianceChecks(input, { minPhotos: 1 });
   checks.push({ id: 'ownership', ok: r.ownership_declared || r.source_kind === 'agent-feed' || r.source_kind === 'agent', severity: 'block', message: 'Confirm you own the property or are authorised to market it.' });
@@ -138,7 +181,15 @@ export async function geocode(postcode: string): Promise<{ postcode: string; dis
   return { postcode: pc, district: loc.district, lat: loc.lat, lng: loc.lng, precise: false };
 }
 
-export function columnsFrom(b: Partial<ListingBodyT>) {
+/** JSON with its keys in one order, so two values can be compared whatever order they were written in. */
+const stable = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof x === 'object' && !Array.isArray(x)
+  ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [c]) => (a < c ? -1 : a > c ? 1 : 0))) : x));
+
+/**
+ * The columns a create or edit sets. `current` is the listing being edited (none for a new one): material_info is
+ * only set when it really changes, and the letting details in it are kept unless the edit sends new ones.
+ */
+export function columnsFrom(b: Partial<ListingBodyT>, current?: Pick<ListingRow, 'channel' | 'material_info'>) {
   const map: Record<string, unknown> = {};
   const set = (col: string, v: unknown) => { if (v !== undefined) map[col] = v; };
   set('channel', b.channel); if (b.title !== undefined) map.title = b.title || null; set('address_line', b.addressLine); set('town', b.town);
@@ -147,7 +198,15 @@ export function columnsFrom(b: Partial<ListingBodyT>) {
   set('price', b.price); set('price_qualifier', b.priceQualifier); set('epc', b.epc); set('council_tax', b.councilTax);
   set('service_charge_annual', b.serviceChargeAnnual); set('ground_rent_annual', b.groundRentAnnual);
   set('features', b.features); set('description', b.description);
-  if (b.materialInfo !== undefined) map.material_info = JSON.stringify(b.materialInfo);
+  // material_info: whatever else is kept there, plus the letting details (rentals only), which only this code writes.
+  const had: Record<string, unknown> = current?.material_info && typeof current.material_info === 'object' ? current.material_info : {};
+  const channel = b.channel ?? current?.channel;
+  if (b.materialInfo !== undefined || b.letting !== undefined || (current && channel !== current.channel)) {
+    const { letting: stored, ...rest } = had;
+    const letting = channel === 'rent' ? cleanLetting(b.letting !== undefined ? b.letting : stored) : null;
+    const next = { ...(b.materialInfo !== undefined ? b.materialInfo : rest), ...(letting ? { letting } : {}) };
+    if (stable(next) !== stable(had)) map.material_info = JSON.stringify(next);
+  }
   if (b.ownershipDeclared !== undefined) map.ownership_declared = b.ownershipDeclared;
   return map;
 }

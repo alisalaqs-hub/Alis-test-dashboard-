@@ -4,14 +4,14 @@
  */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { complianceChecks, type ListingInput } from '../../../../src/engine/listings';
+import { complianceChecks, FIXED_TERM_MESSAGE, lettingWordingMessage, RENT_ADVANCE_MESSAGE, type ListingInput } from '../../../../src/engine/listings';
 import type { PropertyType } from '../../../../src/engine/refurb';
 import { AiError, cached, chatJSON, HOUSE_RULES, untrusted } from '../core';
 import { S, type Infer } from '../schema';
-import { factLines, FactsSchema, type Facts } from './facts';
+import { factLines, FactsSchema, lettingFacts, type Facts } from './facts';
 import { clip, reviewText, type Reason } from './wording';
 
-export const FIELDS = ['title', 'description', 'price', 'postcode', 'tenure', 'leaseYears', 'serviceCharge', 'groundRent', 'councilTax', 'epc', 'beds', 'baths', 'floorArea', 'features', 'photos', 'general'] as const;
+export const FIELDS = ['title', 'description', 'price', 'postcode', 'tenure', 'leaseYears', 'serviceCharge', 'groundRent', 'councilTax', 'epc', 'beds', 'baths', 'floorArea', 'features', 'photos', 'deposit', 'general'] as const;
 export type Field = (typeof FIELDS)[number];
 export type Severity = 'block' | 'warn' | 'tip';
 /**
@@ -30,6 +30,7 @@ export type PrecheckIn = z.infer<typeof PrecheckBody>;
 const CHECK_FIELD: Record<string, Field> = {
   price: 'price', postcode: 'postcode', tenure: 'tenure', lease: 'leaseYears', charges: 'serviceCharge', ctax: 'councilTax', epc: 'epc', 'epc-let': 'epc',
   photos: 'photos', 'photo-min': 'photos', discrim: 'description', bidding: 'description', fees: 'description', contact: 'description', payment: 'description', scam: 'description',
+  'deposit-cap': 'deposit', 'deposit-text': 'description', 'holding-deposit': 'description', 'rent-advance': 'description', 'fixed-term': 'description', 'sex-disability': 'description',
 };
 
 /** Streetkey's own compliance checks (the same ones the form and the server use) for these facts. */
@@ -40,11 +41,13 @@ export function ruleChecks(f: Facts, description: string, photoCount: number) {
     beds: f.beds, baths: f.baths, floorArea: f.floorArea ?? 0, price: f.price ?? 0, epc: f.epc ?? undefined, councilTax: f.councilTax ?? undefined,
     serviceChargeAnnual: f.serviceCharge ?? undefined, groundRentAnnual: f.groundRent ?? undefined, features: f.features, description,
     photos: Array.from({ length: photoCount }, () => ''), source: { kind: f.channel === 'rent' ? 'landlord' : 'owner', name: '', licence: '', verified: false },
+    letting: lettingFacts(f),
   };
   return complianceChecks(input, { minPhotos: 1 });
 }
 
-const WORDING: Record<Reason, { severity: Severity; text: string }> = {
+/** text: what follows the quoted words (for the letting rules, a sentence of its own that names the cap for this rent). */
+const WORDING: Record<Reason, { severity: Severity; text: string | ((f: Facts) => string) }> = {
   discrimination: { severity: 'block', text: 'could discriminate against people, which is unlawful in a rental advert. Describe the home, not who should live there.' },
   steering: { severity: 'warn', text: 'could discriminate or steer people. Describe the home, not who should live there.' },
   bidding: { severity: 'block', text: 'invites offers or bids. A rental advert must state one fixed rent.' },
@@ -61,6 +64,11 @@ const WORDING: Record<Reason, { severity: Severity; text: string }> = {
   area: { severity: 'tip', text: 'describes the area. Keep it factual.' },
   amenities: { severity: 'tip', text: 'mentions nearby amenities. Check it’s accurate.' },
   unstated: { severity: 'tip', text: 'includes a detail that isn’t in your listing fields. Check it’s accurate.' },
+  'deposit-text': { severity: 'warn', text: (f) => lettingWordingMessage('deposit-text', f.price ?? 0) },
+  'holding-deposit': { severity: 'warn', text: (f) => lettingWordingMessage('holding-deposit', f.price ?? 0) },
+  'rent-advance': { severity: 'warn', text: RENT_ADVANCE_MESSAGE },
+  'fixed-term': { severity: 'warn', text: FIXED_TERM_MESSAGE },
+  'sex-disability': { severity: 'warn', text: 'mentions sex or disability, which could discriminate. Describe the home and its access instead.' },
 };
 
 const AiOut = S.obj({
@@ -74,10 +82,11 @@ type AiOutT = Infer<typeof AiOut>;
 
 const REVIEW_RULES = [
   'You review a UK property listing for a private seller or landlord before it is submitted. Compare the title and description with the facts and report real problems only.',
-  '- block: unlawful or clearly misleading wording: discrimination or steering (e.g. “no DSS”, “professionals only”, “ideal for couples”), bidding language or tenant fees in a rental, or text that contradicts the facts (e.g. a different number of bedrooms, tenure or EPC rating).',
+  '- block: unlawful or clearly misleading wording: discrimination or steering (e.g. “no DSS”, “professionals only”, “British passport holders only”, “ideal for couples”), bidding language or tenant fees in a rental, or text that contradicts the facts (e.g. a different number of bedrooms, tenure or EPC rating).',
   '- warn: claims that could mislead or can’t be verified (superlatives, unverified claims about schools, transport, the area, planning potential or investment returns), prices other than the stated one, or material information described inconsistently.',
   '- tip: clarity and completeness (details people will ask about, a very short description, unclear wording).',
   'Point to the words in the text. Do not invent facts, prices or legal requirements. Do not repeat a point. Do not report missing EPC, council tax, tenure or photos: those are checked separately.',
+  '- For a letting, do not report tenure, lease length, service charge or ground rent as missing: they are not asked for. “No students” is not discrimination: do not report it.',
   'Write in British English, plainly and kindly.',
 ].join('\n');
 
@@ -98,7 +107,7 @@ export async function precheck(input: PrecheckIn, meta: { userId?: string | null
       if (seen.has(k)) continue;
       seen.add(k);
       const w = WORDING[p.reason];
-      issues.push({ severity: w.severity, field, message: `“${clip(p.sentence, 90)}” ${w.text}`, source: 'wording', reason: p.reason, enforced: w.severity === 'block' });
+      issues.push({ severity: w.severity, field, message: `“${clip(p.sentence, 90)}” ${typeof w.text === 'function' ? w.text(f) : w.text}`, source: 'wording', reason: p.reason, enforced: w.severity === 'block' });
     }
   }
 

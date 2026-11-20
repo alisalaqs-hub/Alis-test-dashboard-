@@ -5,7 +5,8 @@
  */
 import { z } from 'zod';
 import { POSTCODE_RE } from '../../../../src/engine/listings';
-import { CONDITIONS, ERAS, PROPERTY_TYPES } from '../../services/listings';
+import { availableNow, cleanLetting, dateText, epcNeedsExemption, FURNISHING_LABEL, HMO_LICENCE_LABEL, LET_TYPE_LABEL, type Letting } from '../../../../src/engine/letting';
+import { CONDITIONS, ERAS, LettingBody, PROPERTY_TYPES } from '../../services/listings';
 
 /** Empty strings from form fields mean "not given". */
 const blank = (v: unknown) => (v === '' || v === undefined ? null : v);
@@ -34,8 +35,32 @@ export const FactsSchema = z.object({
   price: optNum(100_000_000),
   serviceCharge: optNum(1_000_000),
   groundRent: optNum(1_000_000),
+  /** Letting details (rentals only): the same checked shape the listing itself is saved with. */
+  letting: z.preprocess(blank, LettingBody.nullable()).optional(),
 });
 export type Facts = z.infer<typeof FactsSchema>;
+
+/** The letting details of a rental, as stated (null for a sale, or when none were given). */
+export const lettingFacts = (f: Pick<Facts, 'channel' | 'letting'>): Letting | null => (f.channel === 'rent' ? cleanLetting(f.letting) : null);
+/**
+ * The letting details as plain statements, written from the facts ("Deposit: £1,800", "Available from: 1 December
+ * 2026", "Furnishing: Furnished"). Used for the prompt and for the material information shown to the lister.
+ */
+export function lettingLines(f: Pick<Facts, 'channel' | 'letting' | 'epc'>): string[] {
+  const l = lettingFacts(f);
+  if (!l) return [];
+  return [
+    l.deposit != null ? (l.deposit > 0 ? `Deposit: ${gbpText(l.deposit)}` : 'Deposit: none') : '',
+    `Available from: ${availableNow(l.availableFrom) ? 'now' : dateText(l.availableFrom!)}`,
+    l.furnished ? `Furnishing: ${FURNISHING_LABEL[l.furnished]}` : '',
+    l.petsConsidered ? 'Pets: considered' : '',
+    l.billsIncluded != null ? `Bills: ${l.billsIncluded ? 'included in the rent' : 'not included'}` : '',
+    l.maxOccupants != null ? `Maximum occupants: ${l.maxOccupants}` : '',
+    l.letType ? `Let type: ${LET_TYPE_LABEL[l.letType]}` : '',
+    l.letType === 'hmo' && l.hmoLicence ? `HMO licence: ${HMO_LICENCE_LABEL[l.hmoLicence]}` : '',
+    l.epcExemption && epcNeedsExemption(f.epc) ? `EPC exemption: registered (rating ${f.epc})` : '',
+  ].filter(Boolean);
+}
 
 const OUTWARD_RE = /^[A-Z]{1,2}\d[A-Z\d]?$/;
 /** The outward code only (never the full postcode) for anything sent to the model. */
@@ -62,6 +87,7 @@ const ERA_WORD: Record<string, string> = { 'pre-1919': 'built before 1919', '191
 /** The facts as plain lines for the prompt (outward code only). */
 export function factLines(f: Facts): string {
   const area = outwardCode(f);
+  const rent = f.channel === 'rent';
   const lines = [
     `Listing: ${f.channel === 'rent' ? 'to let' : 'for sale'}`,
     f.price ? (f.channel === 'rent' ? `Rent: ${gbpText(f.price)} per calendar month (fixed)` : `Asking price: ${gbpText(f.price)}`) : 'Price: not given',
@@ -69,9 +95,11 @@ export function factLines(f: Facts): string {
     `Bedrooms: ${f.beds}${f.beds === 0 ? ' (studio)' : ''}; bathrooms: ${f.baths}`,
     f.floorArea ? `Floor area: ${Math.round(f.floorArea)} m² (about ${sqft(f.floorArea)} sq ft)` : 'Floor area: not given',
     `Location: ${[f.town, area].filter(Boolean).join(', ') || 'not given'}`,
-    f.tenure ? `Tenure: ${TENURE_WORD[f.tenure]}${f.tenure !== 'freehold' && f.leaseYears ? `, ${f.leaseYears} years remaining on the lease` : ''}` : 'Tenure: not given',
-    f.serviceCharge != null && f.tenure !== 'freehold' ? `Service charge: ${gbpText(f.serviceCharge)} a year` : '',
-    f.groundRent != null && f.tenure !== 'freehold' ? `Ground rent: ${gbpText(f.groundRent)} a year` : '',
+    // Tenure, lease and charges are for buyers: a let is never described by them.
+    rent ? '' : f.tenure ? `Tenure: ${TENURE_WORD[f.tenure]}${f.tenure !== 'freehold' && f.leaseYears ? `, ${f.leaseYears} years remaining on the lease` : ''}` : 'Tenure: not given',
+    !rent && f.serviceCharge != null && f.tenure !== 'freehold' ? `Service charge: ${gbpText(f.serviceCharge)} a year` : '',
+    !rent && f.groundRent != null && f.tenure !== 'freehold' ? `Ground rent: ${gbpText(f.groundRent)} a year` : '',
+    ...lettingLines(f),
     `EPC rating: ${f.epc ?? 'not given'}`,
     `Council tax band: ${f.councilTax ? (f.councilTax === 'EXEMPT' ? 'exempt' : f.councilTax) : 'not given'}`,
     f.condition ? `Condition: ${CONDITION_WORD[f.condition]}` : '',
@@ -85,13 +113,16 @@ export function factLines(f: Facts): string {
 /** Material information statements derived only from the facts (NTS Parts A/B where known). */
 export function materialInfo(f: Facts): string[] {
   const out: string[] = [];
-  if (f.price) out.push(f.channel === 'rent' ? `Rent: ${gbpText(f.price)} per calendar month (fixed)` : `Asking price: ${gbpText(f.price)}`);
-  if (f.tenure) {
+  const rent = f.channel === 'rent';
+  if (f.price) out.push(rent ? `Rent: ${gbpText(f.price)} per calendar month (fixed)` : `Asking price: ${gbpText(f.price)}`);
+  // For a let: the letting details. Tenure, lease length and charges are material information for a sale only.
+  if (rent) out.push(...lettingLines(f));
+  if (!rent && f.tenure) {
     let t = `Tenure: ${TENURE_WORD[f.tenure]}`;
     if (f.tenure !== 'freehold' && f.leaseYears) t += ` (${f.leaseYears} years remaining on the lease)`;
     out.push(t);
   }
-  if (f.tenure && f.tenure !== 'freehold') {
+  if (!rent && f.tenure && f.tenure !== 'freehold') {
     if (f.serviceCharge != null) out.push(`Service charge: ${gbpText(f.serviceCharge)} a year`);
     if (f.groundRent != null) out.push(`Ground rent: ${gbpText(f.groundRent)} a year`);
   }
@@ -109,19 +140,26 @@ export function missingFacts(f: Facts): string[] {
   if (!f.price) m.push(f.channel === 'rent' ? 'Monthly rent' : 'Asking price');
   if (!f.epc) m.push('EPC rating (legally required before marketing)');
   if (!f.councilTax) m.push('Council tax band');
-  if (!f.tenure) m.push('Tenure');
-  if (f.tenure === 'leasehold' && !f.leaseYears) m.push('Years remaining on the lease');
-  if (f.tenure && f.tenure !== 'freehold' && f.serviceCharge == null) m.push('Annual service charge');
-  if (f.tenure === 'leasehold' && f.groundRent == null) m.push('Annual ground rent');
+  // Tenure, lease length and charges are asked of sales only: they are never "missing" from a let.
+  const sale = f.channel !== 'rent';
+  if (sale && !f.tenure) m.push('Tenure');
+  if (sale && f.tenure === 'leasehold' && !f.leaseYears) m.push('Years remaining on the lease');
+  if (sale && f.tenure && f.tenure !== 'freehold' && f.serviceCharge == null) m.push('Annual service charge');
+  if (sale && f.tenure === 'leasehold' && f.groundRent == null) m.push('Annual ground rent');
   if (!f.floorArea) m.push('Floor area');
   if (!f.town && !outwardCode(f)) m.push('Town or postcode district');
-  if (f.channel === 'rent') m.push('Deposit amount (material information for lettings)');
+  if (!sale) {
+    const l = lettingFacts(f);
+    if (l?.deposit == null) m.push('Deposit amount (material information for lettings)');
+    if (!l?.furnished) m.push('Whether it is furnished');
+  }
   return m;
 }
 
 /** Money amounts the seller stated: the only £ figures AI text may contain. */
 export function statedMoney(f: Facts): number[] {
-  return [f.price, f.serviceCharge, f.groundRent].filter((n): n is number => n != null && n > 0);
+  const rent = f.channel === 'rent';
+  return [f.price, rent ? null : f.serviceCharge, rent ? null : f.groundRent, lettingFacts(f)?.deposit].filter((n): n is number => n != null && n > 0);
 }
 
 /** Plain numbers the facts (and the seller's own notes) contain: the only figures AI text may use. */
@@ -131,7 +169,8 @@ export function statedNumbers(f: Facts, extraText: string[] = []): number[] {
   if (f.leaseYears) nums.add(f.leaseYears);
   for (const n of statedMoney(f)) nums.add(n);
   for (const e of f.era?.match(/\d{4}/g) ?? []) nums.add(Number(e));
-  for (const t of [f.title ?? '', f.town ?? '', ...f.features, ...extraText]) for (const n of numbersIn(t)) nums.add(n);
+  // The letting details as written out (so "available from 1 December 2026" and "up to 4 people" may be repeated).
+  for (const t of [f.title ?? '', f.town ?? '', ...f.features, ...lettingLines(f), ...extraText]) for (const n of numbersIn(t)) nums.add(n);
   return [...nums];
 }
 

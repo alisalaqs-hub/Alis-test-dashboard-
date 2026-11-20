@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { areaEvidence } from '../../src/engine/listings';
 import { q } from '../src/db';
 import { enqueue } from '../src/ai/jobs';
 import { finalise, statesFixedRent } from '../src/ai/listing/describe';
 import { imageSize, isPlaceholderAlt, photoTips, suggestOrder } from '../src/ai/listing/photos';
-import { ASSUMED_YIELD_PCT, CONDITION_ADJ, PRICE_TIMING, PriceGuideBody, priceRange, strayFigures } from '../src/ai/listing/price';
+import { NO_RENT_EVIDENCE, NO_SALE_EVIDENCE, PRICE_TIMING, strayFigures } from '../src/ai/listing/price';
 import { cleanText, isStated, moneyMatchesIn, reviewText, sentenceProblem } from '../src/ai/listing/wording';
-import { FactsSchema } from '../src/ai/listing/facts';
+import { factLines, FactsSchema, materialInfo, missingFacts } from '../src/ai/listing/facts';
 import { fetchableExternal, LISTING_PHOTO_CONSENT, photoLimits } from '../src/routes/ai-listing';
 import { client, jpegWithExif, LISTING, multipart, signUp } from './helpers';
+import { fakeOfficial } from './official-fakes';
 import { mockOpenAI, reply, TINY_PNG } from './openai-mock';
 import { fakeHosts } from './setup';
 
@@ -150,8 +150,11 @@ describe('POST /api/ai/listing/describe', () => {
       expect(r.status).toBe(200);
       expect(r.json.description).not.toMatch(/1,700|No pets|DSS|admin fee/i);
       expect(r.json.description).toContain('The rent is fixed at £1,650 per calendar month.');
-      expect(r.json.materialInfo).toEqual(expect.arrayContaining(['Rent: £1,650 per calendar month (fixed)', 'Tenure: Leasehold (110 years remaining on the lease)', 'Service charge: £1,400 a year']));
-      expect(r.json.missingInfo).toEqual(expect.arrayContaining(['Annual ground rent', 'Deposit amount (material information for lettings)']));
+      expect(r.json.materialInfo).toEqual(expect.arrayContaining(['Rent: £1,650 per calendar month (fixed)', 'Council tax band: B', 'EPC rating: C']));
+      // a let is never described by tenure, lease length or charges, and they are never "missing" from it
+      expect(r.json.materialInfo.join(' ')).not.toMatch(/tenure|lease|service charge|ground rent/i);
+      expect(r.json.missingInfo).toEqual(expect.arrayContaining(['Deposit amount (material information for lettings)', 'Whether it is furnished']));
+      expect(r.json.missingInfo.join(' ')).not.toMatch(/tenure|lease|service charge|ground rent/i);
       const w = r.json.wordingWarnings.join(' ');
       expect(w).toMatch(/bidding/);
       expect(w).toMatch(/Tenant Fees Act/);
@@ -342,20 +345,28 @@ describe('POST /api/ai/listing/photos/preview', () => {
   });
 });
 
-/* ───────── 4. price guide ───────── */
+/* ───────── 4. price guide: real sold prices only ───────── */
+const days = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+/** Six terraced homes sold on the listing's own postcode in the last year: £480,000 to £580,000. */
+const soldNearby = () => fakeOfficial({
+  postcodes: [{ postcode: 'E17 4QH', lat: 51.5893, lng: -0.0185 }],
+  sales: Array.from({ length: 6 }, (_, i) => ({ tx: `Q${i}`, postcode: 'E17 4QH', paon: String(20 + i), street: 'ELM ROAD', amount: 480_000 + i * 20_000, date: days(100 + i * 30), ptype: 'terraced' })),
+});
+const clearSold = () => q('TRUNCATE sold_prices, sold_price_fetches, data_cache');
+
 describe('POST /api/ai/listing/price-guide', () => {
   const BODY = { postcode: 'E17 4QH', type: 'terraced', beds: 3, floorArea: 92, condition: 'fair', channel: 'sale', askingPrice: 525000 };
 
-  it('computes the range in code and regenerates a narrative that adds figures', async () => {
-    const ev = areaEvidence('E17 4QH')!;
-    const low = Math.round((ev.refurbishedPerM2 * CONDITION_ADJ.fair * 92 * 0.92) / 1000) * 1000;
-    const high = Math.round((ev.refurbishedPerM2 * CONDITION_ADJ.fair * 92 * 1.08) / 1000) * 1000;
+  it('takes the range from real sold prices and regenerates a narrative that adds figures', async () => {
+    await clearSold();
+    const f = soldNearby();
     const ai = mockOpenAI({
       chat: (body, n) => {
         expect(body.messages[1].content).toContain('<<<price_facts');
+        expect(body.messages[1].content).toMatch(/real sold prices/);
         return n === 0
           ? reply.json({ explanation: 'Homes like this sell for around £610,000 nearby.', position: 'Your price is 12.5% under value.', advice: ['List at £600,000 to attract bids.'] })
-          : reply.json({ explanation: `The range of £${low.toLocaleString('en-GB')} to £${high.toLocaleString('en-GB')} comes from demonstration comparables. It is indicative, not a valuation.`, position: 'Your asking price of £525,000 sits within the range.', advice: ['Use bright, level photos.', 'Review interest after a few weeks.'] });
+          : reply.json({ explanation: 'The range is the middle half of what terraced homes nearby sold for. It is indicative, not a valuation.', position: 'Your asking price of £525,000 sits within the range.', advice: ['Use bright, level photos.', 'Review interest after a few weeks.'] });
       },
     });
     try {
@@ -364,8 +375,11 @@ describe('POST /api/ai/listing/price-guide', () => {
       expect((await c.post('/api/ai/listing/price-guide', { ...BODY, floorArea: 2 })).status).toBe(400);
       const r = await c.post('/api/ai/listing/price-guide', BODY);
       expect(r.status).toBe(200);
-      expect(r.json).toMatchObject({ low, high, basis: { n: ev.n, scope: ev.scope, demo: true } });
-      expect(r.json.position).toBe(525000 > high ? 'above' : 525000 < low ? 'below' : 'within');
+      expect(r.json.basis).toMatchObject({ n: 6, evidence: 'sales', demo: false });
+      expect(r.json.low).toBeGreaterThanOrEqual(480_000);
+      expect(r.json.high).toBeLessThanOrEqual(580_000);
+      expect(r.json.position).toBe('within');
+      expect(r.json.label).toMatch(/HM Land Registry sold prices/);
       expect(ai.calls('chat')).toHaveLength(2);
       const text = JSON.stringify(r.json.narrative);
       expect(text).not.toMatch(/610,000|600,000|12\.5/);
@@ -377,25 +391,49 @@ describe('POST /api/ai/listing/price-guide', () => {
       // cached: same question, no new AI call
       await c.post('/api/ai/listing/price-guide', BODY);
       expect(ai.calls('chat')).toHaveLength(2);
-    } finally { ai.restore(); }
+      // nothing the public is shown mentions example listings
+      expect(JSON.stringify(r.json)).not.toMatch(/demonstration|demo comparable|assumed|yield/i);
+    } finally { ai.restore(); f.restore(); }
   });
 
-  it('drops sentences with stray figures if the retry still adds them; rentals never suggest bidding', async () => {
-    const ai = mockOpenAI({ chat: () => reply.json({ explanation: 'Similar flats let for £1,900 a month. This is indicative only.', position: 'It sits 30% above.', advice: ['Invite offers above the asking rent.', 'Keep the photos bright.'] }) });
+  it('drops sentences with stray figures if the retry still adds them', async () => {
+    await clearSold();
+    const f = soldNearby();
+    const ai = mockOpenAI({ chat: () => reply.json({ explanation: 'Similar homes sell for £1,900,000. This is indicative only.', position: 'It sits 30% above.', advice: ['Aim for £700,000.', 'Keep the photos bright.'] }) });
     try {
       const { c } = await signUp();
-      const r = await c.post('/api/ai/listing/price-guide', { postcode: 'E10 7BL', type: 'flat', beds: 2, floorArea: 64, condition: 'good', channel: 'rent', askingPrice: 1650 });
+      const r = await c.post('/api/ai/listing/price-guide', { ...BODY, askingPrice: 526000 });
       expect(r.status).toBe(200);
       expect(ai.calls('chat')).toHaveLength(2);
-      expect(r.json.low % 25).toBe(0);
       expect(r.json.narrative.explanation).toBe('This is indicative only.');
       expect(r.json.narrative.position).toBe('');
       expect(r.json.narrative.advice).toEqual(['Keep the photos bright.']);
-      // no evidence at all: no range, no AI call
-      const none = await c.post('/api/ai/listing/price-guide', { postcode: 'JE2 3AB', type: 'flat', beds: 2, floorArea: 64, condition: 'good', channel: 'sale' });
-      expect(none.status).toBe(200);
-      expect(none.json.low).toBeNull();
-      expect(ai.calls('chat')).toHaveLength(2);
+    } finally { ai.restore(); f.restore(); }
+  });
+
+  it('never judges a price with example data: no sold prices, no range; a let gets no guide at all', async () => {
+    await clearSold();
+    const ai = mockOpenAI({ chat: () => reply.json({ explanation: 'x', position: '', advice: [] }) });
+    try {
+      const { c, user } = await signUp();
+      const empty = { low: null, high: null, basis: null, position: null, narrative: null };
+      // official data is off in tests unless a stand-in is set up: a sale has nothing real to compare with
+      const sale = await c.post('/api/ai/listing/price-guide', BODY);
+      expect(sale.status).toBe(200);
+      expect(sale.json).toEqual({ ...empty, note: NO_SALE_EVIDENCE });
+      expect(NO_SALE_EVIDENCE).toBe('We can’t check this price yet: there aren’t enough recent sold prices near this postcode.');
+      // sold prices nearby, but too few of them
+      const f = fakeOfficial({ postcodes: [{ postcode: 'E17 4QH', lat: 51.5893, lng: -0.0185 }], sales: [{ tx: 'A1', postcode: 'E17 4QH', paon: '1', street: 'ELM ROAD', amount: 500_000, date: days(30), ptype: 'terraced' }] });
+      try {
+        expect((await c.post('/api/ai/listing/price-guide', BODY)).json).toEqual({ ...empty, note: NO_SALE_EVIDENCE });
+        // a let is not checked even where sold prices exist: there is no real record of rents
+        const rent = await c.post('/api/ai/listing/price-guide', { postcode: 'E17 4QH', type: 'flat', beds: 2, floorArea: 64, condition: 'good', channel: 'rent', askingPrice: 1650 });
+        expect(rent.status).toBe(200);
+        expect(rent.json).toEqual({ ...empty, note: NO_RENT_EVIDENCE });
+      } finally { f.restore(); }
+      // no AI call was made and nothing was charged
+      expect(ai.calls('chat')).toHaveLength(0);
+      expect(await q(`SELECT 1 FROM rate_limits WHERE key = $1`, [`ai.daily:u:${user.id}`])).toHaveLength(0);
     } finally { ai.restore(); }
   });
 
@@ -738,22 +776,7 @@ describe('wording rules', () => {
 });
 
 /* ───────── price guide: basis, exact figures and time budget ───────── */
-describe('price guide basis and timing', () => {
-  const guide = (o: Record<string, unknown>) => PriceGuideBody.parse({ type: 'flat', beds: 2, floorArea: 64, condition: 'good', channel: 'rent', ...o });
-
-  it('describes the rental basis truthfully: rental comparables, or sale values at an assumed yield', () => {
-    for (const postcode of ['E10 7BL', 'E17 4QH']) {
-      const r = priceRange(guide({ postcode }))!;
-      expect(r.basis).toMatchObject({ n: 0, evidence: 'assumed-yield' });
-      expect(r.basis.method).toMatch(new RegExp(`assumed ${ASSUMED_YIELD_PCT}% gross yield \\(there are no rental comparables for this region yet\\)`));
-      expect(r.basis.method).not.toMatch(/Average rent per m²/);
-    }
-    const ng = priceRange(guide({ postcode: 'NG1 1AA' }))!;
-    expect(ng.basis).toMatchObject({ n: 1, scope: 'the wider region', evidence: 'rentals' });
-    expect(ng.basis.method).toMatch(/^Average rent per m² from 1 demonstration rental comparable in the wider region/);
-    expect(priceRange(guide({ postcode: 'E17 4QH', channel: 'sale', condition: 'fair' }))!.basis.evidence).toBe('sales');
-  });
-
+describe('price guide figures and timing', () => {
   it('flags near-miss figures in the narrative (unit)', () => {
     expect(strayFigures({ explanation: 'Your price of £525,000 sits within the range.', position: 'Aim for £528,000.', advice: [] }, [483000, 567000, 525000], [8])).toEqual(['£528,000']);
     expect(strayFigures({ explanation: 'From £483k to £567k.', position: '', advice: ['About 4.5% gross.'] }, [483000, 567000], [8, 4.5])).toEqual([]);
@@ -772,6 +795,8 @@ describe('price guide basis and timing', () => {
   it('skips the second call when too little time is left, and drops the stray sentences instead', async () => {
     const before = { ...PRICE_TIMING };
     Object.assign(PRICE_TIMING, { budgetMs: 3000, minRetryMs: 2600 });
+    await clearSold();
+    const f = soldNearby();
     const ai = mockOpenAI({ chat: async () => { await new Promise((r) => setTimeout(r, 600)); return reply.json({ explanation: 'Homes nearby sell for £610,000. It is indicative only.', position: 'It sits within the range.', advice: ['Use bright photos.'] }); } });
     honourTimeouts();
     try {
@@ -782,12 +807,14 @@ describe('price guide basis and timing', () => {
       expect(Date.now() - t0).toBeLessThan(3000);
       expect(ai.calls('chat')).toHaveLength(1);
       expect(r.json.narrative.explanation).toBe('It is indicative only.');
-    } finally { Object.assign(PRICE_TIMING, before); ai.restore(); }
+    } finally { Object.assign(PRICE_TIMING, before); ai.restore(); f.restore(); }
   });
 
   it('answers within the time budget when the model is slow', async () => {
     const before = { ...PRICE_TIMING };
     Object.assign(PRICE_TIMING, { budgetMs: 1500, minRetryMs: 1000 });
+    await clearSold();
+    const f = soldNearby();
     const ai = mockOpenAI({ chat: async () => { await new Promise((r) => setTimeout(r, 4000)); return reply.json({ explanation: 'Late.', position: '', advice: [] }); } });
     honourTimeouts();
     try {
@@ -797,7 +824,7 @@ describe('price guide basis and timing', () => {
       expect(Date.now() - t0).toBeLessThan(2500);
       expect(r.status).toBe(504);
       expect(r.json.error.message).toMatch(/took too long/);
-    } finally { Object.assign(PRICE_TIMING, before); ai.restore(); }
+    } finally { Object.assign(PRICE_TIMING, before); ai.restore(); f.restore(); }
   });
 });
 
@@ -852,6 +879,121 @@ describe('AI allowance for listing tools (COST-9)', () => {
       expect(ai.calls('chat')).toHaveLength(1);
       expect(await used('ai.listing.precheck.m')).toBe(1);
       expect(await used('ai.daily')).toBe(1);
+    } finally { ai.restore(); }
+  });
+});
+
+/* ───────── lets: letting details in the facts, and the letting wording rules ───────── */
+describe('letting facts and wording', () => {
+  const LETTING = { deposit: 1800, availableFrom: '2031-12-01', furnished: 'furnished', petsConsidered: true, billsIncluded: false, maxOccupants: 3, letType: 'whole' };
+  /** A let as the form sends it: no tenure, lease or charges, and the letting details. (£1,650 a month: the deposit cap is £1,903.) */
+  const LET = { channel: 'rent', type: 'flat', beds: 2, baths: 1, floorArea: 64, town: 'Leyton', postcode: 'E10 7BL', tenure: null, epc: 'C', councilTax: 'B', condition: 'good', era: '2000+', features: ['Balcony'], price: 1650, letting: LETTING };
+  const let_ = FactsSchema.parse(LET);
+  const ctx = { facts: let_, sources: [] };
+
+  it('describes a let by its letting details, never by tenure, and refuses unknown letting keys', () => {
+    const lines = factLines(let_);
+    for (const l of ['Deposit: £1,800', 'Available from: 1 December 2031', 'Furnishing: Furnished', 'Pets: considered', 'Bills: not included', 'Maximum occupants: 3', 'Let type: Whole property']) expect(lines).toContain(l);
+    expect(lines).not.toMatch(/tenure|lease|service charge|ground rent/i);
+    expect(materialInfo(let_)).toEqual(expect.arrayContaining(['Rent: £1,650 per calendar month (fixed)', 'Deposit: £1,800', 'Available from: 1 December 2031', 'Furnishing: Furnished']));
+    expect(materialInfo(let_).join(' ')).not.toMatch(/tenure/i);
+    expect(missingFacts(let_)).toEqual([]);
+    // even when an older client still sends the listing's stored tenure, a let never mentions it
+    const stored = FactsSchema.parse({ ...RENT_FACTS, letting: null });
+    expect(factLines(stored)).not.toMatch(/tenure|lease|service charge/i);
+    expect(materialInfo(stored).join(' ')).not.toMatch(/tenure|lease|service charge/i);
+    expect(missingFacts(stored)).toEqual(['Deposit amount (material information for lettings)', 'Whether it is furnished']);
+    // a sale is still asked for its tenure, and carries no letting details
+    const sale = FactsSchema.parse({ ...SALE_FACTS, tenure: '', letting: LETTING });
+    expect(factLines(sale)).toContain('Tenure: not given');
+    expect(factLines(sale)).not.toMatch(/Deposit|Furnishing/);
+    expect(missingFacts(sale)).toContain('Tenure');
+    // the HMO licence is stated only for an HMO; the exemption only while the rating is F or G
+    const hmo = FactsSchema.parse({ ...LET, epc: 'F', letting: { ...LETTING, letType: 'hmo', hmoLicence: 'applied', epcExemption: true } });
+    expect(factLines(hmo)).toContain('HMO licence: Licence applied for');
+    expect(factLines(hmo)).toContain('EPC exemption: registered (rating F)');
+    expect(factLines(FactsSchema.parse({ ...LET, letting: { ...LETTING, hmoLicence: 'licensed', epcExemption: true } }))).not.toMatch(/HMO licence|exemption/);
+    expect(FactsSchema.safeParse({ ...LET, letting: { ...LETTING, creditScore: 700 } }).success).toBe(false);
+    expect(FactsSchema.safeParse({ ...LET, letting: { ...LETTING, furnished: 'sort of' } }).success).toBe(false);
+  });
+
+  it('lets a draft repeat the stated letting details, and removes letting terms that break the rules', () => {
+    expect(sentenceProblem('The deposit is £1,800 and the flat is available from 1 December 2031.', ctx)).toBeNull();
+    expect(sentenceProblem('It is offered furnished, for up to 3 people.', ctx)).toBeNull();
+    expect(sentenceProblem('A deposit of £2,500 is required.', ctx)).toBe('deposit-text');
+    expect(sentenceProblem('Deposit of two months’ rent.', ctx)).toBe('deposit-text');
+    expect(sentenceProblem('A holding deposit of two weeks’ rent secures the flat.', ctx)).toBe('holding-deposit');
+    expect(sentenceProblem('Six months’ rent in advance required.', ctx)).toBe('rent-advance');
+    expect(sentenceProblem('Minimum 12 month fixed term.', ctx)).toBe('fixed-term');
+    expect(sentenceProblem('Would suit single female.', ctx)).toBe('sex-disability');
+    expect(sentenceProblem('Not suitable for wheelchair users.', ctx)).toBe('sex-disability');
+    expect(sentenceProblem('British passport holders only.', ctx)).toBe('discrimination');
+    expect(sentenceProblem('No students.', ctx)).toBeNull();
+    // honest wording is left alone
+    expect(sentenceProblem('There is no minimum term: the tenancy runs month to month.', ctx)).toBeNull();
+    expect(sentenceProblem('One month’s rent is payable in advance.', ctx)).toBeNull();
+    // the rules are England's: a let in Scotland isn't checked against them (discrimination still is)
+    const scot = { facts: FactsSchema.parse({ ...LET, postcode: 'EH1 1YZ', town: 'Edinburgh' }), sources: [] };
+    expect(sentenceProblem('Six months’ rent in advance required.', scot)).toBeNull();
+    expect(sentenceProblem('A minimum term of twelve months applies.', ctx)).toBe('fixed-term');
+    expect(sentenceProblem('A minimum term of twelve months applies.', scot)).toBeNull();
+    expect(sentenceProblem('UK citizens only.', scot)).toBe('discrimination');
+    // a sale isn't a letting
+    expect(sentenceProblem('A minimum term of twelve months applies.', { facts: FactsSchema.parse(SALE_FACTS), sources: [] })).toBeNull();
+
+    const out = finalise({
+      headline: 'Two-bedroom flat with balcony in Leyton',
+      paragraphs: ['A two-bedroom flat with a balcony. Minimum 12 month fixed term. Six months’ rent in advance required.', 'Female only. Deposit of two months’ rent. The deposit is £1,800.'],
+      keyFeatures: ['Balcony', 'Minimum term 12 months'], avoided: [], missingInfo: [],
+    }, { facts: let_, tone: 'concise', notes: 'Six months rent upfront please, minimum 12 months, female only.', photoInsights: [] });
+    expect(out.description).not.toMatch(/fixed term|in advance|Female only|two months/i);
+    expect(out.description).toContain('The deposit is £1,800.');
+    expect(out.keyFeatures.join(' ')).not.toMatch(/minimum term/i);
+    const w = out.wordingWarnings.join(' ');
+    expect(w).toMatch(/Your notes ask for rent in advance/);
+    expect(w).toMatch(/Your notes ask for a minimum or fixed term/);
+    expect(w).toMatch(/Your notes include wording about sex or disability/);
+    expect(w).toMatch(/Removed a deposit above the cap/);
+  });
+
+  it('warns about them in the pre-submission check without stopping the listing', async () => {
+    const ai = mockOpenAI({ chat: () => reply.json({ issues: [] }) });
+    try {
+      const { c } = await signUp({ accountType: 'landlord' });
+      const r = await c.post('/api/ai/listing/precheck', {
+        facts: { ...LET, letting: { ...LETTING, deposit: 2500 } },
+        description: 'A bright two-bedroom flat with a balcony. Six months’ rent in advance required. Minimum 12 month fixed term. Holding deposit of two weeks’ rent. Would suit single female. No students.',
+        photoCount: 4,
+      });
+      expect(r.status).toBe(200);
+      const checks = r.json.issues.filter((i: { source: string }) => i.source === 'checks').map((i: { checkId: string; severity: string; field: string }) => `${i.checkId}:${i.severity}:${i.field}`);
+      expect(checks).toEqual(expect.arrayContaining(['deposit-cap:warn:deposit', 'rent-advance:warn:description', 'fixed-term:warn:description', 'holding-deposit:warn:description', 'sex-disability:warn:description']));
+      expect(r.json.issues.find((i: { checkId?: string }) => i.checkId === 'deposit-cap').message).toBe('In England the most a landlord can take as a deposit is five weeks’ rent (£1,903 here).');
+      const wording = r.json.issues.filter((i: { source: string }) => i.source === 'wording');
+      expect(wording.find((i: { reason: string }) => i.reason === 'rent-advance').message)
+        .toBe('“Six months’ rent in advance required.” Since 1 May 2026 landlords in England can’t ask for more than one month’s rent in advance. Check this wording.');
+      expect(wording.find((i: { reason: string }) => i.reason === 'fixed-term').message)
+        .toBe('“Minimum 12 month fixed term.” Since 1 May 2026 new tenancies in England run month to month, so a minimum fixed term can’t be required. Check this wording.');
+      expect(wording.find((i: { reason: string }) => i.reason === 'holding-deposit').message).toMatch(/holding deposit can’t be more than one week’s rent \(£380 here\)/);
+      expect(wording.find((i: { reason: string }) => i.reason === 'sex-disability')).toMatchObject({ severity: 'warn', enforced: false });
+      // warnings only: nothing here stops the listing, and "No students" isn't flagged at all
+      expect(r.json.issues.every((i: { severity: string }) => i.severity !== 'block')).toBe(true);
+      expect(r.json.ready).toBe(true);
+      expect(JSON.stringify(r.json.issues)).not.toMatch(/students/i);
+      // tenure is never asked of a let
+      expect(JSON.stringify(r.json.issues)).not.toMatch(/tenure|lease/i);
+      expect(r.json.checks.filter((x: { id: string }) => ['tenure', 'lease', 'charges'].includes(x.id)).every((x: { ok: boolean }) => x.ok)).toBe(true);
+      // a nationality requirement is refused, like "No DSS"
+      const nat = await c.post('/api/ai/listing/precheck', { facts: LET, description: 'A bright two-bedroom flat with a balcony. British passport holders only.', photoCount: 4 });
+      expect(nat.json.ready).toBe(false);
+      expect(nat.json.issues.find((i: { reason?: string }) => i.reason === 'discrimination')).toMatchObject({ severity: 'block', enforced: true });
+      expect(nat.json.issues.find((i: { checkId?: string }) => i.checkId === 'discrim')).toMatchObject({ severity: 'block' });
+      // an F-rated let is blocked until a registered exemption is declared
+      const f = await c.post('/api/ai/listing/precheck', { facts: { ...LET, epc: 'F' }, description: 'A bright two-bedroom flat with a balcony.', photoCount: 4 });
+      expect(f.json.issues.find((i: { checkId?: string }) => i.checkId === 'epc-let')).toMatchObject({ severity: 'block' });
+      const exempt = await c.post('/api/ai/listing/precheck', { facts: { ...LET, epc: 'F', letting: { ...LETTING, epcExemption: true } }, description: 'A bright two-bedroom flat with a balcony.', photoCount: 4 });
+      expect(exempt.json.issues.find((i: { checkId?: string }) => i.checkId === 'epc-let')).toBeUndefined();
+      expect(exempt.json.ready).toBe(true);
     } finally { ai.restore(); }
   });
 });

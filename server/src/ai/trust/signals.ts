@@ -215,6 +215,9 @@ export function searchTerms(s: string, max = 10) {
 const CHECK_TYPE: Record<string, FlagType> = {
   discrim: 'discrimination', bidding: 'other', fees: 'other', photos: 'photos', 'photo-min': 'photos', ownership: 'other',
   contact: 'contact-details', payment: 'scam', scam: 'scam',
+  // Letting warnings (a deposit above the cap, rent in advance, a fixed term, sex or disability wording): wording for a
+  // person to look at, not missing details, and never more than a low flag (the lister was only warned about them).
+  'deposit-cap': 'other', 'deposit-text': 'other', 'holding-deposit': 'other', 'rent-advance': 'other', 'fixed-term': 'other', 'sex-disability': 'other',
 };
 /**
  * Listing checks that are advice for the lister, not trust concerns: the photos tip ("3+ photos get more
@@ -228,6 +231,9 @@ const CHECK_EVIDENCE: Record<string, string> = {
   charges: 'Service charge not stated', ctax: 'Council tax band not stated', epc: 'No EPC rating', 'epc-let': 'EPC rating below E for a rental',
   'photo-min': 'No photos', ownership: 'Ownership not declared', discrim: 'Wording matched Streetkey’s discrimination check',
   bidding: 'The rent invites offers or bids', fees: 'Mentions tenant fees',
+  'deposit-cap': 'The deposit is above the cap for the rent', 'deposit-text': 'The advert states a deposit above the cap for the rent',
+  'holding-deposit': 'The advert states a holding deposit above one week’s rent', 'rent-advance': 'The advert asks for two months’ rent or more in advance',
+  'fixed-term': 'The advert requires a fixed or minimum term', 'sex-disability': 'The advert mentions sex or disability',
 };
 const QUOTED_CHECKS: Record<string, RegExp[]> = { discrim: DISCRIMINATORY, bidding: [BIDDING], fees: [TENANT_FEES] };
 

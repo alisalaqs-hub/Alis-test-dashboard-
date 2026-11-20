@@ -268,9 +268,259 @@ describe('admin email when a live listing is held', () => {
   });
 });
 
+/* ───────── rental adverts: letting details, letting wording, agents and the public address ───────── */
+const LET = { ...LISTING, channel: 'rent', title: 'Two-bedroom flat to rent', type: 'flat', beds: 2, floorArea: 60, price: 1600, features: ['Balcony'], description: 'A bright two-bedroom flat with a balcony.' };
+const LETTING = { deposit: 1800, availableFrom: '2031-12-01', furnished: 'furnished', petsConsidered: true, billsIncluded: false, maxOccupants: 3, letType: 'whole' };
+const stored = async (ref: string) => (await q<{ material_info: Record<string, unknown> }>('SELECT material_info FROM listings WHERE ref = $1', [ref]))[0].material_info;
+/** The lister's own failing checks, as "id:severity". */
+const failingChecks = async (c: C, ref: string) => ((await c.get(`/api/listings/${ref}`)).json.checks as { id: string; ok: boolean; severity: string }[]).filter((x) => !x.ok && !x.id.startsWith('photo')).map((x) => `${x.id}:${x.severity}`);
+
+describe('letting details on a rental', () => {
+  it('checks, stores and returns them; unknown keys are refused', async () => {
+    const l = await signUp({ accountType: 'landlord' });
+    const unknown = await l.c.post('/api/listings', { ...LET, letting: { ...LETTING, income: 30000 } });
+    expect(unknown.status).toBe(400);
+    expect(Object.keys(unknown.json.error.fields)).toEqual(['letting']);
+    const bad = await l.c.post('/api/listings', { ...LET, letting: { ...LETTING, furnished: 'sort of', availableFrom: '31/12/2031', maxOccupants: 0, deposit: -1, letType: 'castle', hmoLicence: 'maybe', petsConsidered: 'yes' } });
+    expect(bad.status).toBe(400);
+    expect(Object.keys(bad.json.error.fields).sort()).toEqual(['letting.availableFrom', 'letting.deposit', 'letting.furnished', 'letting.hmoLicence', 'letting.letType', 'letting.maxOccupants', 'letting.petsConsidered']);
+    // only the server writes material_info.letting, from the checked letting object
+    const smuggled = await l.c.post('/api/listings', { ...LET, materialInfo: { letting: 'anything' } });
+    expect(smuggled.status).toBe(400);
+    expect(smuggled.json.error.fields.materialInfo).toMatch(/letting field/);
+
+    // the HMO licence is kept only for an HMO, and the exemption only shows while the rating is F or G
+    const made = await l.c.post('/api/listings', { ...LET, materialInfo: { heating: 'Gas central heating' }, letting: { ...LETTING, deposit: '1800', hmoLicence: 'licensed', epcExemption: true } });
+    expect(made.status).toBe(201);
+    const ref = made.json.listing.ref as string;
+    expect(made.json.listing.letting).toEqual(LETTING);
+    expect(await stored(ref)).toEqual({ heating: 'Gas central heating', letting: { ...LETTING, epcExemption: true } });
+    expect(made.json.listing.source).toMatchObject({ kind: 'landlord', name: 'Private landlord' });
+
+    // the public sees them once the listing is live
+    await uploadFiles(l.c, ref, [{ name: 'front.jpg' }]);
+    expect((await l.c.post(`/api/listings/${ref}/submit`)).json.status).toBe('pending');
+    const admin = await signUp(); await makeAdmin(admin.email);
+    expect((await admin.c.post(`/api/admin/listings/${ref}/approve`)).json.status).toBe('live');
+    const pub = await client().get(`/api/listings/${ref}`);
+    expect(pub.json.listing.letting).toEqual(LETTING);
+    expect((await client().get('/api/listings?channel=rent')).json.items.find((i: { ref: string }) => i.ref === ref).letting).toEqual(LETTING);
+  });
+
+  it('keeps them when an edit leaves them out, replaces them when it sends them, and announces only real changes', async () => {
+    const l = await signUp({ accountType: 'landlord' });
+    const ref = (await l.c.post('/api/listings', { ...LET, materialInfo: { heating: 'Gas central heating' }, letting: LETTING })).json.listing.ref as string;
+    const updates: string[][] = [];
+    on('listingUpdated', (p) => { if (p.ref === ref) updates.push(p.fields); });
+
+    // another field: the letting details stay as they are
+    const price = await l.c.patch(`/api/listings/${ref}`, { price: 1650 });
+    expect(price.json.listing.letting).toEqual(LETTING);
+    expect(updates.at(-1)).toEqual(['price']);
+    // the form sends everything on each save: the same letting details again are not a change (whatever order the keys come in)
+    const again = await l.c.patch(`/api/listings/${ref}`, { letting: Object.fromEntries(Object.entries(LETTING).reverse()) });
+    expect(again.status).toBe(200);
+    expect(updates).toHaveLength(1);
+    // new details replace the old ones; the rest of material_info is kept
+    const hmo = await l.c.patch(`/api/listings/${ref}`, { letting: { furnished: 'unfurnished', petsConsidered: false, billsIncluded: true, letType: 'hmo', hmoLicence: 'applied' } });
+    expect(hmo.json.listing.letting).toEqual({ furnished: 'unfurnished', petsConsidered: false, billsIncluded: true, letType: 'hmo', hmoLicence: 'applied' });
+    expect(updates.at(-1)).toEqual(['material_info']);
+    expect((await stored(ref)).heating).toBe('Gas central heating');
+    // null clears them
+    expect((await l.c.patch(`/api/listings/${ref}`, { letting: null })).json.listing.letting).toBeUndefined();
+    expect(await stored(ref)).toEqual({ heating: 'Gas central heating' });
+    expect((await l.c.patch(`/api/listings/${ref}`, { letting: { ...LETTING, extra: true } })).status).toBe(400);
+  });
+
+  it('never puts them on a sale', async () => {
+    const s = await signUp({ accountType: 'owner' });
+    const sale = await s.c.post('/api/listings', { ...LISTING, letting: LETTING });
+    expect(sale.status).toBe(201);
+    expect(sale.json.listing.letting).toBeUndefined();
+    expect(await stored(sale.json.listing.ref)).toEqual({});
+    // a let that becomes a sale loses them
+    const ref = (await s.c.post('/api/listings', { ...LET, letting: LETTING })).json.listing.ref as string;
+    expect((await s.c.get(`/api/listings/${ref}`)).json.listing.letting).toEqual(LETTING);
+    const turned = await s.c.patch(`/api/listings/${ref}`, { channel: 'sale', price: 400000 });
+    expect(turned.json.listing.letting).toBeUndefined();
+    expect(await stored(ref)).toEqual({});
+  });
+
+  it('warns about a deposit above the cap without stopping the listing', async () => {
+    const l = await signUp({ accountType: 'landlord' });
+    // £1,600 a month is £369.23 a week: five weeks is £1,846
+    const ref = (await l.c.post('/api/listings', { ...LET, letting: { ...LETTING, deposit: 3200 } })).json.listing.ref as string;
+    expect(await failingChecks(l.c, ref)).toEqual(['deposit-cap:warn']);
+    const own = await l.c.get(`/api/listings/${ref}`);
+    expect(own.json.checks.find((x: { id: string }) => x.id === 'deposit-cap').message).toBe('In England the most a landlord can take as a deposit is five weeks’ rent (£1,846 here).');
+    await uploadFiles(l.c, ref, [{ name: 'front.jpg' }]);
+    expect((await l.c.post(`/api/listings/${ref}/submit`)).json.status).toBe('pending'); // a warning, not a block
+    expect((await l.c.patch(`/api/listings/${ref}`, { letting: { ...LETTING, deposit: 1846 } })).status).toBe(200);
+    expect(await failingChecks(l.c, ref)).toEqual([]);
+    // six weeks when the yearly rent is £50,000 or more (£5,000 a month: £6,923)
+    const dear = (await l.c.post('/api/listings', { ...LET, price: 5000, letting: { ...LETTING, deposit: 6900 } })).json.listing.ref as string;
+    expect(await failingChecks(l.c, dear)).toEqual([]);
+    await l.c.patch(`/api/listings/${dear}`, { letting: { ...LETTING, deposit: 7000 } });
+    expect((await l.c.get(`/api/listings/${dear}`)).json.checks.find((x: { id: string }) => x.id === 'deposit-cap')).toMatchObject({ ok: false, severity: 'warn', message: 'In England the most a landlord can take as a deposit is six weeks’ rent (£6,923 here).' });
+  });
+
+  it('lets an F or G rated home be listed once a registered exemption is declared, and shows it', async () => {
+    const l = await signUp({ accountType: 'landlord' });
+    const ref = (await l.c.post('/api/listings', { ...LET, epc: 'F', letting: LETTING })).json.listing.ref as string;
+    await uploadFiles(l.c, ref, [{ name: 'front.jpg' }]);
+    const blocked = await l.c.post(`/api/listings/${ref}/submit`);
+    expect(blocked.status).toBe(422);
+    expect(blocked.json.error.fields['epc-let']).toMatch(/EPC E or better.*registered exemption/);
+    const ticked = await l.c.patch(`/api/listings/${ref}`, { letting: { ...LETTING, epcExemption: true } });
+    expect(ticked.json.listing.letting).toEqual({ ...LETTING, epcExemption: true });
+    expect((await l.c.post(`/api/listings/${ref}/submit`)).json.status).toBe('pending');
+    // a submitted listing must keep passing: the exemption can't be dropped while the rating is still F
+    const dropped = await l.c.patch(`/api/listings/${ref}`, { letting: LETTING });
+    expect(dropped.status).toBe(422);
+    expect(dropped.json.error.fields['epc-let']).toBeTruthy();
+    // with a better rating the exemption no longer shows
+    expect((await l.c.patch(`/api/listings/${ref}`, { epc: 'C' })).json.listing.letting.epcExemption).toBeUndefined();
+  });
+
+  it('never asks a let for tenure, lease length or charges', async () => {
+    const l = await signUp({ accountType: 'landlord' });
+    // the listing keeps a tenure on record (the form sends its own unseen), but nothing about it is required of a let
+    const ref = (await l.c.post('/api/listings', { ...LET, tenure: 'leasehold', letting: LETTING })).json.listing.ref as string;
+    expect(await failingChecks(l.c, ref)).toEqual([]);
+    await uploadFiles(l.c, ref, [{ name: 'front.jpg' }]);
+    expect((await l.c.post(`/api/listings/${ref}/submit`)).json.status).toBe('pending');
+    // a sale still is
+    const s = await signUp({ accountType: 'owner' });
+    const sale = (await s.c.post('/api/listings', { ...LISTING, tenure: 'leasehold' })).json.listing.ref as string;
+    expect(await failingChecks(s.c, sale)).toEqual(['lease:block', 'charges:warn']);
+  });
+});
+
+describe('wording checks for lets', () => {
+  it('warns about deposits, rent in advance, fixed terms and sex or disability wording, and still takes the listing', async () => {
+    const l = await signUp({ accountType: 'landlord' });
+    const description = 'A bright flat. Deposit of two months’ rent. Holding deposit £500. Six months’ rent in advance required. Minimum 12 month fixed term. Would suit single female. Not suitable for wheelchair users.';
+    const ref = (await l.c.post('/api/listings', { ...LET, description, letting: LETTING })).json.listing.ref as string;
+    expect(await failingChecks(l.c, ref)).toEqual(['sex-disability:warn', 'deposit-text:warn', 'holding-deposit:warn', 'rent-advance:warn', 'fixed-term:warn']);
+    const checks = (await l.c.get(`/api/listings/${ref}`)).json.checks as { id: string; message: string }[];
+    const message = (id: string) => checks.find((x) => x.id === id)!.message;
+    expect(message('rent-advance')).toBe('Since 1 May 2026 landlords in England can’t ask for more than one month’s rent in advance. Check this wording.');
+    expect(message('fixed-term')).toBe('Since 1 May 2026 new tenancies in England run month to month, so a minimum fixed term can’t be required. Check this wording.');
+    expect(message('deposit-text')).toBe('In England the most a landlord can take as a deposit is five weeks’ rent (£1,846 here). Check this wording.');
+    expect(message('holding-deposit')).toBe('In England a holding deposit can’t be more than one week’s rent (£369 here). Check this wording.');
+    await uploadFiles(l.c, ref, [{ name: 'front.jpg' }]);
+    expect((await l.c.post(`/api/listings/${ref}/submit`)).json.status).toBe('pending'); // warnings never block
+  });
+
+  it('refuses nationality requirements like "No DSS", and no longer refuses "No students"', async () => {
+    const l = await signUp({ accountType: 'landlord' });
+    const ref = (await l.c.post('/api/listings', { ...LET, description: 'A bright flat. No students.', letting: LETTING })).json.listing.ref as string;
+    await uploadFiles(l.c, ref, [{ name: 'front.jpg' }]);
+    expect(await failingChecks(l.c, ref)).toEqual([]);
+    expect((await l.c.post(`/api/listings/${ref}/submit`)).json.status).toBe('pending');
+    for (const text of ['British passport holders only.', 'UK citizens only.', 'British only.']) {
+      const bad = await l.c.patch(`/api/listings/${ref}`, { description: `A bright flat. ${text}` });
+      expect(bad.status, text).toBe(422);
+      expect(bad.json.error.fields.discrim).toMatch(/discriminatory/);
+    }
+    // sex-specific wording is a warning: the edit is saved
+    expect((await l.c.patch(`/api/listings/${ref}`, { description: 'A room in a shared house. Female only.' })).status).toBe(200);
+    expect(await failingChecks(l.c, ref)).toEqual(['sex-disability:warn']);
+  });
+});
+
+describe('an estate agent lists under their agency', () => {
+  it('creates the listing under the agency named, for its members only', async () => {
+    // someone who runs an agency: creating it makes them an agent
+    const agent = await signUp({ accountType: 'owner', name: 'Agent' });
+    const orgId = (await agent.c.post('/api/orgs', { name: 'Lea Valley Homes', kind: 'agency', redressScheme: 'The Property Ombudsman' })).json.id as string;
+    expect((await agent.c.get('/api/me/orgs')).json.items).toEqual([expect.objectContaining({ id: orgId, name: 'Lea Valley Homes', kind: 'agency', verified: false, role: 'owner' })]);
+    const made = await agent.c.post('/api/listings', { ...LISTING, organisationId: orgId });
+    expect(made.status).toBe(201);
+    expect(made.json.listing).toMatchObject({ organisationId: orgId, agentName: 'Lea Valley Homes', mine: true, source: { kind: 'agent', name: 'Lea Valley Homes', verified: false } });
+    // a colleague whose own account isn't an agent's still lists under the agency when the form names it
+    const colleague = await signUp({ accountType: 'landlord' });
+    await q(`INSERT INTO memberships (organisation_id, user_id) VALUES ($1, $2)`, [orgId, colleague.user.id]);
+    const theirs = await colleague.c.post('/api/listings', { ...LET, letting: LETTING, organisationId: orgId });
+    expect(theirs.json.listing).toMatchObject({ organisationId: orgId, source: { kind: 'agent', name: 'Lea Valley Homes' } });
+    expect((await colleague.c.post('/api/listings', LET)).json.listing).toMatchObject({ organisationId: null, source: { kind: 'landlord', name: 'Private landlord' } });
+    // nobody can list under an agency they don't belong to
+    const stranger = await signUp({ accountType: 'agent' });
+    const refused = await stranger.c.post('/api/listings', { ...LISTING, organisationId: orgId });
+    expect(refused.status).toBe(403);
+    expect(refused.json.error.code).toBe('not_a_member');
+    expect((await stranger.c.post('/api/listings', { ...LISTING, organisationId: 'not-an-id' })).status).toBe(400);
+    // an agent with no agency lists privately (the form sends them to create one first)
+    expect((await stranger.c.post('/api/listings', LISTING)).json.listing).toMatchObject({ organisationId: null, source: { kind: 'owner', name: 'Private seller' } });
+
+    // an agency that has been verified publishes straight away; one that hasn't goes to review
+    const ref = made.json.listing.ref as string;
+    await uploadFiles(agent.c, ref, [{ name: 'front.jpg' }]);
+    expect((await agent.c.post(`/api/listings/${ref}/submit`)).json.status).toBe('pending');
+    await q('UPDATE organisations SET verified = true WHERE id = $1', [orgId]);
+    const second = (await agent.c.post('/api/listings', { ...LISTING, addressLine: '16 Elm Road', organisationId: orgId })).json.listing.ref as string;
+    await uploadFiles(agent.c, second, [{ name: 'front.jpg' }]);
+    expect((await agent.c.post(`/api/listings/${second}/submit`)).json.status).toBe('live');
+  });
+});
+
+describe('the public address', () => {
+  it('is the street and the outward postcode for every kind of lister; the lister, their agency and admins see it in full', async () => {
+    const agent = await signUp({ accountType: 'agent' });
+    const orgId = (await agent.c.post('/api/orgs', { name: 'Forest Road Estates', kind: 'agency' })).json.id as string;
+    await q('UPDATE organisations SET verified = true WHERE id = $1', [orgId]);
+    const ref = (await agent.c.post('/api/listings', { ...LISTING, addressLine: 'Flat 2, 14 Elm Road' })).json.listing.ref as string;
+    await uploadFiles(agent.c, ref, [{ name: 'front.jpg' }]);
+    expect((await agent.c.post(`/api/listings/${ref}/submit`)).json.status).toBe('live');
+    const row = (await q<{ lat: number; lng: number; source_kind: string }>('SELECT lat, lng, source_kind FROM listings WHERE ref = $1', [ref]))[0];
+    expect(row.source_kind).toBe('agent');
+
+    const isPublic = (l: { addressLine: string; postcode: string; district: string; lat: number; lng: number; mine: boolean }) => {
+      expect(l).toMatchObject({ addressLine: 'Elm Road', postcode: 'E17', district: 'E17', mine: false });
+      expect(JSON.stringify(l)).not.toMatch(/4QH|14 Elm|Flat 2/);
+      expect(l.lat).toBe(Math.round(row.lat * 500) / 500); // the map pin is rounded too
+      expect(l.lat).not.toBe(row.lat);
+    };
+    isPublic((await client().get(`/api/listings/${ref}`)).json.listing);
+    isPublic((await client().get('/api/listings?q=E17')).json.items.find((i: { ref: string }) => i.ref === ref));
+    isPublic((await client().get(`/api/agents/${orgId}`)).json.listings.find((i: { ref: string }) => i.ref === ref));
+    // someone signed in who has nothing to do with the listing, and another agency's staff
+    isPublic((await (await signUp()).c.get(`/api/listings/${ref}`)).json.listing);
+    const rival = await signUp({ accountType: 'agent' });
+    await rival.c.post('/api/orgs', { name: 'Another Agency', kind: 'agency' });
+    isPublic((await rival.c.get(`/api/listings/${ref}`)).json.listing);
+
+    // the lister, a colleague at their agency and an admin
+    const full = { addressLine: 'Flat 2, 14 Elm Road', postcode: 'E17 4QH', lat: row.lat, lng: row.lng };
+    expect((await agent.c.get(`/api/listings/${ref}`)).json.listing).toMatchObject({ ...full, mine: true });
+    const colleague = await signUp({ accountType: 'agent' });
+    await q(`INSERT INTO memberships (organisation_id, user_id) VALUES ($1, $2)`, [orgId, colleague.user.id]);
+    expect((await colleague.c.get(`/api/listings/${ref}`)).json.listing).toMatchObject({ ...full, mine: true });
+    const admin = await signUp(); await makeAdmin(admin.email);
+    expect((await admin.c.get(`/api/listings/${ref}`)).json.listing).toMatchObject({ ...full, mine: false });
+
+    // a listing from an agent's feed is treated the same
+    await q(`UPDATE listings SET source_kind = 'agent-feed', owner_user_id = NULL WHERE ref = $1`, [ref]);
+    isPublic((await client().get(`/api/listings/${ref}`)).json.listing);
+    expect((await agent.c.get(`/api/listings/${ref}`)).json.listing).toMatchObject(full);
+  });
+});
+
 /* ───────── shared rules and helpers (unit) ───────── */
 // (Only browser-free modules here: the server type-check can't load the website's client code.)
 import { altTextProblem as altProblem, complianceChecks, dataUrlBytes, extractListing, featuresToAdd, isEnforced, placeFieldProblem, repeatsStructuredFact, severityLabel, sizeBatches, streetOnly } from '../../src/engine/listings';
+
+import { checkEvidence, typeForCheck } from '../src/ai/trust/signals';
+
+describe('letting warnings in the trust review (unit)', () => {
+  it('are wording for a person to look at, never "missing details"', () => {
+    for (const id of ['deposit-cap', 'deposit-text', 'holding-deposit', 'rent-advance', 'fixed-term', 'sex-disability']) {
+      expect(typeForCheck(id), id).toBe('other');
+      expect(checkEvidence(id, ''), id).not.toBe('Streetkey listing check');
+    }
+    expect(typeForCheck('charges')).toBe('material-info');
+  });
+});
 
 describe('listing rules (unit)', () => {
   it('reads tenure and room counts from portal text (labels first, negation-aware)', () => {

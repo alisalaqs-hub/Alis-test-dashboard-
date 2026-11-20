@@ -28,6 +28,8 @@ export function dtoToProperty(d: ListingDTO): Property {
     },
     geo: d.lat != null && d.lng != null ? { lat: d.lat, lng: d.lng } : undefined,
     status: STATUS[d.status], visibility: 'public',
+    // Letting details (rentals only; buildListing never puts them on a sale).
+    letting: d.channel === 'rent' ? d.letting ?? null : null,
   });
   if (!d.epc) p.documents = ['EPC (not yet provided)'];
   if (plan) {

@@ -8,7 +8,7 @@
  *   GET  /api/ai/listing/:ref/photos      stored photo analysis, suggested order and tips (lister, their agency, admin;
  *                                         no AI call, so it works while AI is off and doesn't use the AI allowance)
  *   POST /api/ai/listing/:ref/photos/check  (re)run the photo check for an existing listing (same; consent required)
- *   POST /api/ai/listing/price-guide      range from Streetkey's area evidence + AI explanation (no new figures)
+ *   POST /api/ai/listing/price-guide      sales only: range from real sold prices nearby + AI explanation (no new figures)
  *   POST /api/ai/listing/precheck         compliance checks + wording rules + AI review, merged
  * Uploaded photos are checked in the background ('listing.photos' job, triggered by the photosUploaded hook), but only
  * for people who have consented ('ai_image_processing' in consents) and within a per-person daily allowance.
@@ -27,7 +27,7 @@ import { enqueue, jobDTO, registerJob, type JobRow } from '../ai/jobs';
 import { describeListing, DescribeBody } from '../ai/listing/describe';
 import { analyseBatch, imagesHash, isPlaceholderAlt, photoTips, PriorSchema, suggestOrder, type ImageIn, type PhotoAnalysis, type Summarisable } from '../ai/listing/photos';
 import { precheck, PrecheckBody } from '../ai/listing/precheck';
-import { officialPriceRange, PRICE_TIMING, PriceGuideBody, priceNarrative, priceRange } from '../ai/listing/price';
+import { NO_RENT_EVIDENCE, NO_SALE_EVIDENCE, officialPriceRange, PRICE_TIMING, PriceGuideBody, priceNarrative } from '../ai/listing/price';
 import { bytesHash, signPreview } from '../ai/listing/previewToken';
 import { altTextProblem } from '../../../src/engine/listings';
 import { audit, HttpError, parse, requireUser } from '../services/http';
@@ -317,16 +317,16 @@ export async function aiListingRoutes(app: FastifyInstance) {
     const deadline = Date.now() + PRICE_TIMING.budgetMs; // one budget for the whole request (Netlify answers within 30 s)
     const { userId } = await aiAccess(req, { auth: true });
     const body = parse(PriceGuideBody, req.body);
-    // Real sold prices nearby when they can be had (sales in England and Wales); otherwise Streetkey's demonstration evidence.
-    const range = (await officialPriceRange(body).catch(() => null)) ?? priceRange(body);
-    // No evidence, no AI call: nothing is charged.
-    if (!range) return { low: null, high: null, basis: null, position: null, narrative: null, note: 'There isn’t enough comparable evidence for this postcode yet.' };
+    // Only real evidence is explained: sold prices nearby (sales in England and Wales). No evidence, no AI call, nothing charged,
+    // and never a range worked out from example listings. A let has no real source of rents, so it gets no guide at all.
+    const none = (note: string) => ({ low: null, high: null, basis: null, position: null, narrative: null, note });
+    if (body.channel === 'rent') return none(NO_RENT_EVIDENCE);
+    const range = await officialPriceRange(body).catch(() => null);
+    if (!range) return none(NO_SALE_EVIDENCE);
     const { narrative } = await priceNarrative(body, range, { userId, deadline, charge: () => aiCharge(req, 'listing.price_guide', PRICE_LIMITS) });
     return {
       low: range.low, high: range.high, basis: range.basis, position: range.position, askingVsMidPct: range.askingVsMidPct, narrative,
-      label: range.basis.demo
-        ? 'AI explanation of Streetkey’s indicative range. Not a valuation: the figures come from demonstration comparables, not the AI.'
-        : 'AI explanation of where the price sits against HM Land Registry sold prices nearby. Not a valuation: the figures come from the sold prices, not the AI.',
+      label: 'AI explanation of where the price sits against HM Land Registry sold prices nearby. Not a valuation: the figures come from the sold prices, not the AI.',
     };
   });
 

@@ -62,3 +62,18 @@
 .lp-inline-checks { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
 .step.warn span { background: var(--gold-soft); color: var(--ink); border: 1px solid var(--gold); }
 .lp-page-msg { max-width: 640px; }
+/* Letting details, the deposit, the agency note and the review list. */
+.lp-letting { border-top: 1px solid var(--line); padding-top: 14px; }
+.lp-letting h4 { margin: 0; font-size: 15px; }
+.lp-exempt { display: flex; flex-direction: column; gap: 2px; }
+.lp-exempt p, .lp-agency p, #lp-deposit-note p { margin: 0; }
+.lp-deposit { max-width: 260px; }
+.lp-deposit-warn { max-width: 560px; }
+/* Kept on the page while empty (it is a live region), without taking up a gap of its own. */
+.lp-agency:empty { margin-bottom: -14px; }
+.lp-review { gap: 8px; }
+.lp-all-good { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+/* An agent with no agency to list under: the later steps and Next stay on the page (and focusable) but look unavailable. */
+.steps .step[aria-disabled='true'], .btn[aria-disabled='true'][aria-describedby='lp-agency-note'] { opacity: 0.55; cursor: not-allowed; }
+/* The "(complete)" notes for screen readers stay inside their step, so the step bar never widens the page. */
+.steps .step { position: relative; }
