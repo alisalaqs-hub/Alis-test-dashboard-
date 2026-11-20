@@ -179,6 +179,32 @@ change `connect-src` to match. If the map cannot start (no WebGL, or the tile se
 seconds) the page falls back to the simple outline map. Not built yet: search by travel time (needs a routing
 service) and a distance-from-a-place filter.
 
+## Real listings carry facts, not Streetkey's opinions
+
+Streetkey's own models (price verdicts, the deal score, rent, refurbishment and value-after-works figures,
+offer advice, engagement figures) run on its example homes. They are shown on example listings only, where
+everything is labelled as an example. On a real listing:
+
+- **The listing page** shows what the lister said, official records (sold prices nearby, flood risk, the energy
+  certificate) and three tools the visitor can choose to use: sold prices nearby, cost the works, work out the
+  returns. A works figure is mentioned only when the lister chose *Needs work* or *Major works*. There is no
+  price verdict, deal score, rent estimate, made-up floor plan, invented viewing time or example document.
+- **The "full picture" page** (`/property/<ref>/intelligence`) shows official records, stamp duty on the asking
+  price and the calculators.
+- **Search** matches and orders real homes on their facts alone (`runSearch` in `src/engine/search.ts`); real
+  homes come before example ones; similar homes beside a real home are real homes, without price comparisons.
+- **The listing form's price step** uses HM Land Registry sold prices for a sale, or says it cannot check the
+  price yet. A rent is never judged: there is no real rent source.
+- **Listers' insights and the agency briefing** say nothing about whether a price or rent is high or low
+  (`priceEvidenceFor` in `server/src/ai/inbox/insights.ts` returns no evidence until a real source exists).
+- **The investment calculator**, opened from a real listing, starts as a plain buy-to-let at the asking price
+  with the rent left for the person to enter.
+- **The home tool** (`/my-home`) leads with what homes of the same type sold for nearby (HM Land Registry) and
+  shows the value of an idea only when it rests on real listings.
+
+Anything new that puts a figure on a real listing must come from the lister or an official record, or be
+something the visitor asked a calculator for.
+
 ## Listings, photos, feeds and alerts
 
 - **Photo uploads** go up in small batches (up to 12 files and about 4 MB per request, because Netlify functions accept about 6 MB per request). The page shows progress and a retry never creates a second listing. Each request can carry a `meta` JSON field (`[{token, alt}]`) so alt text from the AI photo check is saved with the photo; if a limit stops a batch part-way, the photos already stored are kept and the response says what happened.
@@ -209,6 +235,34 @@ service) and a distance-from-a-place filter.
 - **Listing history** (migration 016, `server/src/services/history.ts`). Streetkey records what happens to each listing in `listing_events`: first listed, every change to the asking price (old and new), under offer and back, sold or let, withdrawn, relisted. One function, `recordHistory`, compares where a listing stands with the last thing its history says and adds what is missing; every route that changes a listing (the lister's edits and status changes, admin approval and rejection, automatic approval, agency verification, feed imports, account deletion) calls it in the same transaction as the change. A price changed in a draft, or while a listing is off the market, is not a public change: it appears on the day the listing comes back. A listing held for review after an edit keeps its history as it is. Listings that were already on the market were backfilled from their publication date and the price changes in the audit trail.
   - **On the API:** every listing carries `history` (null until it has been on the market): `firstListedAt`, `firstListedPrice`, `daysOnMarket` (time withdrawn isn't counted, and the count stops when sold or let) and `priceChanges` (`at`, `from`, `to`). Prices and dates only, the same for every viewer and every kind of lister: nothing about who made a change, and status events are not published.
   - **On the property page** (real listings only): a *Price history* block ("Listed at £485,000 on 3 Nov 2026", "Reduced by £10,000 (2.1%) on 20 Nov 2026"), "On the market for N days", and a *Reduced* tag by the price when the latest change was a reduction. The wording and the day count are pure functions in `src/engine/history.ts`.
+
+### Rental adverts
+
+- **Letting details** are part of a rental: deposit, available date, furnishing, pets considered, bills included,
+  maximum occupants, let type (whole property, room, HMO) and HMO licence. The form sends a checked `letting`
+  object; the server keeps it in `listings.material_info.letting` (nothing else may write that key) and returns it
+  as `letting` on the listing. Feeds store the same shape. `src/engine/letting.ts` holds the rules and wording;
+  `src/components/LettingFacts.tsx` shows them on the listing and gives the one-line summary on cards.
+- **Warnings a lister can read and still publish with** (England only, skipped for Welsh, Scottish and Northern
+  Irish postcodes): a deposit above five weeks' rent (six when the yearly rent is £50,000 or more), a holding
+  deposit above one week's rent, rent in advance of two months or more, and a minimum fixed term. Wording about
+  sex or about a home not suiting a wheelchair is also a warning.
+- **Refused**: "No DSS" and similar, nationality requirements ("British passport holders only"), turning disabled
+  people away outright, rental bidding and banned tenant fees. "No students" is allowed.
+- **An energy rating of F or G** needs the lister to declare a registered exemption, which the listing then shows.
+- **The public address** of every listing is the street and the first half of the postcode, whoever listed it.
+  The lister, their agency and admins see it in full.
+- These rules are our reading of the law for England and have not been checked by a solicitor.
+
+### Feed safeguards
+
+- A file that cannot be read properly never withdraws listings: if any row cannot be lined up with the header (or
+  has no reference), or the file has rows but nothing in it can be imported, the listings already on Streetkey
+  stay as they are and the result says so.
+- The report email is not repeated when a file is re-sent with nothing new: no listing added or withdrawn and the
+  same listings left out for the same reasons as the last run from that source.
+- A floor area the file did not give is stored as a guess (the column needs a figure) and flagged
+  (`material_info.floorAreaEstimated`, `floorAreaEstimated` on the listing): no page shows it.
 
 ### Results for agencies
 
@@ -384,9 +438,15 @@ GitHub Actions runs all of these on every push (`.github/workflows/ci.yml`).
 ## Not built yet
 
 - Payments (Stripe) for listing upgrades, agency subscriptions and API plans.
-- More official data: Ofsted school ratings, journey times, planning applications, conservation areas, subsidence and radon (not shown for real listings yet); sold prices matched to EPC floor areas for a price per square metre; flood maps for Wales and Scotland.
-- Valuation, rent and deal-score models for real listings still use Streetkey's demonstration evidence and are labelled as estimates; the price check on real listings uses real sold prices.
-- Listing history beyond the property page: search results don't show a *Reduced* tag yet, and the assistant, the lister's insights and the deal score don't use the recorded price changes (on the server they still count days from the publication date).
+- More official data: Ofsted school ratings, planning applications, conservation areas, subsidence and radon; sold prices matched to EPC floor areas for a price per square metre; flood maps for Wales and Scotland; a real source of rents.
+- Valuation, rent and deal-score models for real listings. Until they rest on real evidence they are shown on example listings only (see "Real listings carry facts").
+- Viewing management for listers: viewing slots set by the lister, confirmations, calendar files and reminders.
+- Feed delivery by FTP or SFTP, zipped media, a display-address field, EPC documents and virtual tours.
+- A "find an agent" page by area, agency logos and areas covered, and valuation requests from the home tool.
+- More property types (studio, maisonette, room, land).
+- Registration numbers for landlords and agents in Scotland and Wales, and Private Rented Sector Database IDs when that register starts.
 - Identity and HM Land Registry title checks for a "Verified owner" badge.
-- Documents (EPC certificates, floor plans, leases) with AI extraction; map search with PostGIS.
-- Lettings management tools (tenancies, deposits, compliance reminders).
+- Documents (EPC certificates, leases) with AI extraction; map search with PostGIS.
+- The terms page still needs the company's legal details and a solicitor's review.
+
+Streetkey is a portal: tenancy management, rent collection, deposits and referencing are deliberately not planned.
