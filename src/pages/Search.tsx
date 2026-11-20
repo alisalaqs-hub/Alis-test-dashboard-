@@ -3,9 +3,11 @@ import { Link, useMatch, useNavigationType, useParams, useSearchParams } from 'r
 import { slugPlace, unslugPlace, usePageMeta } from '../lib/meta';
 import { describeQuery, runSearch, type SearchHit, type SearchQuery } from '../engine/search';
 import { gbp, gbpK, HouseArt, Seg, streetName, UKMap } from '../components/ui';
-import { homeKind } from '../components/PropertyCard';
+import { homeKind, priceNote } from '../components/PropertyCard';
+import { lettingLine } from '../components/LettingFacts';
 import { useStore } from '../store';
 import { pointInPolygon, type LngLat } from '../engine/geo';
+import { FURNISHINGS, FURNISHING_LABEL } from '../engine/letting';
 import { latestPriceMove } from '../engine/history';
 import { ApiError } from '../lib/api';
 import { aiPost, useAi, useSignInPath } from '../lib/ai/core';
@@ -111,6 +113,16 @@ export default function Search() {
   const typeParam = params.get('type');
   const type = TYPE_OPTIONS.some(([v]) => v === typeParam) ? (typeParam as string) : '';
   const added = choice(params.get('added'), ADDED_OPTIONS.map(([d]) => d));
+  /*
+   * Furnishing and pets, for homes to rent: chosen in the filters, or read from the words ("furnished flat, pets
+   * allowed"). They narrow real adverts by what the landlord said; a rental that says nothing about it is kept
+   * out only when the person asked for that thing.
+   */
+  const furnishedParam = params.get('furnished');
+  const worded = /\bunfurnished\b/i.test(submitted) ? 'unfurnished' : /\b(?:part[- ]furnished)\b/i.test(submitted) ? 'part-furnished' : /\bfurnished\b/i.test(submitted) ? 'furnished' : '';
+  const furnished = furnishedParam === 'any' ? '' : (FURNISHINGS as readonly string[]).includes(furnishedParam ?? '') ? (furnishedParam as string) : worded;
+  const petsParam = params.get('pets');
+  const pets = petsParam === '0' ? false : petsParam === '1' || /\b(?:pets?|dogs?|cats?)\s+(?:allowed|considered|welcome|friendly|ok(?:ay)?)\b|\bpet[- ]friendly\b/i.test(submitted);
   const available = params.get('available') === '1';
   const withoutKey = params.getAll('without').join('\n');
   const removed = useMemo(() => [...new Set(withoutKey ? withoutKey.split('\n') : [])].filter((k) => k && k.length <= 80).slice(0, MAX_REMOVED), [withoutKey]);
@@ -245,8 +257,10 @@ export default function Search() {
     ? { title: `Homes ${toRent ? 'to rent' : 'for sale'} in ${placeName}`, description: `${realHits || 'Search'} homes ${toRent ? 'to rent' : 'for sale'} in ${placeName} on Streetkey, each with sold prices nearby, flood risk, its energy rating and the cost of works.`, index: realHits > 0 && !params.get('q'), canonical: `/${toRent ? 'to-rent' : 'for-sale'}/${slugPlace(placeName)}` }
     : { title: 'Search homes for sale and to rent', index: false });
   const matched = hits.filter((h) => src === 'all' || (src === 'agents' ? h.property.source?.kind === 'agent-feed' || !h.property.source : h.property.source?.kind === 'owner' || h.property.source?.kind === 'landlord'));
-  // Added lately, and still available: narrowed here because they are about the listing, not the home.
-  const recent = matched.filter((h) => (added === '' || h.property.daysOnMarket <= added) && (!available || h.property.status !== 'under offer'));
+  // Added lately, still available, furnishing and pets: narrowed here because they are about the advert, not the home.
+  const recent = matched.filter((h) => (added === '' || h.property.daysOnMarket <= added) && (!available || h.property.status !== 'under offer')
+    && (!rentView || !furnished || h.property.letting?.furnished === furnished)
+    && (!rentView || !pets || h.property.letting?.petsConsidered === true));
   // An area drawn on the map narrows the results to the homes inside it.
   const shown = area ? recent.filter((h) => pointInPolygon([h.property.lng, h.property.lat], area)) : recent;
   const narrative = useMemo(() => narrate(q, hits), [q, hits]);
@@ -353,9 +367,11 @@ export default function Search() {
               <label className="field">{rentView ? 'Max rent' : 'Max price'}<select className="input" value={maxPrice} onChange={(e) => update({ max: e.target.value || null })}><option value="">No max</option>{PRICE_OPTIONS.map((v) => <option key={v} value={v}>{rentView ? `${gbp(v)} pcm` : gbpK(v)}</option>)}</select></label>
               <label className="field">Bedrooms<select className="input" value={minBeds} onChange={(e) => update({ beds: e.target.value || null })}><option value="">Any</option>{BED_OPTIONS.map((v) => <option key={v} value={v}>{v}+</option>)}</select></label>
               <label className="field">Type<select className="input" value={type} onChange={(e) => update({ type: e.target.value || null })}><option value="">Any</option>{TYPE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+              {rentView && <label className="field">Furnishing<select className="input" value={furnished} onChange={(e) => update({ furnished: e.target.value || (worded ? 'any' : null) })}><option value="">Any</option>{FURNISHINGS.map((f) => <option key={f} value={f}>{FURNISHING_LABEL[f]}</option>)}</select></label>}
               <label className="field">Added<select className="input" value={added} onChange={(e) => update({ added: e.target.value || null })}><option value="">Any time</option>{ADDED_OPTIONS.map(([d, l]) => <option key={d} value={d}>{l}</option>)}</select></label>
               <label className="field">Listed by<select className="input" value={src} onChange={(e) => setSrc(e.target.value as typeof src)}><option value="all">Everyone</option><option value="agents">Estate agents</option><option value="private">Owners and landlords</option></select></label>
               <label className="field">Sort by<select className="input" value={sortValue} onChange={(e) => setSort(e.target.value as Sort)}><option value="fit">Best match</option>{canRank && <option value="ai">Best match with AI</option>}<option value="new">Newest</option><option value="price">Lowest price</option><option value="price-desc">Highest price</option></select></label>
+              {rentView && <label className="check filter-check"><input type="checkbox" checked={pets} onChange={(e) => update({ pets: e.target.checked ? '1' : '0' })} />Pets considered</label>}
               <label className="check filter-check"><input type="checkbox" checked={available} onChange={(e) => update({ available: e.target.checked ? '1' : null })} />Hide {rentView ? 'let agreed' : 'under offer'}</label>
             </div>
           </div>
@@ -392,9 +408,10 @@ export default function Search() {
                   <div className="rcard-main">
                     <div className="rcard-top">
                       <Link to={`/property/${p.id}`} className="rcard-link">
-                        <span className="hcard-price">{gbp(p.price)}{rental ? <small> pcm</small> : p.listing === 'auction' ? <small> guide</small> : null}</span>
+                        <span className="hcard-price">{gbp(p.price)}{rental ? <small> pcm</small> : p.listing === 'auction' ? <small> guide</small> : priceNote(p) ? <small> {priceNote(p)}</small> : null}</span>
                         <span className="rcard-kind">{homeKind(p)}{rental ? ' to rent' : ''}</span>
                         <span className="rcard-place">{streetName(p.street)}, {p.town}</span>
+                        {rental && lettingLine(p) && <span className="rcard-let">{lettingLine(p)}</span>}
                       </Link>
                       <button type="button" className={`hcard-heart rcard-heart${on ? ' on' : ''}`} aria-pressed={on} aria-label={`${on ? 'Saved' : 'Save'}: ${p.title}`} onClick={() => toggleSaved(p.id)}><Icon name="heart" size={20} /></button>
                     </div>
@@ -404,7 +421,7 @@ export default function Search() {
                       <span className="hcard-facts">
                         {p.beds > 0 && <span><Icon name="bed" size={16} />{p.beds}<span className="sr-only"> bedrooms</span></span>}
                         {p.baths > 0 && <span><Icon name="bath" size={16} />{p.baths}<span className="sr-only"> bathrooms</span></span>}
-                        {p.floorArea > 0 && <span><Icon name="area" size={16} />{Math.round(p.floorArea)} m²</span>}
+                        {p.floorArea > 0 && !p.floorAreaEstimated && <span><Icon name="area" size={16} />{Math.round(p.floorArea)} m²</span>}
                         {p.epc?.current && <span className="hcard-epc">EPC {p.epc.current}</span>}
                       </span>
                       <span className="rcard-by">{p.agent}{p.alsoListedBy?.length ? `, also ${p.alsoListedBy.join(', ')}` : ''}</span>

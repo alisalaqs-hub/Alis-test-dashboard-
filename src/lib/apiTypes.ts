@@ -54,6 +54,8 @@ export interface ListingDTO {
   groundRentAnnual: number | null;
   features: string[];
   description: string | null;
+  /** True when the floor area is a guess (a feed that gave none): the site never shows it as the home's floor area. */
+  floorAreaEstimated?: boolean;
   photos: PhotoDTO[];
   source: { kind: SourceKindDTO; name: string; verified: boolean };
   /** The agency (or landlord or developer company) that listed it, whose public page is /agent/<id>. Null for private sellers and landlords (absent on older servers). */

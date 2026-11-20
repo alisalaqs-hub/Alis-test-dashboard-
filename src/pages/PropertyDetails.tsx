@@ -21,6 +21,8 @@ import { useServer } from '../lib/server';
 import { useAi } from '../lib/ai/core';
 import { slugPlace } from '../lib/meta';
 import { telHref } from '../lib/phone';
+import { hasLettingFacts, LettingFacts } from '../components/LettingFacts';
+import { priceNote } from '../components/PropertyCard';
 import '../components/floorplan.css';
 
 /** The next few viewing slots: Saturday mornings and weekday evenings. */
@@ -198,7 +200,8 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
   // Real listings carry Streetkey's record of the listing (first listed, days on the market, price changes); example listings keep their own figures.
   const history = real ? p.history : undefined;
   const offMarket = p.status === 'withdrawn'; // sold, let or withdrawn
-  const priceLabel = rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price';
+  const qualifier = priceNote(p);
+  const priceLabel = rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : qualifier ? qualifier.charAt(0).toUpperCase() + qualifier.slice(1) : 'Asking price';
   useEffect(() => { track('listing_view', p.id); }, [p.id, consent]);
   // The lister's view count: every visit, without recording who (the server leaves out the lister's own).
   useEffect(() => { if (live) api.listings.viewed(p.id); }, [live, p.id]);
@@ -295,7 +298,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
 
           <div className="grid g4 keep2">
             {/* A real listing's energy rating is the letter its lister gave; only example homes carry a score. */}
-            {([['bed', 'Bedrooms', p.beds || 'Studio'], ['bath', 'Bathrooms', p.baths], ['area', 'Floor area', `${p.floorArea} m²`], ['bolt', 'Energy rating', real ? (p.epc.current || 'Not given') : `${p.epc.current} (${p.epc.score})`]] as const).map(([ic, a, b]) => <div key={a} className="fact-tile"><span className="trust-ic"><Icon name={ic} size={20} /></span><span><span className="xs muted">{a}</span><span className="num">{b}</span></span></div>)}
+            {([['bed', 'Bedrooms', p.beds || 'Studio'], ['bath', 'Bathrooms', p.baths], ['area', 'Floor area', p.floorAreaEstimated ? 'Not given' : `${p.floorArea} m²`], ['bolt', 'Energy rating', real ? (p.epc.current || 'Not given') : `${p.epc.current} (${p.epc.score})`]] as const).map(([ic, a, b]) => <div key={a} className="fact-tile"><span className="trust-ic"><Icon name={ic} size={20} /></span><span><span className="xs muted">{a}</span><span className="num">{b}</span></span></div>)}
           </div>
 
           {!real && !rental && <section className="card ai-card">
@@ -333,6 +336,9 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
 
           {/* On a phone the contact box comes straight after the description, not at the foot of the page. */}
           {narrow && contact}
+
+          {/* What a tenant asks first: deposit, when it is available, furnishing, pets, bills. */}
+          {rental && hasLettingFacts(p) && <Section title="Letting details"><LettingFacts p={p} /></Section>}
 
           <div className="grid g2">
             <Section title="Floor plan" right={p.floorPlan ? <button className="btn ghost sm" onClick={() => { track('floorplan_open', p.id); setPlanOpen(true); }}>Open full size</button> : undefined}>

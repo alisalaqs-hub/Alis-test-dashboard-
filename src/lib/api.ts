@@ -50,7 +50,9 @@ const del = <T>(p: string, b?: unknown) => request<T>('DELETE', p, b);
  */
 function beacon(path: string) {
   try {
-    void fetch(`${API_BASE}${path}`, { method: 'POST', credentials: 'include', keepalive: true }).catch(() => {});
+    // A plain request: the page stays open for both uses (opening a listing, tapping a phone number).
+    // The answer is not needed, but it is read: an unread answer keeps its connection busy.
+    void fetch(`${API_BASE}${path}`, { method: 'POST', credentials: 'include' }).then((r) => r.text()).catch(() => {});
   } catch { /* counting never breaks the page */ }
 }
 const qs = (o: Record<string, string | number | undefined | null>) => { const s = new URLSearchParams(); for (const [k, v] of Object.entries(o)) if (v != null && v !== '') s.set(k, String(v)); const t = s.toString(); return t ? `?${t}` : ''; };

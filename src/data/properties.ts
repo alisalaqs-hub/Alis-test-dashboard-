@@ -61,6 +61,10 @@ export interface Property {
   /** private = only visible to the user who added it (e.g. a listing analysed from another website). */
   visibility?: 'public' | 'private';
   photos?: string[];          // data URLs (prototype) / CDN URLs (production)
+  /** The floor area is a guess (an agent feed that gave none): it is used for nothing the visitor sees. */
+  floorAreaEstimated?: boolean;
+  /** How the lister qualified the asking price: 'guide', 'offers over', 'offers in region of', 'fixed'. */
+  priceQualifier?: string;
   /** What Streetkey AI saw in the listing's photos ("period fireplace", "bay window"). Shown as AI's reading, and searchable. */
   photoFeatures?: string[];
   /** The listing's own floor plan (a picture) and what it shows in words, when the lister added one. */

@@ -184,11 +184,15 @@ export const DISCRIMINATORY: RegExp[] = [
   // Nationality requirements: "British passport holders only", "UK citizens only", "must hold a British passport".
   new RegExp(String.raw`\b${NATIONALITY}\s+(?:passports?(?:\s+holders?)?|citizens?|citizenship|nationals?|nationality|born)\s+(?:only|preferred|wanted|required|sought|essential|needed)\b`, 'i'),
   new RegExp(String.raw`\bmust\s+(?:be|have|hold)\s+(?:an?\s+)?${NATIONALITY}\s+(?:citizens?|citizenship|nationals?|nationality|passports?(?:\s+holders?)?)\b`, 'i'),
+  // Turning disabled people away outright ("no disabled", "we don't accept wheelchair users") is refused, like "No DSS".
+  // Saying the home may not suit a wheelchair ("not suitable for wheelchair users") is only a warning: see below.
+  new RegExp(String.raw`\b(?:no|sorry,?\s+no|not\s+accepting|we\s+(?:do\s+not|don['’]t)\s+accept|cannot\s+accept|can['’]t\s+accept)\s+(?:wheelchair\s+users?|disabled(?:\s+(?:people|persons?|tenants?|applicants?))?(?!\s+(?:access|parking|facilities|toilets?|bays?|spaces?|adaptations?))|mobility\s+scooter\s+users?)\b`, 'i'),
 ];
 /*
  * Sex-specific and disability wording ("suit single female", "female only", "male only", "not suitable for
  * wheelchair users"). The lister is warned and can still publish: it is flagged for them to check, not refused.
- * A plain statement about the building ("no wheelchair access", "no lift") is not flagged.
+ * A plain statement about the building ("no wheelchair access", "no lift") is not flagged, and turning disabled
+ * people away outright ("no disabled people") is refused above, not merely warned about.
  */
 const SEX_WORD = String.raw`(?:females?|males?|ladies|lady|gentlemen|gentleman|women|woman|men|man|girls?|boys?)`;
 const WHO = String.raw`(?:(?:a|an|one)\s+)?(?:(?:single|young|mature|professional|working|quiet|tidy)\s+)*`;
@@ -199,7 +203,6 @@ export const SEX_OR_DISABILITY: RegExp[] = [
   new RegExp(String.raw`\b(?:all[\s-]+(?:female|male|girls?|boys?)|(?:female|male|girls?|boys?)[\s-]+only)\b`, 'i'),
   new RegExp(String.raw`\b${EXCLUDES}\s+(?:(?:single|young)\s+)?(?:females?|males?|ladies|gentlemen|women|men|girls|boys)\b`, 'i'),
   new RegExp(String.raw`\b(?:not\s+suitable|unsuitable|not\s+suited|not\s+appropriate)\s+(?:for|to)\s+(?:(?:the|any)\s+)?${DISABILITY_WORD}\b`, 'i'),
-  new RegExp(String.raw`\b(?:no|sorry,?\s+no|not\s+accepting|we\s+(?:do\s+not|don['’]t)\s+accept|cannot\s+accept|can['’]t\s+accept)\s+(?:wheelchair\s+users?|disabled(?:\s+(?:people|persons?|tenants?|applicants?))?(?!\s+(?:access|parking|facilities|toilets?|bays?|spaces?|adaptations?))|mobility\s+scooter\s+users?)\b`, 'i'),
 ];
 /** Sex-specific or disability wording in listing text: the first match, or null. */
 export function sexOrDisabilityWording(text: string): string | null {

@@ -94,6 +94,13 @@ export { streetOnly };
  * The letting details stored on a rental (material_info.letting), checked again on the way out; null for a sale
  * or when there are none. (material_info may arrive as the JSON text an edit is about to save.)
  */
+/** material_info as an object (it may arrive as the JSON text an edit is about to save). */
+function infoOf(r: Pick<ListingRow, 'material_info'>): Record<string, unknown> {
+  let info: unknown = r.material_info;
+  if (typeof info === 'string') { try { info = JSON.parse(info); } catch { info = null; } }
+  return info && typeof info === 'object' ? (info as Record<string, unknown>) : {};
+}
+
 export function lettingOf(r: Pick<ListingRow, 'channel' | 'material_info'>): Letting | null {
   if (r.channel !== 'rent') return null;
   let info: unknown = r.material_info;
@@ -132,6 +139,8 @@ export function toDTO(r: ListingRow, photos: PhotoDTO[], viewer: { userId?: stri
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(), publishedAt: r.published_at?.toISOString() ?? null,
     history: history ?? null,
     ...(letting && Object.keys(letting).length ? { letting } : {}),
+    // A feed that gave no floor area leaves a guess in the column (it needs a figure): say so, so no page shows it.
+    ...(infoOf(r).floorAreaEstimated === true ? { floorAreaEstimated: true } : {}),
     mine,
   };
 }

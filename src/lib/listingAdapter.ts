@@ -40,6 +40,8 @@ export function dtoToProperty(d: ListingDTO): Property {
   const seen = new Map<string, number>();
   for (const x of d.photos) if (!isFloorPlanCaption(x.alt)) for (const f of x.features ?? []) seen.set(f, (seen.get(f) ?? 0) + 1);
   if (seen.size) p.photoFeatures = [...seen].sort((a, b) => b[1] - a[1]).map(([f]) => f).slice(0, 12);
+  if (d.floorAreaEstimated) p.floorAreaEstimated = true;
+  if (d.priceQualifier && d.channel === 'sale') p.priceQualifier = d.priceQualifier;
   p.createdAt = d.publishedAt ?? d.createdAt;
   // Listed by an organisation: its public page is /agent/<id>. Private sellers and landlords have none.
   if (d.organisationId) p.agentId = d.organisationId;

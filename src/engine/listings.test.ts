@@ -187,12 +187,14 @@ describe('discriminatory wording', () => {
   });
 
   it('warns, without blocking, on sex-specific and disability wording', () => {
-    for (const t of ['Would suit single female', 'Suit single female', 'Female only', 'Male only', 'Females only house share', 'All-female household', 'Female tenant preferred', 'Ladies only', 'Not suitable for wheelchair users', 'Unsuitable for disabled people', 'Not suitable for anyone with mobility issues', 'No disabled people', 'No males']) {
+    for (const t of ['Would suit single female', 'Suit single female', 'Female only', 'Male only', 'Females only house share', 'All-female household', 'Female tenant preferred', 'Ladies only', 'Not suitable for wheelchair users', 'Unsuitable for disabled people', 'Not suitable for anyone with mobility issues', 'No males']) {
       expect(sexOrDisabilityWording(t), t).not.toBeNull();
       expect(isDiscriminatory(t), t).toBe(false);
     }
     expect(failing('Room in a shared house. Female only.')).toEqual(['sex-disability:warn']);
     expect(failing('Top-floor flat, not suitable for wheelchair users.')).toEqual(['sex-disability:warn']);
+    // Turning disabled people away outright is refused, like "No DSS": it is not a matter of wording to check.
+    for (const t of ['No disabled people']) expect(isDiscriminatory(t), t).toBe(true);
     // plain facts about the building are not flagged
     for (const t of ['No lift: the flat is on the third floor.', 'No wheelchair access to the upper floor.', 'No disabled parking bay.', 'Step-free access throughout.', 'The garage is ideal for a man cave.', 'Male and female toilets on each floor.'])
       expect(sexOrDisabilityWording(t), t).toBeNull();
