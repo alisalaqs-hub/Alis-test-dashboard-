@@ -34,7 +34,7 @@ export interface ListingInsights {
   headline: string; whatsWorking: string[]; whatToImprove: Improvement[]; priceNote: string | null;
   stats?: InsightStats; generatedAt?: string; model?: string | null;
 }
-export interface ListingStats { days: { day: string; views: number; visitors: number }[]; totals: Record<string, number>; saves: number; enquiries: number; note: string }
+export interface ListingStats { days: { day: string; views: number; calls?: number; visitors: number }[]; totals: Record<string, number>; calls?: number; saves: number; enquiries: number; note: string }
 
 /* ───────── calls ───────── */
 const enc = encodeURIComponent;

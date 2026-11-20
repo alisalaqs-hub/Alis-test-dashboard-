@@ -77,7 +77,7 @@ export function priceEvidenceFor(_r: Pick<ListingRow, 'postcode' | 'channel' | '
 }
 
 export async function computeStats(row: ListingRow): Promise<InsightStats> {
-  const [ev, enq, saves, photos] = await Promise.all([
+  const [ev, enq, saves, photos, counted] = await Promise.all([
     one<{ views: number; visitors: number; photo_opens: number; shares: number }>(
       `SELECT count(*) FILTER (WHERE name = 'listing_view')::int AS views, count(DISTINCT session_id) FILTER (WHERE name = 'listing_view')::int AS visitors,
               count(*) FILTER (WHERE name = 'photo_open')::int AS photo_opens, count(*) FILTER (WHERE name = 'share')::int AS shares
@@ -88,7 +88,11 @@ export async function computeStats(row: ListingRow): Promise<InsightStats> {
          FROM enquiries WHERE listing_id = $1 AND NOT filtered`, [row.id]),
     one<{ n: number }>('SELECT count(*)::int n FROM saved_listings WHERE listing_key = $1', [row.ref]),
     one<{ n: number }>('SELECT count(*)::int n FROM listing_photos WHERE listing_id = $1', [row.id]),
+    // The complete count of visits (listing_views: every visitor, nobody identified), as Results shows.
+    one<{ n: number }>(`SELECT coalesce(sum(views), 0)::int n FROM listing_views WHERE listing_id = $1 AND day > current_date - 30`, [row.id]),
   ]);
+  // Analytics events only cover visitors who allowed analytics, so the complete count is never lower.
+  if (ev && counted) ev.views = Math.max(ev.views, counted.n);
   let photoQuality: PhotoQuality | null = null;
   if (await hasAiQuality()) {
     const vals = await q<{ v: unknown }>('SELECT ai_quality AS v FROM listing_photos WHERE listing_id = $1 AND ai_quality IS NOT NULL ORDER BY position LIMIT 60', [row.id]).catch(() => []);

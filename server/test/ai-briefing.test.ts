@@ -572,8 +572,8 @@ describe('my-agency briefing (live data)', () => {
     const draft = await mk({ title: 'Draft flat', addressLine: '2 Draft Lane' });
     await q(`UPDATE listings SET status = 'live', published_at = now() - interval '12 days' WHERE ref = $1`, [live]);
     const id = (await q<{ id: string }>('SELECT id FROM listings WHERE ref = $1', [live]))[0].id;
-    await q(`INSERT INTO engagement_events (listing_id, session_id, name, occurred_at) SELECT $1, 's' || g, 'listing_view', now() - interval '2 days' FROM generate_series(1, 5) g`, [id]);
-    await q(`INSERT INTO engagement_events (listing_id, session_id, name, occurred_at) SELECT $1, 'p' || g, 'listing_view', now() - interval '40 days' FROM generate_series(1, 3) g`, [id]);
+    // Views come from the complete count of visits (listing_views), the same figures the agency's Results show.
+    await q(`INSERT INTO listing_views (listing_id, day, views) VALUES ($1, current_date - 2, 5), ($1, current_date - 40, 3)`, [id]);
     await q(`INSERT INTO enquiries (listing_id, name, email, kind, status) VALUES ($1, 'Buyer One', 'one@example.com', 'viewing', 'new'), ($1, 'Buyer Two', 'two@example.com', 'question', 'replied')`, [id]);
     await q(`INSERT INTO enquiries (listing_id, name, email, kind, status, filtered) VALUES ($1, 'Spam', 'spam@example.com', 'question', 'new', true)`, [id]);
     await q(`INSERT INTO audit_log (action, subject, detail) VALUES ('listing.updated', $1, '{"fields":["price"],"priceFrom":550000,"priceTo":525000}')`, [`listing:${live}`]);
@@ -653,7 +653,7 @@ describe('my-agency briefing (live data)', () => {
 
       // Cached while nothing changes; new activity means a fresh briefing.
       expect((await agent.c.post('/api/ai/briefing', { kind: 'my-agency' })).json.cached).toBe(true);
-      await q(`INSERT INTO engagement_events (listing_id, session_id, name) VALUES ($1, 'new', 'listing_view')`, [id]);
+      await q(`INSERT INTO listing_views (listing_id, day, views) VALUES ($1, current_date, 1) ON CONFLICT (listing_id, day) DO UPDATE SET views = listing_views.views + 1`, [id]);
       const again = await agent.c.post('/api/ai/briefing', { kind: 'my-agency' });
       expect(again.json.cached).toBe(false);
       expect(userJson(ai.calls('chat')[1].body as Body).items[0].fields.views30d).toBe(6);

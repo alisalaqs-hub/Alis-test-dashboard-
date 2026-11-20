@@ -30,6 +30,7 @@ const P: Record<string, string> = {
   plan: 'M4 4h16v16H4zM4 12h8M12 4v10M12 17v3M16 12h4',
   bell: 'M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',
   map: 'M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14',
+  phone: 'M6 3h3l2 5-2.500 1.500a11 11 0 0 0 6 6L16 13l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 4 5a2 2 0 0 1 2-2z',
 };
 export function Icon({ name, size = 22, stroke = 1.8 }: { name: keyof typeof P | string; size?: number; stroke?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d={P[name] ?? P.search} /></svg>;

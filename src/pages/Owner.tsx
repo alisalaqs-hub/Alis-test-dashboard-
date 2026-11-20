@@ -83,7 +83,7 @@ function ViewsChart({ days }: { days: ListingStats['days'] }) {
       </div>
       <figcaption className="row between xs muted" style={{ marginTop: 6 }}>
         <span>{shortDate(days[0].day)}</span>
-        <span>{total ? `${total.toLocaleString('en-GB')} views in total · busiest day ${shortDate(best.day)} (${best.views})` : 'No tracked views yet'}</span>
+        <span>{total ? `${total.toLocaleString('en-GB')} views in total · busiest day ${shortDate(best.day)} (${best.views})` : 'No views yet'}</span>
         <span>{shortDate(days[days.length - 1].day)}</span>
       </figcaption>
     </figure>
@@ -116,7 +116,7 @@ function LiveOwner({ listings, onDemo }: { listings: MyListing[]; onDemo: () => 
     <div className="stack" style={{ gap: 18 }}>
       <div className="page-head">
         <div><div className="eyebrow">Property owner dashboard</div><h2 style={{ marginTop: 6 }}>How is my listing performing?</h2>
-          <p className="muted" style={{ marginTop: 6 }}>Real figures from Streetkey for the last 30 days. Views and saves only count visitors who allowed analytics; enquiries are the messages sent to you.</p></div>
+          <p className="muted" style={{ marginTop: 6 }}>Real figures from Streetkey for the last 30 days. Views count every visit to your listing, without recording who viewed, and leave out your own. Enquiries are the messages sent to you.</p></div>
         <div className="stack" style={{ gap: 6, alignItems: 'flex-end' }}>
           {listings.length > 1 && <label className="field" style={{ minWidth: 220 }}>Choose listing<select className="input" value={l.ref} onChange={(e) => setRef(e.target.value)}>{listings.map((x) => <option key={x.ref} value={x.ref}>{name(x)} · {x.town}</option>)}</select></label>}
           <div className="row"><Tag kind="ok">Your live data</Tag><button type="button" className="btn sm ghost" onClick={onDemo}>See the demo dashboard</button></div>
@@ -124,7 +124,7 @@ function LiveOwner({ listings, onDemo }: { listings: MyListing[]; onDemo: () => 
       </div>
 
       <div className="grid g4 keep2">
-        <div className="card"><Stat label="Listing views (30 days)" value={views.toLocaleString('en-GB')} sub="Visitors who allowed analytics" /></div>
+        <div className="card"><Stat label="Listing views (30 days)" value={views.toLocaleString('en-GB')} sub={stats?.calls ? `${stats.calls} call${stats.calls === 1 ? '' : 's'} from the listing` : 'Every visit, not counting your own'} /></div>
         <div className="card"><Stat label="Saved by" value={saves.toLocaleString('en-GB')} sub={`${saves === 1 ? 'person' : 'people'} with a Streetkey account`} /></div>
         <div className="card"><Stat label="Enquiries" value={(stats?.enquiries ?? l.stats.enquiries).toLocaleString('en-GB')} sub={<>
           {l.stats.newEnquiries ? <Link to="/account/inbox">{l.stats.newEnquiries} new in your inbox</Link> : 'All caught up'}

@@ -20,6 +20,7 @@ import { EpcValue, FloodValue, OfficialListingPanel, useOfficialListing } from '
 import { useServer } from '../lib/server';
 import { useAi } from '../lib/ai/core';
 import { slugPlace } from '../lib/meta';
+import { telHref } from '../lib/phone';
 import '../components/floorplan.css';
 
 /** The next few viewing slots: Saturday mornings and weekday evenings. */
@@ -199,6 +200,8 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
   const offMarket = p.status === 'withdrawn'; // sold, let or withdrawn
   const priceLabel = rental ? 'Rent' : p.listing === 'auction' ? 'Guide price' : 'Asking price';
   useEffect(() => { track('listing_view', p.id); }, [p.id, consent]);
+  // The lister's view count: every visit, without recording who (the server leaves out the lister's own).
+  useEffect(() => { if (live) api.listings.viewed(p.id); }, [live, p.id]);
   const slots = useMemo(() => nextSlots(), []);
   const myViewing = viewings.find((v) => v.propertyId === p.id);
 
@@ -212,6 +215,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
     <div id="enquire" className="stack" style={{ gap: 16 }}>
       {live ? (
         <Section title={rental ? 'Book a viewing' : 'Arrange a viewing'} kicker={p.agent}>
+          {p.agentPhone && <a className="btn ghost lp-call" href={telHref(p.agentPhone)} onClick={() => api.listings.callTapped(p.id)}><Icon name="phone" size={18} /> Call {p.agentPhone}</a>}
           <EnquiryBox listingRef={p.id} rental={rental} lister={p.agent} />
           {p.agentId && <p className="small" style={{ marginTop: 10 }}><Link to={`/agent/${p.agentId}`}>More homes from {p.agent}</Link></p>}
         </Section>
@@ -379,6 +383,7 @@ function PropertyDetailsInner({ property: p }: { property: Property }) {
       {/* Phones: the way to get in touch stays in reach while reading. */}
       <div className="lp-actions" role="group" aria-label="Get in touch">
         <button type="button" className={`icon-btn${saved.includes(p.id) ? ' saved' : ''}`} aria-pressed={saved.includes(p.id)} aria-label={saved.includes(p.id) ? 'Saved' : 'Save this home'} onClick={() => { toggleSaved(p.id); track('save', p.id); }}><Icon name="heart" /></button>
+        {live && p.agentPhone && <a className="btn ghost" href={telHref(p.agentPhone)} onClick={() => api.listings.callTapped(p.id)}><Icon name="phone" size={18} /> Call</a>}
         <button type="button" className="btn accent" onClick={toContact}>{live ? 'Request a viewing' : 'Arrange a viewing'}</button>
       </div>
     </div>

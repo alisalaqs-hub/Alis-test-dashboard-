@@ -49,10 +49,10 @@ export async function agencySnapshot(userId: string): Promise<{ snapshot: Snapsh
        coalesce(pc.n, 0)::int AS price_changes, pc.previous_price
      FROM mine m
      LEFT JOIN (SELECT listing_id,
-                  count(*) FILTER (WHERE occurred_at > now() - interval '30 days') n30,
-                  count(*) FILTER (WHERE occurred_at <= now() - interval '30 days') n60
-                FROM engagement_events
-               WHERE name = 'listing_view' AND occurred_at > now() - interval '60 days' AND listing_id IN (SELECT id FROM mine)
+                  sum(views) FILTER (WHERE day > current_date - 30) n30,
+                  sum(views) FILTER (WHERE day <= current_date - 30) n60
+                FROM listing_views -- the complete count of visits, as Results shows
+               WHERE day > current_date - 60 AND listing_id IN (SELECT id FROM mine)
                GROUP BY listing_id) v ON v.listing_id = m.id
      LEFT JOIN (SELECT listing_key, count(*) n FROM saved_listings WHERE listing_key IN (SELECT ref FROM mine) GROUP BY listing_key) s ON s.listing_key = m.ref
      LEFT JOIN (SELECT listing_id, count(*) n,

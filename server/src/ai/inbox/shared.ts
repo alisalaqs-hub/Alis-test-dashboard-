@@ -5,7 +5,7 @@
  */
 import type { FastifyRequest } from 'fastify';
 import { mentionsProtected } from '../../../../src/lib/ai/search';
-import { one, q } from '../../db';
+import { one } from '../../db';
 import { forbidden, notFound, requireUser } from '../../services/http';
 import { streetOnly } from '../../services/listings';
 import { hit } from '../../services/ratelimit';
@@ -39,13 +39,6 @@ export async function listerAccess(req: FastifyRequest, id: string) {
   const lister = e.owner_user_id === u.id || (!!e.organisation_id && orgs.includes(e.organisation_id));
   if (!lister) throw forbidden();
   return { e, user: u };
-}
-
-/** Who receives enquiries for a listing: the lister, or the agency's owners and admins (as the core route does). */
-export async function listerEmails(listing: { owner_user_id: string | null; organisation_id: string | null }) {
-  return (await q<{ email: string }>(
-    `SELECT DISTINCT u.email FROM users u WHERE u.deleted_at IS NULL AND (u.id = $1 OR u.id IN (SELECT user_id FROM memberships WHERE organisation_id = $2 AND role IN ('owner', 'admin')))`,
-    [listing.owner_user_id, listing.organisation_id])).map((r) => r.email);
 }
 
 /** How a conversation refers to the home: never with the house number. */
